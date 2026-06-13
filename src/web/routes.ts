@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import type { App } from '../app.js';
-import { DATA_DIR } from '../config.js';
+import { DATA_DIR, resolveStickerPath } from '../config.js';
 import { logger } from '../logger.js';
 import { FREQ_LEVELS, PERSONA_PRESETS } from '../ai/prompts.js';
 
@@ -123,8 +123,10 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
 
   fastify.get<{ Params: { id: string } }>('/api/stickers/:id/image', async (req, reply) => {
     const sticker = app.repo.getSticker(Number(req.params.id));
-    if (!sticker || !fs.existsSync(sticker.file_path)) return reply.code(404).send({ error: 'not found' });
-    return reply.type('image/webp').send(fs.createReadStream(sticker.file_path));
+    if (!sticker) return reply.code(404).send({ error: 'not found' });
+    const file = resolveStickerPath(sticker.file_path);
+    if (!fs.existsSync(file)) return reply.code(404).send({ error: 'file missing' });
+    return reply.type('image/webp').send(fs.createReadStream(file));
   });
 
   fastify.patch<{ Params: { id: string }; Body: { description?: string; usage_hint?: string } }>(

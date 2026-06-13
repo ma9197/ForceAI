@@ -14,6 +14,17 @@ export const UI_DIST = path.join(ROOT_DIR, 'ui', 'dist');
 
 export const PORT = Number(process.env.PORT ?? 3008);
 
+/**
+ * Resolve a sticker's actual file location from whatever path is stored in the DB.
+ * The stored path may be a Windows absolute path (from a local install) or a Linux one
+ * (on the server) — we only trust the filename and re-root it under the current STICKER_DIR.
+ * Splitting on both separators makes it work regardless of which OS wrote the row.
+ */
+export function resolveStickerPath(storedPath: string): string {
+  const name = storedPath.split(/[\\/]/).pop() || storedPath;
+  return path.join(STICKER_DIR, name);
+}
+
 // ---- Models ----
 export const GENERATION_MODEL = 'claude-sonnet-4-6';
 export const GATEKEEPER_MODELS = {

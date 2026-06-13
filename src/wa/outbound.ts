@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { jidNormalizedUser, type WASocket, type WAMessage } from 'baileys';
-import { DEFAULT_MSG_PREFIX, DEFAULT_MSG_SUFFIX, ELEVENLABS, IMAGE_GEN, OUTBOUND, type ImageModelChoice } from '../config.js';
+import { DEFAULT_MSG_PREFIX, DEFAULT_MSG_SUFFIX, ELEVENLABS, IMAGE_GEN, OUTBOUND, resolveStickerPath, type ImageModelChoice } from '../config.js';
 import { logger } from '../logger.js';
 import { elevenLabsTts } from '../voice/tts.js';
 import { geminiGenerateImage } from '../images/gen.js';
@@ -123,12 +123,13 @@ export class Outbound {
       }
       case 'sticker': {
         const sticker = this.repo.getSticker(action.sticker_id);
-        if (!sticker || !fs.existsSync(sticker.file_path)) {
-          logger.warn({ id: action.sticker_id }, 'sticker not found — skipping');
+        const stickerFile = sticker ? resolveStickerPath(sticker.file_path) : '';
+        if (!sticker || !fs.existsSync(stickerFile)) {
+          logger.warn({ id: action.sticker_id }, 'sticker file not found — skipping');
           return null;
         }
         await sleep(rand(OUTBOUND.REACT_MIN, OUTBOUND.REACT_MAX) + 800);
-        const buffer = fs.readFileSync(sticker.file_path);
+        const buffer = fs.readFileSync(stickerFile);
         const target = action.target_message_id ? this.store.resolve(action.target_message_id) : null;
         const sent = await sock.sendMessage(
           chatJid,
