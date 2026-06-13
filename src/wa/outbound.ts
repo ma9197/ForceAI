@@ -91,7 +91,7 @@ export class Outbound {
           logger.error({ err, action }, 'failed to execute action');
         }
       }
-      try { await sock.sendPresenceUpdate('paused', chatJid); } catch { /* ignore */ }
+      if (this.typingOn()) { try { await sock.sendPresenceUpdate('paused', chatJid); } catch { /* ignore */ } }
     });
   }
 
@@ -176,7 +176,7 @@ export class Outbound {
           }
         }
 
-        try { await this.getSock()?.sendPresenceUpdate('composing', chatJid); } catch { /* ignore */ }
+        if (this.typingOn()) { try { await this.getSock()?.sendPresenceUpdate('composing', chatJid); } catch { /* ignore */ } }
         const gen = await geminiGenerateImage(action.prompt, model, editImage);
         if (!gen) {
           const text = this.decorate('couldn\'t cook that image up 💀');
@@ -194,8 +194,8 @@ export class Outbound {
       }
       case 'voice': {
         const voiceId = this.repo.getConfig('voice_id') || ELEVENLABS.DEFAULT_VOICE_ID;
-        // "recording" presence instead of "composing" while TTS renders
-        try { await sock.sendPresenceUpdate('recording', chatJid); } catch { /* ignore */ }
+        // "recording" presence while TTS renders (only if typing indicators enabled)
+        if (this.typingOn()) { try { await sock.sendPresenceUpdate('recording', chatJid); } catch { /* ignore */ } }
         const audio = await elevenLabsTts(action.text, voiceId);
         if (!audio) {
           logger.warn('TTS failed — falling back to text message');
@@ -216,11 +216,22 @@ export class Outbound {
     }
   }
 
+  /** Typing/recording indicators tell WhatsApp the account is "active on a linked device",
+   *  which silences phone notification sounds. OFF by default so the phone keeps notifying. */
+  private typingOn(): boolean {
+    return this.repo.getConfig('typing_indicators') === '1';
+  }
+
   private async simulateTyping(sock: WASocket, chatJid: string, text: string): Promise<void> {
     const duration = Math.min(
       Math.max(jitter(text.length * OUTBOUND.TYPING_MS_PER_CHAR, OUTBOUND.TYPING_JITTER), OUTBOUND.TYPING_MIN),
       OUTBOUND.TYPING_MAX,
     );
+    // keep the human-like pause before sending, but only emit the "typing…" presence if enabled
+    if (!this.typingOn()) {
+      await sleep(duration);
+      return;
+    }
     const start = Date.now();
     try {
       await sock.sendPresenceUpdate('composing', chatJid);

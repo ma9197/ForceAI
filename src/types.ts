@@ -175,5 +175,7 @@ export interface StatusPayload {
     image_freq: string;
     images_per_day: number;
     images_today: number;
+    typing_indicators: boolean;
+    token_reduction: boolean;
   };
 }

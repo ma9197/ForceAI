@@ -192,6 +192,7 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     intro_message?: string; intro_enabled?: boolean; rate_per_min?: number; rate_per_hour?: number;
     super_idle_minutes?: number;
     image_enabled?: boolean; image_model?: string; image_freq?: string; images_per_day?: number;
+    typing_indicators?: boolean; token_reduction?: boolean;
   } }>(
     '/api/settings',
     async (req) => {
@@ -261,6 +262,12 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
       if (b.images_per_day !== undefined) {
         const v = Math.max(1, Math.min(200, Math.round(Number(b.images_per_day))));
         if (Number.isFinite(v)) app.repo.setConfig('images_per_day', String(v));
+      }
+      if (b.typing_indicators !== undefined) {
+        app.repo.setConfig('typing_indicators', b.typing_indicators ? '1' : '0');
+      }
+      if (b.token_reduction !== undefined) {
+        app.repo.setConfig('token_reduction', b.token_reduction ? '1' : '0');
       }
       return settingsPayload(app);
     },

@@ -337,6 +337,8 @@ export class App {
       image_freq: this.repo.getConfig('image_freq') ?? 'rare',
       images_per_day: Number(this.repo.getConfig('images_per_day') ?? IMAGE_GEN.DEFAULT_PER_DAY),
       images_today: this.repo.imagesToday(),
+      typing_indicators: this.repo.getConfig('typing_indicators') === '1',
+      token_reduction: this.repo.getConfig('token_reduction') === '1',
     };
   }
 

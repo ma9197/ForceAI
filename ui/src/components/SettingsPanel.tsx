@@ -27,6 +27,8 @@ interface Settings {
   image_freq: string;
   images_per_day: number;
   images_today: number;
+  typing_indicators: boolean;
+  token_reduction: boolean;
 }
 
 const FREQ = ['off', 'rare', 'sometimes', 'often', 'always'];
@@ -86,6 +88,39 @@ export function SettingsPanel({ onSaved }: { onSaved: () => void }) {
 
   return (
     <div>
+      <h3 style={{ margin: '0 0 4px' }}>Phone &amp; system</h3>
+
+      <div className="settings-row">
+        <div>
+          <label>Typing indicators</label>
+          <div className="hint">
+            Shows "typing…" before replies. <b style={{ color: 'var(--warn)' }}>Keep OFF</b> — turning it ON
+            makes WhatsApp think you're active on this device and <b>silences your phone's notification sounds</b>.
+          </div>
+        </div>
+        <input
+          type="checkbox"
+          checked={settings.typing_indicators}
+          onChange={e => update({ typing_indicators: e.target.checked })}
+          style={{ width: 18, height: 18 }}
+        />
+      </div>
+
+      <div className="settings-row">
+        <div>
+          <label>Token Reduction System</label>
+          <div className="hint">Trims operator-override context from requests to lower token usage on busy chats.</div>
+        </div>
+        <input
+          type="checkbox"
+          checked={settings.token_reduction}
+          onChange={e => update({ token_reduction: e.target.checked })}
+          style={{ width: 18, height: 18 }}
+        />
+      </div>
+
+      <h3 style={{ margin: '18px 0 4px' }}>AI</h3>
+
       <div className="settings-row">
         <div>
           <label>Thinking-stage model</label>

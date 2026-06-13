@@ -78,6 +78,7 @@ export default function App() {
   const conn = status?.connection ?? 'connecting';
   const groups = status?.groups ?? [];
   const selected = groups.find(g => g.jid === selectedJid) ?? null;
+  const hideInfluence = !!status?.settings?.token_reduction;
 
   const sendInfluence = async () => {
     const text = influence.trim();
@@ -167,9 +168,9 @@ export default function App() {
               <LiveFeed
                 items={feed}
                 selectedShortId={replyTarget?.shortId}
-                onSelect={t => setReplyTarget(cur => (cur?.shortId === t.shortId ? null : t))}
+                onSelect={hideInfluence ? undefined : (t => setReplyTarget(cur => (cur?.shortId === t.shortId ? null : t)))}
               />
-              {replyTarget && (
+              {!hideInfluence && replyTarget && (
                 <div className="reply-chip">
                   ↩ ForceAI will reply to <b>{replyTarget.sender}</b>: "{replyTarget.text.slice(0, 70)}{replyTarget.text.length > 70 ? '…' : ''}"
                   <span className="muted" style={{ marginLeft: 8 }}>(add optional guidance below, or just hit Influence)</span>
@@ -177,15 +178,19 @@ export default function App() {
                 </div>
               )}
               <div className="controls">
-                <input
-                  placeholder={replyTarget
-                    ? 'Optional: what should the reply be about? (empty = its own choice)'
-                    : `Influence ${selected?.name ?? 'this group'}: tell ForceAI what to bring up…`}
-                  value={influence}
-                  onChange={e => setInfluence(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && sendInfluence()}
-                />
-                <button className="primary" onClick={sendInfluence}>{replyTarget ? 'Reply ↩' : 'Influence ⚡'}</button>
+                {!hideInfluence && (
+                  <>
+                    <input
+                      placeholder={replyTarget
+                        ? 'Optional: what should the reply be about? (empty = its own choice)'
+                        : `Influence ${selected?.name ?? 'this group'}: tell ForceAI what to bring up…`}
+                      value={influence}
+                      onChange={e => setInfluence(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && sendInfluence()}
+                    />
+                    <button className="primary" onClick={sendInfluence}>{replyTarget ? 'Reply ↩' : 'Influence ⚡'}</button>
+                  </>
+                )}
                 <button onClick={() => selectedJid && post('/api/continue', { jid: selectedJid })}>Continue ▶</button>
                 <button onClick={() => selectedJid && post('/api/sleep', { jid: selectedJid })} title="Put ForceAI to sleep until someone says 'ForceAI'">Sleep 💤</button>
               </div>

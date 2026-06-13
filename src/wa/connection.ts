@@ -96,6 +96,9 @@ export class WaConnection extends EventEmitter {
       if (connection === 'open') {
         this.reconnectDelay = 1000;
         this.setState('open');
+        // Tell WhatsApp this linked device is NOT actively being watched, so the phone keeps
+        // playing notification sounds (an active companion device silences them otherwise).
+        try { await sock.sendPresenceUpdate('unavailable'); } catch { /* ignore */ }
         this.emit('ready', sock);
         logger.info({ user: sock.user?.id, lid: sock.user?.lid }, 'WhatsApp connection open');
       }

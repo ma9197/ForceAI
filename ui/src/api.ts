@@ -19,7 +19,7 @@ export interface Status {
   online: boolean;
   groups: GroupStatus[];
   stats: Record<string, number>;
-  settings: { gatekeeper_model: string; effort: string; daily_budget_usd: number };
+  settings: { gatekeeper_model: string; effort: string; daily_budget_usd: number; token_reduction?: boolean };
 }
 
 export interface GroupInfo { jid: string; subject: string; size: number; linked?: boolean }
