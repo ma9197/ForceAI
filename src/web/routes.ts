@@ -75,6 +75,17 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     return { ok: true };
   });
 
+  // full shutdown: disconnect WhatsApp entirely (linked device goes offline), dashboard stays up
+  fastify.post('/api/shutdown', async () => {
+    await app.shutdown();
+    return { ok: true };
+  });
+
+  fastify.post('/api/startup', async () => {
+    await app.startup();
+    return { ok: true };
+  });
+
   fastify.post<{ Body: { jid: string } }>('/api/sleep', async (req, reply) => {
     const jid = req.body?.jid;
     if (!jid) return reply.code(400).send({ error: 'jid required' });

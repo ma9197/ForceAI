@@ -99,7 +99,7 @@ export default function App() {
         <span className={`dot ${conn}`} title={conn} />
         <span className="muted">{conn}</span>
         <div className="grow" />
-        {selected && (
+        {status && status.online && selected && (
           <>
             <span className="phase-chip">{selected.phase}</span>
             <button
@@ -110,9 +110,29 @@ export default function App() {
             </button>
           </>
         )}
+        {status && (status.online ? (
+          <button
+            className="danger"
+            title="Fully disconnect WhatsApp (linked device goes offline). Memory + states are kept."
+            onClick={() => { if (confirm('Shut down ForceAI? It fully disconnects from WhatsApp (your linked device goes offline) so you can test phone notifications. Nothing is lost — Power On resumes everything.')) post('/api/shutdown'); }}
+          >⏻ Shut down</button>
+        ) : (
+          <button className="primary" onClick={() => post('/api/startup')}>⏻ Power On</button>
+        ))}
       </div>
 
-      {conn === 'waiting_qr' || conn === 'logged_out' ? (
+      {status && !status.online ? (
+        <div className="center-screen">
+          <div style={{ fontSize: 40 }}>🔌</div>
+          <h2>ForceAI is shut down</h2>
+          <p className="muted" style={{ maxWidth: 460, textAlign: 'center' }}>
+            WhatsApp is fully disconnected — your linked device is offline, exactly like closing the app.
+            Your phone notifications should now behave normally. All memory, groups and their states are
+            saved; nothing was reset.
+          </p>
+          <button className="primary" onClick={() => post('/api/startup')}>⏻ Power On & resume</button>
+        </div>
+      ) : conn === 'waiting_qr' || conn === 'logged_out' ? (
         <QrLogin qr={qr} />
       ) : groups.length === 0 || showPicker ? (
         <GroupPicker

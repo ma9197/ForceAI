@@ -147,6 +147,7 @@ export interface GroupStatus {
 
 export interface StatusPayload {
   connection: string;
+  online: boolean;
   groups: GroupStatus[];
   stats: Record<string, number>;
   settings: {

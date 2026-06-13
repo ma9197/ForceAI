@@ -38,6 +38,8 @@ export class App {
   stickers: StickerLearning;
   polls: PollTracker;
 
+  /** false = full shutdown (WhatsApp disconnected, dashboard still up). Persisted across restarts. */
+  online = true;
   /** all groups the bot is currently live in — each has its own arbiter/extractor */
   linkedGroups = new Set<string>();
   private arbiters = new Map<string, Arbiter>();
@@ -70,6 +72,7 @@ export class App {
     );
 
     this.loadLinkedGroups();
+    this.online = this.repo.getConfig('bot_online') !== '0'; // restore shutdown state across restarts
     // NOTE: we intentionally do NOT reset paused/asleep on boot — each group is restored to
     // its EXACT prior state (live / sleeping / paused) so restarts and updates are seamless.
     // (paused_<jid> and asleep_<jid> are persisted in config; the arbiter reads them.)
@@ -144,6 +147,35 @@ export class App {
       }
     });
 
+    if (this.online) {
+      await this.conn.start();
+    } else {
+      // booted in shutdown state — keep the dashboard up but stay disconnected
+      logger.info('booting in SHUTDOWN state — WhatsApp not connected until Power On');
+      for (const a of this.arbiters.values()) a.suspend();
+      this.conn.setOffline();
+    }
+  }
+
+  /** Full shutdown: disconnect WhatsApp entirely (linked device goes offline), keep dashboard up.
+   *  NOT a reset — all memory and per-group states are preserved; Power On resumes everything. */
+  async shutdown(): Promise<void> {
+    if (!this.online) return;
+    this.online = false;
+    this.repo.setConfig('bot_online', '0');
+    for (const a of this.arbiters.values()) a.suspend();
+    await this.conn.stop();
+    logger.info('bot shut down — WhatsApp disconnected');
+    this.bus.publish({ kind: 'status', status: this.statusPayload() });
+  }
+
+  /** Power back on: reconnect WhatsApp (same session, no QR) and resume all groups in their saved state. */
+  async startup(): Promise<void> {
+    if (this.online) return;
+    this.online = true;
+    this.repo.setConfig('bot_online', '1');
+    for (const a of this.arbiters.values()) a.resume();
+    this.bus.publish({ kind: 'status', status: this.statusPayload() });
     await this.conn.start();
   }
 
@@ -339,6 +371,7 @@ export class App {
 
     return {
       connection: this.conn.state,
+      online: this.online,
       groups,
       stats,
       settings: this.getSettings(),

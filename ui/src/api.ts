@@ -16,6 +16,7 @@ export interface GroupStatus {
 
 export interface Status {
   connection: string;
+  online: boolean;
   groups: GroupStatus[];
   stats: Record<string, number>;
   settings: { gatekeeper_model: string; effort: string; daily_budget_usd: number };

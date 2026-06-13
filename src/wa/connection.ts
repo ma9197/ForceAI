@@ -12,7 +12,7 @@ import { EventEmitter } from 'node:events';
 import { AUTH_DIR } from '../config.js';
 import { logger, waLogger } from '../logger.js';
 
-export type ConnState = 'waiting_qr' | 'connecting' | 'open' | 'closed' | 'logged_out';
+export type ConnState = 'waiting_qr' | 'connecting' | 'open' | 'closed' | 'logged_out' | 'offline';
 
 /**
  * Owns the Baileys socket lifecycle: QR, auth persistence, reconnect with backoff.
@@ -32,9 +32,13 @@ export class WaConnection extends EventEmitter {
     await this.connect();
   }
 
+  /** Fully disconnect the WhatsApp socket (linked device goes offline) WITHOUT logging out —
+   *  creds stay on disk so start() resumes the same session with no QR. */
   async stop(): Promise<void> {
     this.stopped = true;
     try { this.sock?.end(undefined); } catch { /* ignore */ }
+    this.sock = null;
+    this.setState('offline');
   }
 
   get ownJid(): string | undefined {
@@ -43,6 +47,12 @@ export class WaConnection extends EventEmitter {
 
   get ownLid(): string | undefined {
     return this.sock?.user?.lid ? jidNormalizedUser(this.sock.user.lid) : undefined;
+  }
+
+  /** Mark offline without an active socket (used when booting in shutdown state). */
+  setOffline(): void {
+    this.stopped = true;
+    this.setState('offline');
   }
 
   private setState(s: ConnState): void {

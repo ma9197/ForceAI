@@ -23,6 +23,7 @@ export interface ArbiterEvents {
 export class Arbiter {
   phase: ArbiterPhase = 'IDLE';
   paused = false;
+  private suspended = false; // transient: bot fully shut down (offline) — distinct from paused
 
   private buffer: NormalizedMessage[] = [];
   private hardTriggerIds = new Set<string>();
@@ -119,8 +120,19 @@ export class Arbiter {
     if (paused) this.clearTimer();
   }
 
+  /** Suspend all activity (full shutdown) without changing persisted paused/asleep state. */
+  suspend(): void {
+    this.suspended = true;
+    this.clearTimer();
+  }
+
+  resume(): void {
+    this.suspended = false;
+  }
+
   /** Entry point for every normalized message in the active group. */
   onMessage(m: NormalizedMessage): void {
+    if (this.suspended) return; // bot is shut down
     if (m.isBot) return; // own sends — never input
     if (this.paused) return;
 
@@ -203,6 +215,7 @@ export class Arbiter {
 
   /** Influence / Continue / Admin: force a generation cycle with an operator instruction. */
   forceGenerate(instruction: string, label = 'OPERATOR'): void {
+    if (this.suspended) return; // bot is shut down
     this.decision('T0', label, instruction.slice(0, 200));
     this.pendingInfluence = instruction;
     if (this.busy) return; // applied right after the in-flight cycle finishes
@@ -243,7 +256,7 @@ export class Arbiter {
   // ---- evaluation cycle ----
 
   private async evaluate(): Promise<void> {
-    if (this.busy || this.paused || this.buffer.length === 0) return;
+    if (this.suspended || this.busy || this.paused || this.buffer.length === 0) return;
     this.busy = true;
 
     try {
