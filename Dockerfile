@@ -18,8 +18,9 @@ ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 EXPOSE 3008
 
-# data/ (SQLite, WhatsApp auth, images, stickers) MUST be a mounted volume so it
-# survives redeploys — see docker-compose.yml / your host's volume settings.
-VOLUME ["/app/data"]
+# data/ (SQLite, WhatsApp auth, images, stickers) MUST be a persistent volume so it
+# survives redeploys. On Railway: attach a Volume in the UI mounted at /app/data.
+# On a VPS with docker-compose: the ./data bind-mount handles it (see docker-compose.yml).
+# NOTE: a Dockerfile `VOLUME` instruction is intentionally omitted — Railway rejects it.
 
 CMD ["npx", "tsx", "src/index.ts"]
