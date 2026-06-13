@@ -1,0 +1,12 @@
+# One command to run ForceAI 24/7 on a VPS:  docker compose up -d --build
+# It auto-restarts on crash or server reboot, and keeps all data in ./data.
+services:
+  forceai:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3008:3008"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data   # persistent: SQLite, WhatsApp login, images, stickers
