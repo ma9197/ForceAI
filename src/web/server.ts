@@ -34,6 +34,13 @@ export async function startWebServer(app: App): Promise<void> {
     });
   }
 
+  // accept raw binary uploads (the one-time data import) as a Buffer
+  fastify.addContentTypeParser(
+    'application/octet-stream',
+    { parseAs: 'buffer', bodyLimit: 209_715_200 },
+    (_req, body, done) => done(null, body),
+  );
+
   await fastify.register(fastifyWebsocket);
 
   if (fs.existsSync(UI_DIST)) {

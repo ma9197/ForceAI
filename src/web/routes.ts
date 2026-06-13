@@ -1,6 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import fs from 'node:fs';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import type { App } from '../app.js';
+import { DATA_DIR } from '../config.js';
+import { logger } from '../logger.js';
 import { FREQ_LEVELS, PERSONA_PRESETS } from '../ai/prompts.js';
 
 function settingsPayload(app: App) {
@@ -142,6 +146,29 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
       })),
       decisions,
     };
+  });
+
+  // ---- one-time brain import: upload a tar.gz of the local data/ folder ----
+  // Auth-protected (global Basic Auth). Extracts into DATA_DIR then restarts so the app
+  // boots with the imported DB + WhatsApp session + stickers, restoring exact prior state.
+  fastify.post('/api/admin/import', { bodyLimit: 209_715_200 }, async (req, reply) => {
+    const buf = req.body as Buffer;
+    if (!Buffer.isBuffer(buf) || buf.length === 0) {
+      return reply.code(400).send({ error: 'empty body — POST the tar.gz as application/octet-stream' });
+    }
+    const tmp = path.join(DATA_DIR, '_import.tar.gz');
+    try {
+      fs.writeFileSync(tmp, buf);
+      execFileSync('tar', ['-xzf', tmp, '-C', DATA_DIR]);
+    } catch (err) {
+      logger.error({ err }, 'data import failed');
+      return reply.code(500).send({ error: 'extract failed: ' + String(err) });
+    } finally {
+      try { fs.rmSync(tmp, { force: true }); } catch { /* ignore */ }
+    }
+    logger.info(`data import: ${buf.length} bytes extracted — restarting to load it`);
+    reply.send({ ok: true, bytes: buf.length, restarting: true });
+    setTimeout(() => process.exit(1), 800); // Railway restarts (restart policy: on failure)
   });
 
   fastify.get('/api/settings', async () => settingsPayload(app));
