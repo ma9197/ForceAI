@@ -95,6 +95,43 @@ export interface VoiceItemRow {
   checked: number; // 0 = new/unreviewed, 1 = reviewed by owner
 }
 
+export interface MemberReportRow {
+  id: number;
+  member_jid: string;
+  week_start: number;
+  bio: string | null;
+  summary: string | null;
+  talking_style: string | null;
+  created_at: number;
+}
+
+export interface MemberStatHistoryRow {
+  id: number;
+  member_jid: string;
+  week_start: number;
+  stat_key: string; // 'mood' | 'iq' | 'aggression'
+  value: number | null;
+  label: string | null;
+  reason: string | null;
+  created_at: number;
+}
+
+/** Code-derived (token-free) analytics for one person, computed live from the message log. */
+export interface MemberCodeStats {
+  messages_total: number;        // all-time (members.message_count)
+  messages_window: number;       // within the analysis window
+  starts: number;                // conversations kicked off (quiet-timer rule)
+  contributions: number;         // messages joining an ongoing convo / replies
+  starter_ratio: number;         // starts / (starts + contributions)
+  top_hour: number | null;       // 0-23, most active hour
+  top_day: number | null;        // 0-6 (Sun..Sat), most active weekday
+  sparkline: number[];           // per-day message counts, last 14 days
+  avg_len: number;               // avg characters per text message
+  emoji_rate: number;            // emojis per message
+  question_rate: number;         // fraction of messages containing '?'
+  reply_network: { jid: string; count: number }[]; // top people they reply to
+}
+
 export interface StickerRow {
   id: number;
   file_path: string;
@@ -125,6 +162,7 @@ export type BusEvent =
   | { kind: 'stats'; stats: Record<string, number> }
   | { kind: 'fact'; chatJid: string; memberJid: string; fact: string; category: string | null }
   | { kind: 'voice'; chatJid: string; count: number }
+  | { kind: 'report'; count: number }
   | { kind: 'sticker'; id: number; description: string | null }
   | { kind: 'status'; status: StatusPayload };
 

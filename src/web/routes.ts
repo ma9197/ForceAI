@@ -171,6 +171,62 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     return { ok: true };
   });
 
+  // ---- Members: per-person dossiers, GLOBAL across all groups ----
+  const personNameOf = (jid: string) => app.repo.getMember(jid)?.display_name ?? jid.split('@')[0];
+  const latestStatsObj = (memberJid: string) => {
+    const locks = new Set(app.repo.getStatLocks(memberJid));
+    const out: Record<string, { value: number | null; label: string | null; reason: string | null; locked: boolean }> = {};
+    for (const s of app.repo.getLatestStats(memberJid)) {
+      out[s.stat_key] = { value: s.value, label: s.label, reason: s.reason, locked: locks.has(s.stat_key) };
+    }
+    return out;
+  };
+
+  fastify.get('/api/people', async () => {
+    const code = app.repo.computeAllCodeStats();
+    return app.repo.getPeople().map(m => {
+      const report = app.repo.getLatestReport(m.jid);
+      return {
+        jid: m.jid,
+        name: m.display_name ?? m.jid.split('@')[0],
+        message_count: m.message_count,
+        last_seen: m.last_seen,
+        bio: report?.bio ?? null,
+        talking_style: report?.talking_style ?? null,
+        has_report: !!report,
+        stats: latestStatsObj(m.jid),
+        code: code.get(m.jid) ?? null,
+      };
+    });
+  });
+
+  fastify.get<{ Params: { jid: string } }>('/api/people/:jid', async (req, reply) => {
+    const memberJid = decodeURIComponent(req.params.jid);
+    const m = app.repo.getMember(memberJid);
+    if (!m) return reply.code(404).send({ error: 'not found' });
+    const report = app.repo.getLatestReport(memberJid);
+    const code = app.repo.computeAllCodeStats().get(memberJid) ?? null;
+    return {
+      jid: m.jid,
+      name: m.display_name ?? m.jid.split('@')[0],
+      message_count: m.message_count,
+      first_seen: m.first_seen,
+      last_seen: m.last_seen,
+      bio: report?.bio ?? null,
+      summary: report?.summary ?? null,
+      talking_style: report?.talking_style ?? null,
+      week_start: report?.week_start ?? null,
+      has_report: !!report,
+      stats: latestStatsObj(memberJid),
+      code,
+      groups: app.repo.getMemberGroups(memberJid),
+      reply_network: (code?.reply_network ?? []).map(r => ({ ...r, name: personNameOf(r.jid) })),
+    };
+  });
+
+  fastify.get<{ Params: { jid: string; statKey: string } }>('/api/people/:jid/stat/:statKey/history', async (req) =>
+    app.repo.getStatHistory(decodeURIComponent(req.params.jid), req.params.statKey));
+
   fastify.get('/api/stickers', async () => app.repo.getStickers());
 
   fastify.get<{ Params: { id: string } }>('/api/stickers/:id/image', async (req, reply) => {

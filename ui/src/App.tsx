@@ -6,11 +6,12 @@ import { GroupPicker } from './components/GroupPicker';
 import { LiveFeed, type FeedItem, type ReplyTarget } from './components/LiveFeed';
 import { MemoryBrowser } from './components/MemoryBrowser';
 import { VoiceProfilePanel } from './components/VoiceProfilePanel';
+import { MembersPanel } from './components/MembersPanel';
 import { StickerGrid } from './components/StickerGrid';
 import { StatsPanel } from './components/StatsPanel';
 import { SettingsPanel } from './components/SettingsPanel';
 
-type Tab = 'memory' | 'voice' | 'stickers' | 'stats' | 'settings';
+type Tab = 'memory' | 'voice' | 'members' | 'stickers' | 'stats' | 'settings';
 
 export default function App() {
   const [status, setStatus] = useState<Status | null>(null);
@@ -71,6 +72,7 @@ export default function App() {
         break;
       case 'fact':
       case 'voice':
+      case 'report':
       case 'sticker':
         setMemoryVersion(v => v + 1);
         break;
@@ -199,15 +201,16 @@ export default function App() {
             </div>
             <div className="side-col">
               <div className="tabs">
-                {(['memory', 'voice', 'stickers', 'stats', 'settings'] as Tab[]).map(t => (
+                {(['memory', 'voice', 'members', 'stickers', 'stats', 'settings'] as Tab[]).map(t => (
                   <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>
-                    {t === 'voice' ? 'Voice' : t[0].toUpperCase() + t.slice(1)}
+                    {t === 'voice' ? 'Voice' : t === 'members' ? 'Members' : t[0].toUpperCase() + t.slice(1)}
                   </button>
                 ))}
               </div>
               <div className="tab-body">
                 {tab === 'memory' && selectedJid && <MemoryBrowser jid={selectedJid} version={memoryVersion} />}
                 {tab === 'voice' && selectedJid && <VoiceProfilePanel jid={selectedJid} version={memoryVersion} />}
+                {tab === 'members' && <MembersPanel version={memoryVersion} groups={groups} />}
                 {tab === 'stickers' && <StickerGrid version={memoryVersion} />}
                 {tab === 'stats' && <StatsPanel group={selected} globalStats={status?.stats ?? {}} />}
                 {tab === 'settings' && <SettingsPanel onSaved={refreshStatus} />}
@@ -221,14 +224,14 @@ export default function App() {
               className={mobileView === 'chat' ? 'active' : ''}
               onClick={() => setMobileView('chat')}
             >💬<span>Chat</span></button>
-            {(['memory', 'voice', 'stickers', 'stats', 'settings'] as Tab[]).map(t => (
+            {(['memory', 'voice', 'members', 'stickers', 'stats', 'settings'] as Tab[]).map(t => (
               <button
                 key={t}
                 className={mobileView === 'side' && tab === t ? 'active' : ''}
                 onClick={() => { setTab(t); setMobileView('side'); }}
               >
-                {t === 'memory' ? '🧠' : t === 'voice' ? '🗣️' : t === 'stickers' ? '🖼️' : t === 'stats' ? '📊' : '⚙️'}
-                <span>{t === 'voice' ? 'Voice' : t[0].toUpperCase() + t.slice(1)}</span>
+                {t === 'memory' ? '🧠' : t === 'voice' ? '🗣️' : t === 'members' ? '👥' : t === 'stickers' ? '🖼️' : t === 'stats' ? '📊' : '⚙️'}
+                <span>{t === 'voice' ? 'Voice' : t === 'members' ? 'Members' : t[0].toUpperCase() + t.slice(1)}</span>
               </button>
             ))}
           </div>

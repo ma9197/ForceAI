@@ -52,6 +52,34 @@ export interface VoiceProfile {
   items: VoiceItem[];
 }
 
+export interface MemberStat { value: number | null; label: string | null; reason: string | null; locked: boolean }
+
+export interface MemberCodeStats {
+  messages_total: number; messages_window: number;
+  starts: number; contributions: number; starter_ratio: number;
+  top_hour: number | null; top_day: number | null;
+  sparkline: number[];
+  avg_len: number; emoji_rate: number; question_rate: number;
+  reply_network: { jid: string; count: number }[];
+}
+
+export interface PersonSummary {
+  jid: string; name: string; message_count: number; last_seen: number;
+  bio: string | null; talking_style: string | null; has_report: boolean;
+  stats: Record<string, MemberStat>;
+  code: MemberCodeStats | null;
+}
+
+export interface PersonProfile extends PersonSummary {
+  first_seen: number; summary: string | null; week_start: number | null;
+  groups: { chat_jid: string; count: number }[];
+  reply_network: { jid: string; count: number; name: string }[];
+}
+
+export interface StatHistoryEntry {
+  week_start: number; value: number | null; label: string | null; reason: string | null;
+}
+
 export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     headers: { 'Content-Type': 'application/json' },

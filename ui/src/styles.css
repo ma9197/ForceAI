@@ -283,6 +283,69 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent2); }
 }
 
 /* ============================================================
+   MEMBERS — per-person dossiers (global roster)
+   ============================================================ */
+.member-roster { display: flex; flex-direction: column; gap: 8px; }
+.member-card { background: var(--panel); border: 1px solid var(--border); border-radius: 11px; overflow: hidden; }
+.member-card.open { border-color: var(--accent2); }
+.member-head { display: flex; align-items: center; gap: 11px; padding: 10px 12px; cursor: pointer; }
+.member-head:hover { background: rgba(91, 140, 255, 0.05); }
+.member-avatar {
+  width: 36px; height: 36px; flex: 0 0 auto; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, var(--accent2), var(--accent)); color: #06210f;
+  font-weight: 800; font-size: 15px;
+}
+.member-id { flex: 1; min-width: 0; }
+.member-name { font-size: 14px; font-weight: 600; }
+.member-vibe { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px; }
+.member-chips { display: flex; gap: 5px; flex: 0 0 auto; }
+.member-chip {
+  font-size: 11px; padding: 2px 7px; border-radius: 8px;
+  background: var(--panel2); border: 1px solid var(--border); white-space: nowrap;
+}
+.member-caret { color: var(--muted); font-size: 11px; flex: 0 0 auto; }
+.member-body { padding: 4px 12px 12px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 14px; }
+.member-section-title { font-size: 11px; letter-spacing: 0.6px; text-transform: uppercase; color: var(--muted); font-weight: 700; margin: 10px 0 7px; }
+.member-bio { font-size: 13px; line-height: 1.55; margin: 0 0 10px; }
+
+/* AI stat tiles + expandable history */
+.mstat-list { display: flex; flex-direction: column; gap: 6px; }
+.mstat { border: 1px solid var(--border); border-radius: 9px; background: var(--panel2); }
+.mstat.open { border-color: var(--accent2); }
+.mstat-head { display: flex; align-items: center; gap: 10px; padding: 8px 10px; cursor: pointer; }
+.mstat-icon { font-size: 16px; flex: 0 0 auto; }
+.mstat-main { flex: 1; min-width: 0; }
+.mstat-label { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 5px; }
+.mstat-lock { font-size: 10px; }
+.mstat-hint { font-size: 10px; color: var(--muted); }
+.mstat-val { font-size: 19px; font-weight: 800; color: var(--accent); display: flex; align-items: baseline; gap: 6px; }
+.mstat-vlabel { font-size: 11px; font-weight: 500; color: var(--muted); }
+.mstat-caret { color: var(--muted); font-size: 11px; }
+.mstat-body { padding: 0 10px 10px; }
+.mstat-reason { font-size: 12px; color: var(--text); margin: 2px 0 8px; font-style: italic; }
+.mstat-timeline { display: flex; flex-direction: column; gap: 7px; border-left: 2px solid var(--border); padding-left: 10px; }
+.mstat-week-head { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
+.mstat-week-date { color: var(--muted); }
+.mstat-week-val { font-weight: 700; color: var(--accent2); }
+.mstat-week-reason { font-size: 11px; color: var(--muted); margin-top: 1px; }
+
+/* code-derived analytics */
+.mcode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+.mcode-grid .stat { padding: 9px 11px; }
+.mcode-grid .stat .v { font-size: 18px; }
+.mcode-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.mcode-row.col { flex-direction: column; align-items: stretch; gap: 5px; }
+.mcode-label { font-size: 12px; font-weight: 600; }
+.spark { display: block; }
+.role-bar { height: 8px; border-radius: 5px; background: var(--accent2); overflow: hidden; }
+.role-start { display: block; height: 100%; background: var(--accent); }
+.role-legend { display: flex; gap: 14px; font-size: 11px; color: var(--muted); }
+.reply-net { display: flex; flex-wrap: wrap; gap: 6px; }
+.reply-chip-m { font-size: 11px; padding: 3px 9px; border-radius: 8px; background: var(--panel2); border: 1px solid var(--border); }
+.reply-chip-m b { color: var(--accent2); margin-left: 3px; }
+
+/* ============================================================
    MOBILE (≤ 760px) — single column + bottom nav
    ============================================================ */
 @media (max-width: 760px) {

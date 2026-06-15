@@ -126,6 +126,50 @@ export function openDb(): Database.Database {
       UNIQUE(chat_jid, category, content)
     );
     CREATE INDEX IF NOT EXISTS idx_voice_chat ON voice_items(chat_jid, superseded_by);
+
+    -- member reports: per-PERSON dossier, GLOBAL (one identity across all groups). One row per week.
+    CREATE TABLE IF NOT EXISTS member_reports (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      member_jid  TEXT NOT NULL,
+      week_start  INTEGER NOT NULL,   -- epoch ms; the week the report covers
+      bio         TEXT,                -- AI's evolving descriptive bio
+      summary     TEXT,                -- 1-2 line "what happened this week"
+      talking_style TEXT,
+      created_at  INTEGER,
+      UNIQUE(member_jid, week_start)
+    );
+    CREATE INDEX IF NOT EXISTS idx_report_member ON member_reports(member_jid, week_start);
+
+    -- one row per stat per week — drives the expandable per-stat timelines
+    CREATE TABLE IF NOT EXISTS member_stat_history (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      member_jid  TEXT NOT NULL,
+      week_start  INTEGER NOT NULL,
+      stat_key    TEXT NOT NULL,       -- 'mood' | 'iq' | 'aggression'
+      value       REAL,
+      label       TEXT,
+      reason      TEXT,
+      created_at  INTEGER,
+      UNIQUE(member_jid, week_start, stat_key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_stat_hist ON member_stat_history(member_jid, stat_key, week_start);
+
+    -- owner-locked stats: presence = frozen (weekly job carries the value forward, AI must not change)
+    CREATE TABLE IF NOT EXISTS member_stat_locks (
+      member_jid  TEXT NOT NULL,
+      stat_key    TEXT NOT NULL,
+      PRIMARY KEY (member_jid, stat_key)
+    );
+
+    -- ForceAI's private per-reply observations about a person; consumed + pruned by the weekly job
+    CREATE TABLE IF NOT EXISTS member_observations (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      member_jid  TEXT NOT NULL,
+      chat_jid    TEXT,
+      observation TEXT NOT NULL,
+      ts          INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_member_obs ON member_observations(member_jid, ts);
   `);
 
   // migrations for DBs created before multi-group support

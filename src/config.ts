@@ -45,6 +45,23 @@ export type GenerationChoice = keyof typeof GENERATION_MODELS;
  */
 export const VOICE_PROFILE_MODEL = 'claude-sonnet-4-6';
 
+// ---- Member reports (per-person dossiers, weekly AI + free code-stats) ----
+export const REPORT = {
+  // code-derived analytics (token-free)
+  QUIET_MS: 3 * 60_000,          // group "quiet" threshold for conversation-start detection (owner's rule)
+  CODE_STATS_WINDOW_DAYS: 90,    // window for behavioral code-stats (keeps them current + bounded)
+  SPARKLINE_DAYS: 14,            // per-day activity sparkline length
+  // weekly AI job (used in phase 2)
+  MODEL: 'claude-sonnet-4-6',    // all-Sonnet per owner's choice
+  RUN_HOUR_UTC: 4,               // Sunday ~04:00 UTC = ~08:00 Asia/Baku
+  RUN_WINDOW_HOURS: 3,           // acceptable run window after the target hour
+  MIN_DAYS_BETWEEN: 6,           // don't re-run within this many days
+  HEAVY_MIN_MSGS: 40,            // members with >= this many msgs in the week get a per-member deep-dive
+  BATCH_SIZE: 6,                 // light members processed per batched call
+  SAMPLE_MSGS: 60,               // capped message sample per member in the digest
+  MAX_OUTPUT_TOKENS: 8000,
+} as const;
+
 // $/MTok pricing for cost accounting (input, output, cacheRead, cacheWrite)
 export const PRICING: Record<string, { in: number; out: number; cacheRead: number; cacheWrite: number }> = {
   'claude-sonnet-4-6': { in: 3, out: 15, cacheRead: 0.3, cacheWrite: 3.75 },

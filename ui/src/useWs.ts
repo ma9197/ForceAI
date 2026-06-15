@@ -9,6 +9,7 @@ export type WsEvent =
   | { kind: 'stats'; stats: Record<string, number> }
   | { kind: 'fact'; chatJid: string; memberJid: string; fact: string; category: string | null }
   | { kind: 'voice'; chatJid: string; count: number }
+  | { kind: 'report'; count: number }
   | { kind: 'sticker'; id: number; description: string | null }
   | { kind: 'status'; status: import('./api').Status };
 
