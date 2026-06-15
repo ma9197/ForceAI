@@ -242,16 +242,20 @@ export default function App() {
                         onChange={e => setWhy(e.target.value)}
                         onKeyDown={e => e.key === 'Enter' && sendInfluence()}
                       />
+                    </div>
+                    <div className="influence-actions">
+                      <label className="influence-learn" title="Save this as a teaching moment — the bot distills these into its own sense of when to take initiative">
+                        <input type="checkbox" checked={learn} onChange={e => setLearn(e.target.checked)} />
+                        Teach this move <span className="muted">(learn initiative from it)</span>
+                      </label>
                       <button className="primary" onClick={sendInfluence}>{replyTarget ? 'Reply ↩' : 'Influence ⚡'}</button>
                     </div>
-                    <label className="influence-learn" title="Save this as a teaching moment — the bot distills these into its own sense of when to take initiative">
-                      <input type="checkbox" checked={learn} onChange={e => setLearn(e.target.checked)} />
-                      Teach this move <span className="muted">(learn initiative from it)</span>
-                    </label>
                   </div>
                 )}
-                <button onClick={() => selectedJid && post('/api/continue', { jid: selectedJid })}>Continue ▶</button>
-                <button onClick={() => selectedJid && post('/api/sleep', { jid: selectedJid })} title="Put ForceAI to sleep until someone says 'ForceAI'">Sleep 💤</button>
+                <div className="controls-sys">
+                  <button onClick={() => selectedJid && post('/api/continue', { jid: selectedJid })}>Continue ▶</button>
+                  <button onClick={() => selectedJid && post('/api/sleep', { jid: selectedJid })} title="Put ForceAI to sleep until someone says 'ForceAI'">Sleep 💤</button>
+                </div>
               </div>
             </div>
             <div

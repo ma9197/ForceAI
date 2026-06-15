@@ -189,11 +189,13 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent2); }
 
 /* controls under feed */
 .controls { display: flex; align-items: flex-start; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); background: var(--panel); }
-.controls input { flex: 1; }
 .influence-box { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .influence-row { display: flex; gap: 8px; }
-.influence-learn { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; user-select: none; padding-left: 2px; }
-.influence-learn input[type="checkbox"] { flex: 0 0 auto; width: 16px; height: 16px; }
+.influence-row input { flex: 1; min-width: 0; }
+.influence-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.influence-learn { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; user-select: none; }
+.influence-learn input[type="checkbox"] { flex: 0 0 auto; width: 16px; height: 16px; margin: 0; }
+.controls-sys { display: flex; gap: 8px; flex: 0 0 auto; }
 
 /* tabs */
 .tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--panel); }
@@ -454,9 +456,11 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent2); }
   .msg { max-width: 90%; }
 
   /* controls stack: full-width input, buttons in a wrapping row */
-  .controls { flex-wrap: wrap; padding: 9px 12px; gap: 6px; }
-  .controls input { flex: 1 1 100%; }
-  .controls button { flex: 1 1 auto; }
+  /* controls stack cleanly on mobile: inputs full-width, actions + system buttons in their own rows */
+  .controls { flex-direction: column; align-items: stretch; padding: 9px 12px; gap: 8px; }
+  .influence-row { flex-direction: column; }
+  .influence-row input { flex: none; width: 100%; }
+  .controls-sys button { flex: 1; }
 
   .reply-chip { flex-wrap: wrap; }
 

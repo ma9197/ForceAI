@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import type { App } from '../app.js';
-import { DATA_DIR, resolveStickerPath } from '../config.js';
+import { DATA_DIR, resolveStickerPath, applyMentions } from '../config.js';
 import { logger } from '../logger.js';
 import { FREQ_LEVELS, PERSONA_PRESETS } from '../ai/prompts.js';
 
@@ -324,10 +324,11 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     const limit = Math.min(Number(req.query.limit ?? 100), 300);
     const messages = app.repo.getRecentMessages(jid, limit);
     const decisions = app.repo.getRecentDecisions(limit, jid);
+    const mentions = app.repo.getMentionNameMap();
     return {
       messages: messages.map(r => ({
         id: r.id, shortId: r.short_id, senderName: r.sender_name, isBot: !!r.is_bot,
-        isOwner: !!r.is_owner, type: r.type, text: r.text, ts: r.ts,
+        isOwner: !!r.is_owner, type: r.type, text: applyMentions(r.text ?? '', mentions), ts: r.ts,
       })),
       decisions,
     };

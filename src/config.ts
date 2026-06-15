@@ -25,6 +25,12 @@ export function resolveStickerPath(storedPath: string): string {
   return path.join(STICKER_DIR, name);
 }
 
+/** Replace WhatsApp @<number> mentions with @<name> using a number→name map (else leave as-is). */
+export function applyMentions(text: string, map: Record<string, string>): string {
+  if (!text || text.indexOf('@') < 0) return text;
+  return text.replace(/@(\d{5,})/g, (full, num) => (map[num] ? `@${map[num]}` : full));
+}
+
 // ---- Models ----
 export const GENERATION_MODEL = 'claude-sonnet-4-6';
 export const GATEKEEPER_MODELS = {

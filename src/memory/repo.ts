@@ -71,6 +71,18 @@ export class Repo {
     return this.db.prepare('SELECT * FROM members WHERE jid = ?').get(jid) as MemberRow | undefined;
   }
 
+  /** Map of jid/pn user-number → display name, for resolving @mentions in message text. */
+  getMentionNameMap(): Record<string, string> {
+    const map: Record<string, string> = {};
+    for (const m of this.getMembers()) {
+      if (!m.display_name) continue;
+      const j = m.jid.split('@')[0];
+      if (j) map[j] = m.display_name;
+      if (m.pn_jid) { const p = m.pn_jid.split('@')[0]; if (p) map[p] = m.display_name; }
+    }
+    return map;
+  }
+
   setMemberNotes(jid: string, notes: string): void {
     this.db.prepare('UPDATE members SET personality_notes = ? WHERE jid = ?').run(notes, jid);
   }

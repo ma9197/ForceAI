@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { downloadMediaMessage, type WAMessage } from 'baileys';
-import { INTRO_MESSAGE, DEFAULT_DAILY_BUDGET_USD, DEFAULT_MSG_PREFIX, DEFAULT_MSG_SUFFIX, ELEVENLABS, IMAGE_DIR, IMAGE_GEN, INITIATIVE } from './config.js';
+import { INTRO_MESSAGE, DEFAULT_DAILY_BUDGET_USD, DEFAULT_MSG_PREFIX, DEFAULT_MSG_SUFFIX, ELEVENLABS, IMAGE_DIR, IMAGE_GEN, INITIATIVE, applyMentions } from './config.js';
 import { logger, waLogger } from './logger.js';
 import { openDb } from './memory/db.js';
 import { Repo } from './memory/repo.js';
@@ -277,7 +277,7 @@ export class App {
       await this.downloadMedia(norm.id, norm.raw, norm.type);
     }
 
-    this.bus.publish({ kind: 'message', chatJid: norm.chatJid, message: toFeed(norm) });
+    this.bus.publish({ kind: 'message', chatJid: norm.chatJid, message: toFeed(norm, this.repo.getMentionNameMap()) });
 
     if (source === 'sent') return; // our own send — recorded, nothing to react to
 
@@ -501,7 +501,7 @@ export class App {
   }
 }
 
-function toFeed(m: NormalizedMessage): FeedMessage {
+function toFeed(m: NormalizedMessage, mentions?: Record<string, string>): FeedMessage {
   return {
     id: m.id,
     shortId: m.shortId,
@@ -509,8 +509,8 @@ function toFeed(m: NormalizedMessage): FeedMessage {
     isBot: m.isBot,
     isOwner: m.isOwner,
     type: m.type,
-    text: m.text,
-    quotedText: m.quotedText,
+    text: mentions ? applyMentions(m.text, mentions) : m.text,
+    quotedText: m.quotedText && mentions ? applyMentions(m.quotedText, mentions) : m.quotedText,
     reactionEmoji: m.reactionEmoji,
     ts: m.ts,
   };

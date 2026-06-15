@@ -1,4 +1,4 @@
-import { BOT_NAME, INITIATIVE, MEMORY, VOICE_PROFILE } from '../config.js';
+import { BOT_NAME, INITIATIVE, MEMORY, VOICE_PROFILE, applyMentions } from '../config.js';
 import type { Repo } from '../memory/repo.js';
 import type { VoiceItemRow } from '../types.js';
 import type { PollTracker } from '../wa/polls.js';
@@ -326,6 +326,9 @@ export class PromptBuilder {
   formatTranscript(rows: any[], newSinceTs: number | null, botName = BOT_NAME): string {
     const lines: string[] = [];
     let newMarkerPlaced = false;
+    const mentions = this.repo.getMentionNameMap(); // resolve @<number> tags to names
+
+    const mtext = (t: string) => applyMentions(t ?? '', mentions);
 
     for (const r of rows) {
       if (newSinceTs !== null && !newMarkerPlaced && r.ts > newSinceTs && !r.is_bot) {
@@ -351,10 +354,10 @@ export class PromptBuilder {
           line += ' (reply)';
         }
       }
-      let body = r.type === 'text' ? r.text
+      let body = r.type === 'text' ? mtext(r.text)
         : r.type === 'sticker' ? '[sticker]'
-        : r.type === 'poll' ? `[poll] ${r.text}`
-        : r.text ? `[${r.type}] ${r.text}`
+        : r.type === 'poll' ? `[poll] ${mtext(r.text)}`
+        : r.text ? `[${r.type}] ${mtext(r.text)}`
         : `[${r.type}]`;
       if (r.type === 'poll' && this.polls) {
         const results = this.polls.formatResults(r.id);

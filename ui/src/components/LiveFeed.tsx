@@ -8,12 +8,13 @@ function time(ts: number): string {
   return new Date(ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 }
 
-/** Stable, distinct color per member name (hash → HSL). Members only; bot/owner have fixed colors. */
-function nameColor(name: string): string {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  return `hsl(${h % 360}, 70%, 72%)`;
-}
+/** Distinct, readable member-name colors (WhatsApp-style). Assigned per person by first appearance
+ *  so two members never collide — unlike a hash, which could map both to the same hue. */
+const NAME_PALETTE = [
+  '#53bdeb', '#e542a3', '#5ad469', '#ffab00', '#a78bfa', '#ff7e6b',
+  '#00d5c0', '#f6c445', '#7aa2ff', '#ff8fb1', '#9ad36b', '#f0883e',
+  '#4fd1c5', '#d98cff', '#ffd166', '#8ecae6',
+];
 
 export interface ReplyTarget { shortId: string; sender: string; text: string }
 
@@ -49,6 +50,16 @@ export function LiveFeed({ items, selectedShortId, onSelect }: {
     if (el) el.scrollTop = el.scrollHeight;
   }, [items.length]);
 
+  // assign each distinct member a palette color (by first appearance) so colors never collide
+  const colorByName = new Map<string, string>();
+  let ci = 0;
+  for (const it of items) {
+    if (it.kind === 'message' && !it.isBot && !it.isOwner && !colorByName.has(it.senderName)) {
+      colorByName.set(it.senderName, NAME_PALETTE[ci % NAME_PALETTE.length]);
+      ci += 1;
+    }
+  }
+
   // collapse the name title for consecutive messages from the same sender (messaging-app style)
   let lastSenderKey: string | null = null;
 
@@ -70,7 +81,7 @@ export function LiveFeed({ items, selectedShortId, onSelect }: {
         lastSenderKey = senderKey;
 
         const whoLabel = m.isBot ? 'ForceAI' : m.isOwner ? 'You (admin)' : m.senderName;
-        const whoColor = m.isBot ? 'var(--accent)' : m.isOwner ? 'var(--warn)' : nameColor(m.senderName);
+        const whoColor = m.isBot ? 'var(--accent)' : m.isOwner ? 'var(--warn)' : (colorByName.get(m.senderName) ?? '#53bdeb');
         const isMedia = m.type === 'image' || m.type === 'sticker';
 
         return (
