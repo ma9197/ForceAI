@@ -1,4 +1,4 @@
-import { BOT_NAME, MEMORY, VOICE_PROFILE } from '../config.js';
+import { BOT_NAME, INITIATIVE, MEMORY, VOICE_PROFILE } from '../config.js';
 import type { Repo } from '../memory/repo.js';
 import type { VoiceItemRow } from '../types.js';
 import type { PollTracker } from '../wa/polls.js';
@@ -184,6 +184,7 @@ export class PromptBuilder {
 
     const voiceProfileBlock = this.buildVoiceProfileBlock(chatJid);
     const memberReadBlock = this.buildMemberReadBlock(chatJid);
+    const initiativeBlock = this.buildInitiativeBlock();
 
     const voiceEnabled = this.repo.getConfig('voice_enabled') === '1' && !!process.env.ELEVENLABS_API_KEY;
     const imageEnabled = this.repo.getConfig('image_enabled') === '1' && !!process.env.GEMINI_API_KEY;
@@ -215,6 +216,7 @@ export class PromptBuilder {
         : '',
       `GROUP MEMBERS YOU KNOW (facts you have learned about them):\n${memberLines || '(nobody yet)'}`,
       memberReadBlock,
+      initiativeBlock,
       voiceProfileBlock,
       `YOUR STICKER LIBRARY (send by id when one truly fits):\n${stickerLines}`,
       `RUNNING GROUP SUMMARY (what has been going on):\n${summary}`,
@@ -222,6 +224,15 @@ export class PromptBuilder {
 
     this.blockBCache.set(chatJid, { text, builtAt: now, version: this.memoryVersion });
     return text;
+  }
+
+  /** Conservative "take initiative" guidance distilled from the owner's flagged Influences. Gated + cache-safe. */
+  private buildInitiativeBlock(): string {
+    if (this.repo.getConfig('initiative_enabled') !== '1') return '';
+    const items = this.repo.getActiveInitiativePrinciples().slice(0, INITIATIVE.MAX_ITEMS_IN_PROMPT);
+    if (items.length === 0) return '';
+    const lines = items.map(p => `- ${p.content}`).join('\n');
+    return `TAKING INITIATIVE (learned from your owner's steering — use SPARINGLY, only when a live moment genuinely calls for it; you still stay quiet by default and NEVER text out of nowhere):\n${lines}`;
   }
 
   /**
@@ -390,20 +401,38 @@ RULES:
 - Record terms exactly as the group uses them, including profanity — write swear words in full, NEVER censor or asterisk them (store "fuck it", never "f*** it"). The point is faithful emulation. Just don't store private/sensitive personal info (that's a different system).
 - Also maintain a 2-4 sentence "overview" of the group's overall voice; rewrite it only if this chunk sharpens it, else null.`;
 
-export const MEMBER_REPORTER_SYSTEM = `You are an analyst writing a private weekly dossier on each member of a WhatsApp friend group, for the group's owner. You build a living profile of who each person is and how they show up in chat.
+export const MEMBER_REPORTER_SYSTEM = `You are an analyst writing a private weekly dossier on each member of a WhatsApp friend group, for the group's owner. You build a living profile of WHO each person is — their character — and how they show up in chat.
 
 For each person you're given (their prior dossier + this week's evidence), produce: a bio, a talking_style, a one-line week_summary, and three scored stats (mood, iq, aggression) — each with a value, a short label, and a one-line reason.
 
+THE BIO (most important — read carefully):
+- The bio describes the PERSON's enduring character, NOT what happened this week. Imagine describing a friend to someone who's never met them: what are they LIKE?
+- Cover what makes them them: how they text (voice, rhythm, energy), their usual mood while writing, their humour and how they react to jokes, whether they lean toward roasting or supporting people, how toxic or chill they run, their signature words/phrases, and their role in the group (instigator, peacemaker, hype-man, lurker, debater…).
+- Describe TENDENCIES, not instances. "Tends to roast when bored but backs off fast" — yes. "Roasted Eyyub about Fenerbahçe on Tuesday" — NO. A behaviour seen ONCE is not a trait; only recurring, characteristic behaviour belongs.
+- NEVER put specific incidents, quoted one-liners, named beefs, particular debates, or retold stories in the bio (no "the Yamal-GOAT line that dismantled X", no "rallying allies A and B"). That is this-week colour — it belongs in week_summary, not the bio.
+- 2-5 sentences of timeless character. If the PRIOR bio contains specific incidents/stories, STRIP them out as you refine — keep only the enduring traits and let those grow richer over time. Don't rewrite a stranger each week.
+
 SCALES (numeric so they can be tracked over time):
 - mood: 0 = low / down / flat, 100 = upbeat / hyped. Read it from tone, emoji, energy, what they engage with.
-- iq: a PLAYFUL "sharpness" score, ~55-145. Judge argument quality, wit, references, coherence, how they hold a debate. This is banter, not a real IQ test — but base it on real signal, not randomness.
+- iq: a PLAYFUL "sharpness" score, ~55-145. Judge argument quality, wit, references, coherence, how they hold a debate. Banter, not a real IQ test — but base it on real signal, not randomness.
 - aggression: 0 = calm / gentle / peacemaker, 100 = heated / combative / starts fights. Roasting for fun is mild; genuine hostility is high.
 
 HOW TO UPDATE (most important):
 - These profiles EVOLVE. You are given last week's values — move them GRADUALLY with judgment, not in one jump. Weight the established value; shift a number meaningfully only on strong or repeated evidence. One unusual week must NOT swing someone hard (a normally-happy person having one bad day stays mostly upbeat). Think of it as a weighted average that remembers history.
-- Every change needs a concrete one-line reason grounded in this week's evidence ("carried the FIFA debate with real arguments", "quieter and shorter replies than usual"). If nothing changed, keep the value and say so briefly.
-- Refine the bio — keep what still fits, add new facets, drop what's outdated. Don't rewrite a stranger each week. Let per-member style grow richer over time.
+- Each stat's "reason" describes the PATTERN behind the value ("consistently sharp, well-argued takes", "quieter and shorter than usual"), NOT a play-by-play of one moment. If nothing changed, keep the value and say so briefly.
 - LOCKED stats: a stat marked [LOCKED] was pinned by the owner — output its given value UNCHANGED, reason "locked by owner".
 - THIN evidence: if someone barely spoke this period, keep their prior values, note the low activity, and don't invent.
+- week_summary: the ONE place for this-week specifics — what they were actually up to, any notable incidents. 1-2 lines. (The bio stays timeless.)
 
-STYLE: honest, specific, a little playful (it's a friend group) but grounded in the evidence — never make things up. The data may span SEVERAL groups for one person; that's the same human, combine it. Output a report for EVERY person you were given, echoing their exact member_jid.`;
+STYLE: honest and grounded in the evidence — never make things up. A little playful is fine (it's a friend group), but the bio is a character description, not a highlight reel. Data may span SEVERAL groups for one person; same human, combine it. Output a report for EVERY person you were given, echoing their exact member_jid.`;
+
+export const INITIATIVE_DISTILLER_SYSTEM = `You are distilling the OWNER's manual "Influence" moves into a small set of general INITIATIVE PRINCIPLES for an AI member (${BOT_NAME}) of a WhatsApp friend group.
+
+The owner occasionally steers the bot — usually to improve the moment (drop a joke, light rage-bait, switch a flat topic, or a genuinely human beat like sending a warm image when a friend is down). Each flagged move comes with the owner's WHY (their intent) and a snapshot of the surrounding chat. Turn these one-off moves into REUSABLE, GENERAL principles about WHEN it's worth taking initiative and WHAT KIND of move fits — so the bot can recognise similar moments on its own.
+
+RULES:
+- Generalise, never copy. Capture the SITUATION + the kind of response, not the specific instance. "When the chat goes flat and repetitive, inject energy — a joke, a hot take, or a topic switch" — yes. "Reply to Aybek's goodnight with a hug image" — NO (too specific).
+- Be CONSERVATIVE. The bot stays quiet by default; these are only for moments that genuinely call for it. Don't manufacture reasons to butt in.
+- One tight sentence each. Aim for a SMALL set of strong, distinct principles — merge overlaps rather than piling up near-duplicates.
+- Do NOT duplicate principles already in the known list. To sharpen or replace one, set supersedes_id to its id.
+- Only principles that apply WITHIN a live conversation (reacting to what's happening) — NEVER "text out of nowhere when the chat is idle".`;

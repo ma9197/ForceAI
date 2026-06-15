@@ -1,13 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { downloadMediaMessage, type WAMessage } from 'baileys';
-import { INTRO_MESSAGE, DEFAULT_DAILY_BUDGET_USD, DEFAULT_MSG_PREFIX, DEFAULT_MSG_SUFFIX, ELEVENLABS, IMAGE_DIR, IMAGE_GEN } from './config.js';
+import { INTRO_MESSAGE, DEFAULT_DAILY_BUDGET_USD, DEFAULT_MSG_PREFIX, DEFAULT_MSG_SUFFIX, ELEVENLABS, IMAGE_DIR, IMAGE_GEN, INITIATIVE } from './config.js';
 import { logger, waLogger } from './logger.js';
 import { openDb } from './memory/db.js';
 import { Repo } from './memory/repo.js';
 import { FactExtractor } from './memory/extractor.js';
 import { VoiceProfiler, type VoiceLearnResult } from './memory/voice.js';
 import { MemberReporter, type ReportResult } from './memory/reporter.js';
+import { InitiativeDistiller, type DistillResult } from './memory/initiative.js';
 import { JidResolver } from './wa/jid.js';
 import { WaConnection } from './wa/connection.js';
 import { Normalizer } from './wa/inbound.js';
@@ -48,6 +49,7 @@ export class App {
   private extractors = new Map<string, FactExtractor>();
   private voiceProfilers = new Map<string, VoiceProfiler>();
   private memberReporter: MemberReporter;
+  private initiativeDistiller: InitiativeDistiller;
 
   getArbiter(jid: string): Arbiter | null {
     return this.arbiters.get(jid) ?? null;
@@ -79,6 +81,9 @@ export class App {
         this.bus.publish({ kind: 'report', count });
         this.bus.publish({ kind: 'status', status: this.statusPayload() });
       },
+    });
+    this.initiativeDistiller = new InitiativeDistiller(this.repo, this.ai, this.prompts, {
+      onDistilled: () => this.bus.publish({ kind: 'status', status: this.statusPayload() }),
     });
 
     this.loadLinkedGroups();
@@ -184,6 +189,32 @@ export class App {
     this.repo.deleteMemberReport(memberJid);
     this.prompts.memoryVersion += 1;
     this.bus.publish({ kind: 'report', count: 0 });
+  }
+
+  // ---- initiative learning ----
+  /** Store a flagged Influence (with its chat context) for the initiative distiller. */
+  recordInfluenceLesson(jid: string, text: string, why: string, target: string | null): void {
+    const context = this.prompts.formatTranscript(this.repo.getRecentMessages(jid, INITIATIVE.CONTEXT_MSGS), null);
+    const targetExcerpt = target ? (this.repo.getMessageByShortId(target)?.text ?? null) : null;
+    this.repo.insertInfluenceLesson(jid, text, why, targetExcerpt, context);
+    this.initiativeDistiller.maybeAuto();
+  }
+
+  distillInitiative(): Promise<DistillResult> {
+    return this.initiativeDistiller.run();
+  }
+
+  getInitiativeData(): { principles: { id: number; content: string; example: string | null }[]; pending: number; enabled: boolean } {
+    return {
+      principles: this.repo.getActiveInitiativePrinciples(),
+      pending: this.repo.countUndistilledLessons(),
+      enabled: this.repo.getConfig('initiative_enabled') === '1',
+    };
+  }
+
+  deleteInitiativePrinciple(id: number): void {
+    this.repo.deleteInitiativePrinciple(id);
+    this.prompts.memoryVersion += 1;
   }
 
   /** Full shutdown: disconnect WhatsApp entirely (linked device goes offline), keep dashboard up.
@@ -393,6 +424,7 @@ export class App {
       images_today: this.repo.imagesToday(),
       typing_indicators: this.repo.getConfig('typing_indicators') === '1',
       token_reduction: this.repo.getConfig('token_reduction') === '1',
+      initiative_enabled: this.repo.getConfig('initiative_enabled') === '1',
     };
   }
 

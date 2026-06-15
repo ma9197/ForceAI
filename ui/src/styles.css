@@ -151,8 +151,12 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent2); }
 .decision-row b { color: var(--text); }
 
 /* controls under feed */
-.controls { display: flex; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); background: var(--panel); }
+.controls { display: flex; align-items: flex-start; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); background: var(--panel); }
 .controls input { flex: 1; }
+.influence-box { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.influence-row { display: flex; gap: 8px; }
+.influence-learn { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; user-select: none; padding-left: 2px; }
+.influence-learn input[type="checkbox"] { flex: 0 0 auto; width: 16px; height: 16px; }
 
 /* tabs */
 .tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--panel); }
@@ -190,6 +194,13 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent2); }
 .settings-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--border); }
 .settings-row label { color: var(--text); }
 .settings-row .hint { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+/* AI initiative principles list */
+.initiative-panel { margin-top: 6px; }
+.initiative-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.initiative-item { display: flex; align-items: flex-start; gap: 8px; background: var(--panel); border: 1px solid var(--border); border-radius: 9px; padding: 8px 10px; font-size: 13px; line-height: 1.45; }
+.initiative-item:hover { border-color: var(--accent2); }
+.initiative-item button { padding: 1px 7px; font-size: 11px; flex: 0 0 auto; }
 
 /* ============================================================
    VOICE PROFILE — what the AI learned about the group's style

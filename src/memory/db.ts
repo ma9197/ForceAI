@@ -176,6 +176,26 @@ export function openDb(): Database.Database {
       jid         TEXT PRIMARY KEY,
       created_at  INTEGER
     );
+
+    -- owner Influences flagged "teach this", + the conservative initiative principles distilled from them
+    CREATE TABLE IF NOT EXISTS influence_lessons (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_jid       TEXT,
+      text           TEXT,        -- the influence instruction
+      why            TEXT,        -- the owner's rationale
+      target_excerpt TEXT,        -- the replied-to message, if any
+      context        TEXT,        -- short recent-transcript snapshot at the time
+      ts             INTEGER,
+      distilled      INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS initiative_principles (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      content       TEXT NOT NULL,
+      example       TEXT,
+      created_at    INTEGER,
+      superseded_by INTEGER,
+      UNIQUE(content)
+    );
   `);
 
   // migrations for DBs created before multi-group support

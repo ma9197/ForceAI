@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
+import { InitiativePrinciples } from './InitiativePrinciples';
 
 interface Settings {
   gatekeeper_model: string;
@@ -30,6 +31,7 @@ interface Settings {
   images_today: number;
   typing_indicators: boolean;
   token_reduction: boolean;
+  initiative_enabled: boolean;
 }
 
 const FREQ = ['off', 'rare', 'sometimes', 'often', 'always'];
@@ -430,6 +432,27 @@ export function SettingsPanel({ onSaved }: { onSaved: () => void }) {
           style={{ width: '100%', resize: 'vertical', fontFamily: 'inherit' }}
         />
       </div>
+
+      <h3 style={{ margin: '18px 0 4px' }}>AI initiative</h3>
+
+      <div className="settings-row">
+        <div>
+          <label>Let ForceAI take initiative</label>
+          <div className="hint">
+            Uses principles learned from your <b>"Teach this move"</b> Influences to occasionally take initiative
+            <i> within a live conversation</i> (a warm reply, a topic switch, a joke). It still stays quiet by
+            default and never texts out of nowhere. Turn off to ignore the learned principles entirely.
+          </div>
+        </div>
+        <input
+          type="checkbox"
+          checked={settings.initiative_enabled}
+          onChange={e => update({ initiative_enabled: e.target.checked })}
+          style={{ width: 18, height: 18 }}
+        />
+      </div>
+
+      <InitiativePrinciples />
     </div>
   );
 }

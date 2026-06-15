@@ -62,6 +62,15 @@ export const REPORT = {
   MAX_OUTPUT_TOKENS: 8000,
 } as const;
 
+// ---- Initiative learning (distill flagged Influences into "when to take initiative" principles) ----
+export const INITIATIVE = {
+  MODEL: 'claude-sonnet-4-6',
+  AUTO_DISTILL_AFTER: 5,    // auto-distill once this many new flagged lessons accumulate
+  MAX_ITEMS_IN_PROMPT: 20,  // cap principles injected into the bot's prompt
+  MAX_OUTPUT_TOKENS: 4000,
+  CONTEXT_MSGS: 12,         // recent messages captured as context with each flagged lesson
+} as const;
+
 // $/MTok pricing for cost accounting (input, output, cacheRead, cacheWrite)
 export const PRICING: Record<string, { in: number; out: number; cacheRead: number; cacheWrite: number }> = {
   'claude-sonnet-4-6': { in: 3, out: 15, cacheRead: 0.3, cacheWrite: 3.75 },

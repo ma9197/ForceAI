@@ -488,6 +488,53 @@ export class Repo {
     `).all(memberJid, sinceTs, limit) as { chat_jid: string; text: string; ts: number }[];
   }
 
+  // ---- initiative learning (flagged Influences -> distilled principles) ----
+  insertInfluenceLesson(chatJid: string, text: string, why: string, targetExcerpt: string | null, context: string): void {
+    this.db.prepare(
+      'INSERT INTO influence_lessons(chat_jid, text, why, target_excerpt, context, ts, distilled) VALUES(?, ?, ?, ?, ?, ?, 0)'
+    ).run(chatJid, text, why, targetExcerpt, context, Date.now());
+  }
+
+  countUndistilledLessons(): number {
+    return (this.db.prepare('SELECT COUNT(*) AS c FROM influence_lessons WHERE distilled = 0').get() as { c: number }).c;
+  }
+
+  getUndistilledLessons(): { id: number; text: string; why: string; target_excerpt: string | null; context: string }[] {
+    return this.db.prepare(
+      'SELECT id, text, why, target_excerpt, context FROM influence_lessons WHERE distilled = 0 ORDER BY ts ASC'
+    ).all() as { id: number; text: string; why: string; target_excerpt: string | null; context: string }[];
+  }
+
+  markLessonsDistilled(ids: number[]): void {
+    if (!ids.length) return;
+    this.db.prepare(`UPDATE influence_lessons SET distilled = 1 WHERE id IN (${ids.map(() => '?').join(',')})`).run(...ids);
+  }
+
+  insertInitiativePrinciple(content: string, example: string | null): number | null {
+    try {
+      const res = this.db.prepare(
+        'INSERT INTO initiative_principles(content, example, created_at) VALUES(?, ?, ?)'
+      ).run(content, example, Date.now());
+      return Number(res.lastInsertRowid);
+    } catch {
+      return null; // UNIQUE(content) — already have this principle
+    }
+  }
+
+  supersedeInitiativePrinciple(oldId: number, newId: number): void {
+    this.db.prepare('UPDATE initiative_principles SET superseded_by = ? WHERE id = ?').run(newId, oldId);
+  }
+
+  getActiveInitiativePrinciples(): { id: number; content: string; example: string | null }[] {
+    return this.db.prepare(
+      'SELECT id, content, example FROM initiative_principles WHERE superseded_by IS NULL ORDER BY created_at ASC'
+    ).all() as { id: number; content: string; example: string | null }[];
+  }
+
+  deleteInitiativePrinciple(id: number): void {
+    this.db.prepare('DELETE FROM initiative_principles WHERE id = ?').run(id);
+  }
+
   // ---- stickers ----
   insertSticker(filePath: string, sha256: string): { id: number; existed: boolean } {
     const existing = this.db.prepare('SELECT id FROM stickers WHERE sha256 = ?').get(sha256) as { id: number } | undefined;

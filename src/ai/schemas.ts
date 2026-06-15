@@ -106,13 +106,13 @@ export const VoiceProfileSchema = z.object({
 const StatJudgmentSchema = z.object({
   value: z.number().describe('Numeric score. mood & aggression: 0-100. iq: a playful sharpness score, roughly 55-145.'),
   label: z.string().describe('One or two word descriptor, e.g. "upbeat", "sharp", "heated", "chill".'),
-  reason: z.string().describe('One short line: why this value, or what changed since last week (the basis for the move).'),
+  reason: z.string().describe('One short line describing the PATTERN behind the value (e.g. "consistently sharp takes", "quieter than usual") — not a play-by-play of one incident.'),
 });
 
 export const MemberReportSchema = z.object({
-  bio: z.string().describe('2-5 sentence evolving portrait: their texting personality, how they deal with others, recurring traits, overall vibe. Refine the prior bio rather than rewriting from scratch.'),
-  talking_style: z.string().describe('Short phrase capturing how they text.'),
-  week_summary: z.string().describe('1-2 lines on what they were up to / anything notable this period.'),
+  bio: z.string().describe('2-5 sentences of ENDURING character: how they text, their usual mood, humour, roast-vs-support tendency, toxicity, signature words, social role. Describe WHO they are, not what happened — NO specific incidents, quotes or retold stories. Refine the prior bio (strip any incidents out of it), don\'t rewrite from scratch.'),
+  talking_style: z.string().describe('Short phrase capturing how they text (timeless, not event-driven).'),
+  week_summary: z.string().describe('1-2 lines — THIS PERIOD\'s actual activity and any notable incidents. The place for event-specific colour (kept out of the bio).'),
   mood: StatJudgmentSchema.describe('Mood & energy. 0 = low/down, 100 = upbeat/high-energy.'),
   iq: StatJudgmentSchema.describe('Playful "sharpness" — based on argument quality, wit, references, coherence. NOT a real IQ test. ~55-145.'),
   aggression: StatJudgmentSchema.describe('Temperament. 0 = calm/gentle, 100 = heated/aggressive.'),
@@ -128,6 +128,15 @@ export const BatchReportSchema = z.object({
 
 export type MemberReportOut = z.infer<typeof MemberReportSchema>;
 export type BatchReportOut = z.infer<typeof BatchReportSchema>;
+
+export const InitiativePrinciplesSchema = z.object({
+  principles: z.array(z.object({
+    content: z.string().describe('A general, reusable principle: a recognizable SITUATION + the kind of proactive move that fits it (e.g. "when someone shares a vulnerable / emotional moment, respond with warmth — a kind line or a fitting image, not a generic reply"). Broadly applicable and conservative — NOT a copy of one specific action.'),
+    example: z.string().nullable().describe('Optional one-line illustration of the situation, else null.'),
+    supersedes_id: z.number().nullable().describe('Id of an existing principle this refines/replaces, else null.'),
+  })).describe('New or refined initiative principles. Only genuinely reusable, conservative ones — the bot stays quiet by default.'),
+});
+export type InitiativePrinciplesOut = z.infer<typeof InitiativePrinciplesSchema>;
 
 export type GateResultOut = z.infer<typeof GateResultSchema>;
 export type ActionPlanOut = z.infer<typeof ActionPlanSchema>;

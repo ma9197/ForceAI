@@ -50,23 +50,31 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     return { ok: true };
   });
 
-  fastify.post<{ Body: { jid: string; text?: string; target?: string } }>('/api/influence', async (req, reply) => {
+  fastify.post<{ Body: { jid: string; text?: string; why?: string; target?: string; learn?: boolean } }>('/api/influence', async (req, reply) => {
     const text = req.body?.text?.trim();
+    const why = req.body?.why?.trim();
     const target = req.body?.target?.trim();
     const jid = req.body?.jid;
     if (!text && !target) return reply.code(400).send({ error: 'text or target required' });
     const arbiter = jid ? app.getArbiter(jid) : null;
     if (!arbiter) return reply.code(409).send({ error: 'group not linked' });
 
+    // the bot may take initiative here — not only a literal reply — when it serves the intent
+    const initiative = 'You may do more than a bare reply when it serves this — add a follow-up, switch the topic, or generate an image / poll / voice note if it genuinely fits. Keep it natural and in-character.';
+    const intent = why ? ` The owner's intent (why this is a good move — honour it, never quote it): ${why}.` : '';
+
     let instruction: string;
     if (target && text) {
-      instruction = `Quote-reply to message #${target} (use a "reply" action with target_message_id "${target}"). What to say: ${text}. Deliver it in-character.`;
+      instruction = `Address message #${target} (anchor a "reply" action on target_message_id "${target}"). What to do: ${text}.${intent} ${initiative}`;
     } else if (target) {
-      instruction = `Quote-reply to message #${target} (use a "reply" action with target_message_id "${target}") with whatever fits the moment and your character.`;
+      instruction = `Engage message #${target} (anchor a "reply" action on target_message_id "${target}") in whatever way fits the moment.${intent} ${initiative}`;
     } else {
-      instruction = `Steer the conversation: ${text}. Do it smoothly in-character.`;
+      instruction = `Take the lead in the conversation: ${text}.${intent} ${initiative}`;
     }
     arbiter.forceGenerate(instruction, target ? 'REPLY_TO' : 'INFLUENCE');
+
+    // teaching moment: store it for the initiative distiller to learn from
+    if (req.body?.learn && jid) app.recordInfluenceLesson(jid, text ?? '', why ?? '', target ?? null);
     return { ok: true };
   });
 
@@ -268,6 +276,14 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
   fastify.get('/api/people/ignored', async () =>
     app.repo.getIgnoredJids().map(jid => ({ jid, name: app.repo.getMember(jid)?.display_name ?? jid.split('@')[0] })));
 
+  // ---- initiative learning (principles distilled from flagged Influences) ----
+  fastify.get('/api/initiative', async () => app.getInitiativeData());
+  fastify.post('/api/initiative/distill', async () => app.distillInitiative());
+  fastify.delete<{ Params: { id: string } }>('/api/initiative/:id', async (req) => {
+    app.deleteInitiativePrinciple(Number(req.params.id));
+    return { ok: true };
+  });
+
   fastify.get('/api/stickers', async () => app.repo.getStickers());
 
   fastify.get<{ Params: { id: string } }>('/api/stickers/:id/image', async (req, reply) => {
@@ -343,7 +359,7 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     intro_message?: string; intro_enabled?: boolean; rate_per_min?: number; rate_per_hour?: number;
     super_idle_minutes?: number;
     image_enabled?: boolean; image_model?: string; image_freq?: string; images_per_day?: number;
-    typing_indicators?: boolean; token_reduction?: boolean;
+    typing_indicators?: boolean; token_reduction?: boolean; initiative_enabled?: boolean;
   } }>(
     '/api/settings',
     async (req) => {
@@ -422,6 +438,10 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
       }
       if (b.token_reduction !== undefined) {
         app.repo.setConfig('token_reduction', b.token_reduction ? '1' : '0');
+      }
+      if (b.initiative_enabled !== undefined) {
+        app.repo.setConfig('initiative_enabled', b.initiative_enabled ? '1' : '0');
+        app.prompts.memoryVersion += 1; // toggles the Block B initiative section
       }
       return settingsPayload(app);
     },

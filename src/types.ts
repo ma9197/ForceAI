@@ -229,5 +229,6 @@ export interface StatusPayload {
     images_today: number;
     typing_indicators: boolean;
     token_reduction: boolean;
+    initiative_enabled: boolean;
   };
 }

@@ -23,6 +23,8 @@ export default function App() {
   const [showPicker, setShowPicker] = useState(false);
   const [selectedJid, setSelectedJid] = useState<string | null>(null);
   const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null);
+  const [why, setWhy] = useState(''); // optional rationale behind an Influence
+  const [learn, setLearn] = useState(false); // teach the bot initiative from this move
   const [mobileView, setMobileView] = useState<'chat' | 'side'>('chat'); // mobile: chat vs side panel
   // draggable divider between feed and the controls/tabs panel (desktop). Persisted across reloads.
   const [sideWidth, setSideWidth] = useState<number | null>(() => {
@@ -119,8 +121,10 @@ export default function App() {
   const sendInfluence = async () => {
     const text = influence.trim();
     if ((!text && !replyTarget) || !selectedJid) return;
-    await post('/api/influence', { jid: selectedJid, text, target: replyTarget?.shortId });
+    await post('/api/influence', { jid: selectedJid, text, why: why.trim(), target: replyTarget?.shortId, learn });
     setInfluence('');
+    setWhy('');
+    setLearn(false);
     setReplyTarget(null);
   };
 
@@ -220,17 +224,31 @@ export default function App() {
               )}
               <div className="controls">
                 {!hideInfluence && (
-                  <>
-                    <input
-                      placeholder={replyTarget
-                        ? 'Optional: what should the reply be about? (empty = its own choice)'
-                        : `Influence ${selected?.name ?? 'this group'}: tell ForceAI what to bring up…`}
-                      value={influence}
-                      onChange={e => setInfluence(e.target.value)}
-                      onKeyDown={e => e.key === 'Enter' && sendInfluence()}
-                    />
-                    <button className="primary" onClick={sendInfluence}>{replyTarget ? 'Reply ↩' : 'Influence ⚡'}</button>
-                  </>
+                  <div className="influence-box">
+                    <div className="influence-row">
+                      <input
+                        className="influence-main"
+                        placeholder={replyTarget
+                          ? 'Optional: what should the reply be about? (empty = its own choice)'
+                          : `Influence ${selected?.name ?? 'this group'}: tell ForceAI what to bring up…`}
+                        value={influence}
+                        onChange={e => setInfluence(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && sendInfluence()}
+                      />
+                      <input
+                        className="influence-why"
+                        placeholder={replyTarget ? 'Why reply this way? (optional)' : 'Why this helps (optional)'}
+                        value={why}
+                        onChange={e => setWhy(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && sendInfluence()}
+                      />
+                      <button className="primary" onClick={sendInfluence}>{replyTarget ? 'Reply ↩' : 'Influence ⚡'}</button>
+                    </div>
+                    <label className="influence-learn" title="Save this as a teaching moment — the bot distills these into its own sense of when to take initiative">
+                      <input type="checkbox" checked={learn} onChange={e => setLearn(e.target.checked)} />
+                      Teach this move <span className="muted">(learn initiative from it)</span>
+                    </label>
+                  </div>
                 )}
                 <button onClick={() => selectedJid && post('/api/continue', { jid: selectedJid })}>Continue ▶</button>
                 <button onClick={() => selectedJid && post('/api/sleep', { jid: selectedJid })} title="Put ForceAI to sleep until someone says 'ForceAI'">Sleep 💤</button>
