@@ -266,13 +266,20 @@ export class App {
     const isLinkedGroup = this.linkedGroups.has(norm.chatJid);
     if (!isSelfChat && !isLinkedGroup) return; // ignore every other chat
 
+    const fresh = Date.now() - norm.ts < 120_000; // never act on stale backlog re-deliveries
+
     this.repo.insertMessage(norm);
     this.store.put(norm.id, norm.shortId, norm.raw);
+
+    // pull image/sticker media from the LIVE message (real buffers) so the dashboard feed can render
+    // it — covers inbound AND bot-sent. Also makes inbound images visible to Claude's vision (below).
+    if (isLinkedGroup && fresh && (norm.type === 'image' || norm.type === 'sticker')) {
+      await this.downloadMedia(norm.id, norm.raw, norm.type);
+    }
+
     this.bus.publish({ kind: 'message', chatJid: norm.chatJid, message: toFeed(norm) });
 
     if (source === 'sent') return; // our own send — recorded, nothing to react to
-
-    const fresh = Date.now() - norm.ts < 120_000; // never act on stale backlog re-deliveries
 
     if (isSelfChat) {
       if (fresh) void this.stickers.onSelfChatMessage(norm);
@@ -280,11 +287,7 @@ export class App {
     }
 
     if (isLinkedGroup) {
-      // download inbound images BEFORE the arbiter runs, so Claude can see them — this
-      // also covers owner "Admin: describe this image" on a captioned image (immediate gen).
-      if (norm.type === 'image' && !norm.isBot && fresh) {
-        await this.downloadImage(norm.id, norm.raw);
-      }
+      // (image/sticker media was already fetched above, before the feed publish + the arbiter)
       const arb = this.arbiters.get(norm.chatJid);
       arb?.onMessage(norm); // arbiter has its own staleness + isBot guards
       if (!norm.isBot && fresh) {
@@ -297,18 +300,49 @@ export class App {
     }
   }
 
-  private async downloadImage(messageId: string, raw: WAMessage): Promise<void> {
+  /** Download an image/sticker from the LIVE message (real buffers) and cache it locally. */
+  private async downloadMedia(messageId: string, raw: WAMessage, type: string): Promise<void> {
     try {
       const sock = this.conn.sock;
       const buffer = await downloadMediaMessage(raw, 'buffer', {}, sock ? {
         logger: waLogger,
         reuploadRequest: sock.updateMediaMessage,
       } : undefined as any);
-      const filePath = path.join(IMAGE_DIR, `${messageId.replace(/[^a-zA-Z0-9_-]/g, '_')}.jpg`);
-      fs.writeFileSync(filePath, buffer);
+      const ext = type === 'sticker' ? 'webp' : 'jpg';
+      const filePath = path.join(IMAGE_DIR, `${messageId.replace(/[^a-zA-Z0-9_-]/g, '_')}.${ext}`);
+      fs.writeFileSync(filePath, buffer as Buffer);
       this.repo.setMediaPath(messageId, filePath);
     } catch (err) {
-      logger.debug({ err, messageId }, 'inbound image download failed');
+      logger.debug({ err, messageId, type }, 'media download failed');
+    }
+  }
+
+  /**
+   * Serve a message's image/sticker media for the dashboard feed. Lazily downloads + caches it from
+   * the stored raw message the first time it's viewed — covers inbound AND bot-sent, images AND
+   * stickers, without touching the hot message path.
+   */
+  async getMediaFile(id: string): Promise<{ path: string; contentType: string } | null> {
+    const row = this.repo.getMessageById(id) as { type?: string; media_path?: string | null; raw?: string } | undefined;
+    if (!row || (row.type !== 'image' && row.type !== 'sticker')) return null;
+    const contentType = row.type === 'sticker' ? 'image/webp' : 'image/jpeg';
+    if (row.media_path && fs.existsSync(row.media_path)) return { path: row.media_path, contentType };
+    try {
+      const raw = row.raw ? JSON.parse(row.raw) as WAMessage : null;
+      if (!raw) return null;
+      const sock = this.conn.sock;
+      const buffer = await downloadMediaMessage(raw, 'buffer', {}, sock ? {
+        logger: waLogger,
+        reuploadRequest: sock.updateMediaMessage,
+      } : undefined as any);
+      const ext = row.type === 'sticker' ? 'webp' : 'jpg';
+      const filePath = path.join(IMAGE_DIR, `${id.replace(/[^a-zA-Z0-9_-]/g, '_')}.${ext}`);
+      fs.writeFileSync(filePath, buffer as Buffer);
+      this.repo.setMediaPath(id, filePath);
+      return { path: filePath, contentType };
+    } catch (err) {
+      logger.debug({ err, id }, 'feed media download failed');
+      return null;
     }
   }
 

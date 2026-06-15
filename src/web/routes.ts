@@ -284,6 +284,13 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     return { ok: true };
   });
 
+  // feed media: an image/sticker from any message (inbound or bot-sent), lazily fetched + cached
+  fastify.get<{ Params: { id: string } }>('/api/media/:id', async (req, reply) => {
+    const media = await app.getMediaFile(decodeURIComponent(req.params.id));
+    if (!media) return reply.code(404).send({ error: 'no media' });
+    return reply.type(media.contentType).send(fs.createReadStream(media.path));
+  });
+
   fastify.get('/api/stickers', async () => app.repo.getStickers());
 
   fastify.get<{ Params: { id: string } }>('/api/stickers/:id/image', async (req, reply) => {
