@@ -353,7 +353,7 @@ From the transcript chunk, extract the group's recurring TEXTING STYLE — NOT f
 - joke: running jokes and recurring bits.
 - reference: inside references, nicknames, memes the group reuses.
 - pattern: general texting habits — cadence, message length, emoji usage, capitalization, how/when they switch languages.
-- member_style: how a SPECIFIC member texts (set member_jid to their jid).
+- member_style: how a SPECIFIC member texts (set member_jid to their jid). Keep building each member up over time — add new facets as you notice them, or sharpen an existing note via supersedes_id. A member's style should grow richer the more they talk.
 
 RULES:
 - Only capture RECURRING, characteristic style — things that show up more than once or are clearly a defining trait. Ignore one-off lines.
