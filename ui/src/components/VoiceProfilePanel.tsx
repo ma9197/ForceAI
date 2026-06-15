@@ -4,7 +4,7 @@ import { api, post, type VoiceItem, type VoiceProfile } from '../api';
 /** Friendly labels + icons for each voice-item category the profiler emits. */
 const CATS: { key: string; label: string; icon: string; blurb: string }[] = [
   { key: 'phrase',       label: 'Phrases & sayings', icon: '💬', blurb: 'Recurring expressions the group says' },
-  { key: 'slang',        label: 'Slang & vocab',     icon: '🔤', blurb: 'Their words, abbreviations & spellings' },
+  { key: 'slang',        label: 'Slang & vocab',     icon: '🔤', blurb: 'Their words & abbreviations — shared across all your groups' },
   { key: 'joke',         label: 'Inside jokes',      icon: '😂', blurb: 'Running bits & callbacks' },
   { key: 'reference',    label: 'References',         icon: '🔗', blurb: 'People, places & things they bring up' },
   { key: 'pattern',      label: 'Talking patterns',  icon: '🌀', blurb: 'How they text — rhythm, punctuation, energy' },

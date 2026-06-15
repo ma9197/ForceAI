@@ -184,6 +184,16 @@ export class Repo {
     ).all(chatJid) as import('../types.js').VoiceItemRow[];
   }
 
+  /**
+   * All active slang/vocab items across EVERY group. Slang is shared brain-wide — a word the bot
+   * learns in one chat is usable everywhere — while storage stays per-group for provenance/management.
+   */
+  getAllSlang(): import('../types.js').VoiceItemRow[] {
+    return this.db.prepare(
+      "SELECT * FROM voice_items WHERE category = 'slang' AND superseded_by IS NULL ORDER BY created_at ASC"
+    ).all() as import('../types.js').VoiceItemRow[];
+  }
+
   deleteVoiceItem(id: number): void {
     this.db.prepare('DELETE FROM voice_items WHERE id = ?').run(id);
   }

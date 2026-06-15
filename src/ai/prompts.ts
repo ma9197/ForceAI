@@ -1,5 +1,6 @@
 import { BOT_NAME, MEMORY, VOICE_PROFILE } from '../config.js';
 import type { Repo } from '../memory/repo.js';
+import type { VoiceItemRow } from '../types.js';
 import type { PollTracker } from '../wa/polls.js';
 import { loadTrainingData } from './fewshots.js';
 
@@ -219,18 +220,39 @@ export class PromptBuilder {
     return text;
   }
 
-  /** GROUP VOICE PROFILE section for Block B — the group's learned texting style. Deterministic (cache-safe). */
+  /**
+   * GROUP VOICE PROFILE section for Block B. Most categories reflect THIS group's style, but
+   * slang/vocab is shared brain-wide: words the bot learned in ANY group are usable everywhere
+   * (storage stays per-group; this only affects what the bot is told it knows). Deterministic.
+   */
   private buildVoiceProfileBlock(chatJid: string): string {
-    const items = this.repo.getVoiceItems(chatJid).slice(0, VOICE_PROFILE.MAX_ITEMS_IN_PROMPT);
     const overview = (this.repo.getVoiceOverview(chatJid) ?? '').trim();
-    if (items.length === 0 && !overview) return ''; // nothing learned yet — omit the section entirely
+
+    // everything EXCEPT slang stays scoped to this group (jokes/references/member-styles are group-specific)
+    const groupItems = this.repo.getVoiceItems(chatJid)
+      .filter(i => i.category !== 'slang')
+      .slice(0, VOICE_PROFILE.MAX_ITEMS_IN_PROMPT);
+
+    // slang/vocab pooled across ALL groups, deduped by lowercased content (same word may be saved
+    // in several chats). Deterministic order (created_at) keeps Block B cache-stable.
+    const slangSeen = new Set<string>();
+    const slangItems: VoiceItemRow[] = [];
+    for (const s of this.repo.getAllSlang()) {
+      const key = s.content.trim().toLowerCase();
+      if (slangSeen.has(key)) continue;
+      slangSeen.add(key);
+      slangItems.push(s);
+      if (slangItems.length >= VOICE_PROFILE.MAX_ITEMS_IN_PROMPT) break;
+    }
+
+    if (groupItems.length === 0 && slangItems.length === 0 && !overview) return ''; // nothing learned yet
 
     const members = this.repo.getMembersForChat(chatJid);
     const nameFor = (jid: string | null) => (jid && members.find(m => m.jid === jid)?.display_name) || (jid ? jid.split('@')[0] : '');
 
     const headers: Record<string, string> = {
       phrase: 'Phrases & catchphrases they use',
-      slang: 'Slang & words (with meaning)',
+      slang: "Slang & words you know (with meaning) — vocab you've picked up across ALL your chats; use it freely anywhere. If anyone asks where you learned a word, you can just say you picked it up in another chat",
       joke: 'Running jokes & bits',
       reference: 'Inside references / nicknames / memes',
       pattern: 'Texting patterns (cadence, emoji, language-mixing)',
@@ -238,7 +260,7 @@ export class PromptBuilder {
     };
     const sections: string[] = [];
     for (const cat of Object.keys(headers)) {
-      const list = items.filter(i => i.category === cat);
+      const list = cat === 'slang' ? slangItems : groupItems.filter(i => i.category === cat);
       if (list.length === 0) continue;
       const lines = list.map(i => {
         const who = i.category === 'member_style' && i.member_jid ? `${nameFor(i.member_jid)}: ` : '';
