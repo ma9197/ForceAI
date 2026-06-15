@@ -6,7 +6,7 @@ import { logger, waLogger } from './logger.js';
 import { openDb } from './memory/db.js';
 import { Repo } from './memory/repo.js';
 import { FactExtractor } from './memory/extractor.js';
-import { VoiceProfiler } from './memory/voice.js';
+import { VoiceProfiler, type VoiceLearnResult } from './memory/voice.js';
 import { JidResolver } from './wa/jid.js';
 import { WaConnection } from './wa/connection.js';
 import { Normalizer } from './wa/inbound.js';
@@ -315,6 +315,20 @@ export class App {
 
   sleepGroup(jid: string): void {
     this.arbiters.get(jid)?.sleep();
+  }
+
+  /** Manual voice-learn: deep re-scan of stored chat history for this group. */
+  learnVoiceFromChat(jid: string): Promise<VoiceLearnResult> {
+    const vp = this.voiceProfilers.get(jid);
+    if (!vp) return Promise.resolve({ status: 'empty', learned: 0 });
+    return vp.learnFromChat();
+  }
+
+  /** Manual voice-learn: mine the group's stored facts + summary for voice style. */
+  learnVoiceFromMemory(jid: string): Promise<VoiceLearnResult> {
+    const vp = this.voiceProfilers.get(jid);
+    if (!vp) return Promise.resolve({ status: 'empty', learned: 0 });
+    return vp.learnFromMemory();
   }
 
   setPaused(jid: string, paused: boolean): void {

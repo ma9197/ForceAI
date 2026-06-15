@@ -103,6 +103,7 @@ export const VOICE_PROFILE = {
   IDLE_MS: 8 * 60_000,     // or after a lull with enough backlog
   IDLE_MIN_MSGS: 20,
   MAX_ITEMS_IN_PROMPT: 50, // cap items injected into the generation prompt (keeps it cheap)
+  MANUAL_CHAT_MSGS: 500,   // how many recent messages a manual "learn from chat" scan reads
 } as const;
 
 // ---- ElevenLabs voice ----

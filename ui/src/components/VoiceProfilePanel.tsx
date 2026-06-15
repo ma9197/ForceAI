@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { api, type VoiceProfile } from '../api';
+import { useCallback, useEffect, useState } from 'react';
+import { api, post, type VoiceProfile } from '../api';
 
 /** Friendly labels + icons for each voice-item category the profiler emits. */
 const CATS: { key: string; label: string; icon: string; blurb: string }[] = [
@@ -11,12 +11,47 @@ const CATS: { key: string; label: string; icon: string; blurb: string }[] = [
   { key: 'member_style', label: 'Per-member style',  icon: '🧑', blurb: 'How individuals sound' },
 ];
 
+type LearnResult = { status: string; learned: number };
+
+function messageFor(res: LearnResult, source: 'chat' | 'memory'): string {
+  switch (res.status) {
+    case 'ok':
+      return res.learned > 0
+        ? `✓ Learned ${res.learned} new voice ${res.learned === 1 ? 'note' : 'notes'}.`
+        : '✓ Already up to date — nothing new found.';
+    case 'empty':
+      return source === 'chat' ? 'No chat history stored yet to scan.' : 'No memory to mine yet.';
+    case 'busy':   return 'Already analyzing — give it a moment, then try again.';
+    case 'budget': return 'Skipped — daily budget reached.';
+    default:       return 'Something went wrong — try again.';
+  }
+}
+
 export function VoiceProfilePanel({ jid, version }: { jid: string; version: number }) {
   const [profile, setProfile] = useState<VoiceProfile | null>(null);
+  const [busy, setBusy] = useState<null | 'chat' | 'memory'>(null);
+  const [feedback, setFeedback] = useState<string | null>(null);
 
-  useEffect(() => {
-    api<VoiceProfile>(`/api/voice?jid=${encodeURIComponent(jid)}`).then(setProfile).catch(() => undefined);
-  }, [jid, version]);
+  const reload = useCallback(() => {
+    return api<VoiceProfile>(`/api/voice?jid=${encodeURIComponent(jid)}`).then(setProfile).catch(() => undefined);
+  }, [jid]);
+
+  useEffect(() => { void reload(); }, [reload, version]);
+
+  const learn = async (source: 'chat' | 'memory') => {
+    if (busy) return;
+    setBusy(source);
+    setFeedback(null);
+    try {
+      const res = (await post('/api/voice/learn', { jid, source })) as LearnResult;
+      setFeedback(messageFor(res, source));
+      await reload();
+    } catch {
+      setFeedback('Something went wrong — try again.');
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const deleteItem = async (id: number) => {
     await fetch(`/api/voice/${id}`, { method: 'DELETE' });
@@ -37,6 +72,19 @@ export function VoiceProfilePanel({ jid, version }: { jid: string; version: numb
         </p>
       </div>
 
+      <div className="voice-actions">
+        <button disabled={!!busy} onClick={() => learn('chat')} title="Re-read your saved chat history and pull fresh voice notes">
+          {busy === 'chat' ? '⏳ Scanning chat…' : '🔄 Learn from chat'}
+        </button>
+        <button disabled={!!busy} onClick={() => learn('memory')} title="Mine the bot's saved facts & summary for voice-relevant style">
+          {busy === 'memory' ? '⏳ Mining memory…' : '🧠 Learn from memory'}
+        </button>
+        {feedback && <span className="voice-feedback">{feedback}</span>}
+      </div>
+      <p className="voice-actions-hint muted">
+        Pull a fresh update on demand. Safe to run anytime — it only adds what's genuinely new, never duplicates.
+      </p>
+
       {profile?.overview && (
         <div className="voice-overview">
           <span className="voice-overview-label">The vibe</span>
@@ -46,7 +94,7 @@ export function VoiceProfilePanel({ jid, version }: { jid: string; version: numb
 
       {total === 0 ? (
         <p className="muted" style={{ fontSize: 13 }}>
-          Nothing learned yet — once the group racks up ~50 messages, ForceAI starts taking notes here.
+          Nothing learned yet — chat for a bit, or hit <b>Learn from chat</b> / <b>Learn from memory</b> above to pull what's already stored.
         </p>
       ) : (
         <p className="muted" style={{ fontSize: 11, margin: '0 0 10px' }}>

@@ -186,7 +186,15 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent2); }
    VOICE PROFILE — what the AI learned about the group's style
    ============================================================ */
 .voice-intro h3 { margin: 0 0 4px; font-size: 15px; }
-.voice-intro p { margin: 0 0 14px; font-size: 12px; line-height: 1.5; }
+.voice-intro p { margin: 0 0 12px; font-size: 12px; line-height: 1.5; }
+
+/* manual "learn now" toolbar */
+.voice-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.voice-actions button { font-size: 12px; padding: 7px 12px; }
+.voice-actions button:disabled { opacity: 0.55; cursor: default; }
+.voice-actions button:disabled:hover { border-color: var(--border); }
+.voice-feedback { font-size: 12px; color: var(--accent); flex-basis: 100%; }
+.voice-actions-hint { font-size: 11px; margin: 6px 0 14px; line-height: 1.45; }
 
 /* the AI's free-text summary of the group "vibe" — quote-card treatment */
 .voice-overview {

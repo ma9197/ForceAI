@@ -137,6 +137,17 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     return { ok: true };
   });
 
+  // Manual on-demand voice learning. source: 'chat' = deep re-scan of stored history,
+  // 'memory' = mine the group's facts + summary. Safe to click repeatedly: a concurrency
+  // guard rejects overlaps (status 'busy') and dedup means re-runs only ever add new items.
+  fastify.post<{ Body: { jid?: string; source?: 'chat' | 'memory' } }>('/api/voice/learn', async (req, reply) => {
+    const { jid, source } = req.body ?? {};
+    if (!jid) return reply.code(400).send({ error: 'jid required' });
+    return source === 'memory'
+      ? await app.learnVoiceFromMemory(jid)
+      : await app.learnVoiceFromChat(jid);
+  });
+
   fastify.get('/api/stickers', async () => app.repo.getStickers());
 
   fastify.get<{ Params: { id: string } }>('/api/stickers/:id/image', async (req, reply) => {
