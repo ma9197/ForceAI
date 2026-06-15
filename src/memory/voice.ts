@@ -150,7 +150,7 @@ export class VoiceProfiler {
 
       const response = await this.ai.client.messages.parse({
         model: VOICE_PROFILE_MODEL, // pinned to Sonnet — style capture is quality-sensitive (see config)
-        max_tokens: 2500,
+        max_tokens: VOICE_PROFILE.MAX_OUTPUT_TOKENS, // high enough that rich scans don't truncate the JSON
         system: VOICE_PROFILER_SYSTEM,
         messages: [{
           role: 'user',

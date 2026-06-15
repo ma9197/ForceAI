@@ -337,5 +337,6 @@ RULES:
 - Only capture RECURRING, characteristic style — things that show up more than once or are clearly a defining trait. Ignore one-off lines.
 - Do NOT duplicate items already in the provided known-items list. To refine/replace an existing one, set supersedes_id to its id.
 - Be terse and concrete. Quote real examples in the "example" field when helpful.
+- Output at most ~40 items per response — if there's more, keep only the strongest, most characteristic ones (re-runs can capture the rest later).
 - Keep it tasteful for emulation — capture HOW they talk, never private/sensitive personal info.
 - Also maintain a 2-4 sentence "overview" of the group's overall voice; rewrite it only if this chunk sharpens it, else null.`;

@@ -104,6 +104,9 @@ export const VOICE_PROFILE = {
   IDLE_MIN_MSGS: 20,
   MAX_ITEMS_IN_PROMPT: 50, // cap items injected into the generation prompt (keeps it cheap)
   MANUAL_CHAT_MSGS: 500,   // how many recent messages a manual "learn from chat" scan reads
+  MAX_OUTPUT_TOKENS: 8000, // ceiling for the profiler's JSON output — must be high enough that a
+                           // rich scan (esp. a deep memory/chat re-scan) isn't truncated mid-JSON,
+                           // which makes structured-output parsing throw. Only generated tokens cost.
 } as const;
 
 // ---- ElevenLabs voice ----
