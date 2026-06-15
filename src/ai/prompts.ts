@@ -119,7 +119,8 @@ export const PERSONA_PRESETS: Record<string, { label: string; text: string }> = 
 
 const OUTPUT_CONTRACT = `OUTPUT:
 You always answer with a JSON action plan. Target messages by their short id (#mNN shown in the transcript — use "m41" form without #). Keep "note" to one short line.
-Your past messages in the transcript may show a marker (like 🤖) at the start — that marker is added automatically when sending. NEVER write the marker yourself in your action text.`;
+Your past messages in the transcript may show a marker (like 🤖) at the start — that marker is added automatically when sending. NEVER write the marker yourself in your action text.
+"observation" is OPTIONAL and PRIVATE — a single sentence about a person you just engaged (their mood, a trait, behavior, something notable), saved for your owner's weekly read on people. It is NEVER shown in the chat. Set about_message_id to one of THAT person's messages. Only fill it when you genuinely notice something worth remembering; otherwise null. This is your own quiet read on everyone, building up over time.`;
 
 export class PromptBuilder {
   private blockA: string;
@@ -182,6 +183,7 @@ export class PromptBuilder {
     const summary = this.repo.getSummary(chatJid)?.summary ?? '(no summary yet)';
 
     const voiceProfileBlock = this.buildVoiceProfileBlock(chatJid);
+    const memberReadBlock = this.buildMemberReadBlock(chatJid);
 
     const voiceEnabled = this.repo.getConfig('voice_enabled') === '1' && !!process.env.ELEVENLABS_API_KEY;
     const imageEnabled = this.repo.getConfig('image_enabled') === '1' && !!process.env.GEMINI_API_KEY;
@@ -212,6 +214,7 @@ export class PromptBuilder {
         ? `CHARACTER ADJUSTMENT (set by your owner — adjusts your mood/style on top of your core persona; core rules still apply):\n${adjustment}`
         : '',
       `GROUP MEMBERS YOU KNOW (facts you have learned about them):\n${memberLines || '(nobody yet)'}`,
+      memberReadBlock,
       voiceProfileBlock,
       `YOUR STICKER LIBRARY (send by id when one truly fits):\n${stickerLines}`,
       `RUNNING GROUP SUMMARY (what has been going on):\n${summary}`,
@@ -219,6 +222,29 @@ export class PromptBuilder {
 
     this.blockBCache.set(chatJid, { text, builtAt: now, version: this.memoryVersion });
     return text;
+  }
+
+  /**
+   * Subtle per-person "read" from the latest weekly dossiers — tone guidance only, never raw
+   * numbers. Lets the bot tailor how it talks to each person. Deterministic (cache-safe).
+   */
+  private buildMemberReadBlock(chatJid: string): string {
+    const members = this.repo.getMembersForChat(chatJid);
+    const lines: string[] = [];
+    for (const m of members) {
+      const rep = this.repo.getLatestReport(m.jid);
+      const gist = rep?.bio?.split(/(?<=[.!?])\s/)[0] || rep?.talking_style || '';
+      if (!gist) continue;
+      const stats = this.repo.getLatestStats(m.jid);
+      const vibe = [
+        stats.find(s => s.stat_key === 'mood')?.label,
+        stats.find(s => s.stat_key === 'aggression')?.label,
+      ].filter(Boolean).join(', ');
+      const name = m.display_name ?? m.jid.split('@')[0];
+      lines.push(`- ${name}: ${gist}${vibe ? ` (lately: ${vibe})` : ''}`);
+    }
+    if (lines.length === 0) return '';
+    return `WHO'S WHO — your private read on each person (use it to tailor HOW you talk to them; never recite it or quote stats/numbers in chat):\n${lines.join('\n')}`;
   }
 
   /**

@@ -61,6 +61,13 @@ export const ActionPlanSchema = z.object({
     'Actions executed in order. Usually 1, max 4. Use [{"type":"nothing"}] to stay silent.'
   ),
   note: z.string().describe('One-line internal rationale (shown only on the operator dashboard).'),
+  observation: z.object({
+    about_message_id: z.string().describe('Short id (like m41) of a message from the PERSON this note is about.'),
+    note: z.string().describe('One private sentence about that person for the owner\'s weekly report.'),
+  }).nullable().describe(
+    'OPTIONAL private note about a person you engaged, saved for the weekly member report — NEVER shown in chat. ' +
+    'Only when you genuinely notice something worth recording (their mood, a trait, behavior, growth). Otherwise null.'
+  ),
 });
 
 export const FactExtractionSchema = z.object({

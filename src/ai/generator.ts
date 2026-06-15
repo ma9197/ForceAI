@@ -78,6 +78,16 @@ export class Generator {
         logger.warn({ stop: response.stop_reason }, 'generator returned unparseable output — staying silent');
         return null;
       }
+      // private observation for the weekly member report (never shown in chat) — resolve the
+      // target message's sender and store it against that person.
+      const obs = parsed.observation;
+      if (obs?.note?.trim() && obs.about_message_id) {
+        const target = this.repo.getMessageByShortId(obs.about_message_id);
+        if (target?.sender_jid && !target.is_bot && !target.is_owner) {
+          this.repo.insertMemberObservation(target.sender_jid, input.chatJid, obs.note.trim());
+        }
+      }
+
       // enforce action cap
       const actions = parsed.actions.slice(0, ARBITER.MAX_ACTIONS);
       return { actions, note: parsed.note };
