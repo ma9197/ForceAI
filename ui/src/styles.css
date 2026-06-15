@@ -119,6 +119,8 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent2); }
 .msg { max-width: 78%; padding: 7px 11px; border-radius: 10px; background: var(--panel); word-wrap: break-word; cursor: pointer; border: 1px solid transparent; }
 .msg:hover { border-color: var(--border); }
 .msg.selected { border-color: var(--accent2); box-shadow: 0 0 0 1px var(--accent2); }
+/* consecutive messages from the same sender: tighten the gap (messaging-app grouping) */
+.msg.continuation { margin-top: -3px; }
 .reply-chip {
   display: flex; align-items: center; gap: 6px;
   margin: 0 16px; padding: 7px 12px;

@@ -8,6 +8,15 @@ function time(ts: number): string {
   return new Date(ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 }
 
+/** Stable, distinct color per member name (hash → HSL). Members only; bot/owner have fixed colors. */
+function nameColor(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  const hue = h % 360;
+  // keep saturation/lightness in a readable band on the dark theme
+  return `hsl(${hue}, 68%, 66%)`;
+}
+
 export interface ReplyTarget { shortId: string; sender: string; text: string }
 
 export function LiveFeed({ items, selectedShortId, onSelect }: {
@@ -22,6 +31,10 @@ export function LiveFeed({ items, selectedShortId, onSelect }: {
     if (el) el.scrollTop = el.scrollHeight;
   }, [items.length]);
 
+  // track the previous message's sender so consecutive messages from the same person
+  // collapse their name title (messaging-app style). Decision rows don't break the run.
+  let lastSenderKey: string | null = null;
+
   return (
     <div className="feed" ref={ref}>
       {items.map((item, i) => {
@@ -33,6 +46,12 @@ export function LiveFeed({ items, selectedShortId, onSelect }: {
           );
         }
         const m = item;
+        const senderKey = m.isBot ? '__bot' : m.isOwner ? '__owner' : m.senderName;
+        const continuation = senderKey === lastSenderKey;
+        lastSenderKey = senderKey;
+
+        const whoColor = m.isBot ? undefined : m.isOwner ? 'var(--warn)' : nameColor(m.senderName);
+
         const body =
           m.type === 'reaction' ? `reacted ${m.text || '👍'}` :
           m.type === 'sticker' ? '🩵 [sticker]' :
@@ -43,11 +62,15 @@ export function LiveFeed({ items, selectedShortId, onSelect }: {
         return (
           <div
             key={m.id}
-            className={`msg ${m.isBot ? 'bot' : ''} ${m.isOwner ? 'owner' : ''} ${m.shortId === selectedShortId ? 'selected' : ''}`}
+            className={`msg ${m.isBot ? 'bot' : ''} ${m.isOwner ? 'owner' : ''} ${m.shortId === selectedShortId ? 'selected' : ''} ${continuation ? 'continuation' : ''}`}
             title="Click to make ForceAI reply to this message"
             onClick={() => onSelect?.({ shortId: m.shortId, sender: m.senderName, text: m.text })}
           >
-            <div className="who">{m.isOwner ? 'You (admin)' : m.senderName} <span className="muted">#{m.shortId}</span></div>
+            {!continuation && (
+              <div className="who" style={whoColor ? { color: whoColor } : undefined}>
+                {m.isOwner ? 'You (admin)' : m.senderName} <span className="muted">#{m.shortId}</span>
+              </div>
+            )}
             {m.quotedText && <div className="quoted">↪ {m.quotedText.slice(0, 80)}</div>}
             <div>{body}</div>
             <div className="time">{time(m.ts)}</div>
