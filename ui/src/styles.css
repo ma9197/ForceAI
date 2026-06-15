@@ -183,6 +183,63 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent2); }
 .settings-row .hint { font-size: 11px; color: var(--muted); margin-top: 2px; }
 
 /* ============================================================
+   VOICE PROFILE — what the AI learned about the group's style
+   ============================================================ */
+.voice-intro h3 { margin: 0 0 4px; font-size: 15px; }
+.voice-intro p { margin: 0 0 14px; font-size: 12px; line-height: 1.5; }
+
+/* the AI's free-text summary of the group "vibe" — quote-card treatment */
+.voice-overview {
+  position: relative;
+  background: linear-gradient(135deg, rgba(91, 140, 255, 0.12), rgba(37, 211, 102, 0.10));
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent2);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+}
+.voice-overview-label {
+  display: inline-block;
+  font-size: 10px; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--accent2); font-weight: 700; margin-bottom: 4px;
+}
+.voice-overview p { margin: 0; font-size: 13px; line-height: 1.55; font-style: italic; color: var(--text); }
+
+/* one section per category */
+.voice-cat { margin-bottom: 18px; }
+.voice-cat-head { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 8px; }
+.voice-cat-icon {
+  font-size: 18px; line-height: 1;
+  width: 34px; height: 34px; flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--panel2); border: 1px solid var(--border); border-radius: 9px;
+}
+.voice-cat-title { font-size: 13px; font-weight: 600; }
+.voice-cat-blurb { font-size: 11px; color: var(--muted); margin-top: 1px; }
+
+.voice-items { display: flex; flex-direction: column; gap: 6px; }
+.voice-item {
+  display: flex; align-items: flex-start; gap: 8px;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 9px; padding: 8px 10px;
+  transition: border-color 0.12s;
+}
+.voice-item:hover { border-color: var(--accent2); }
+.voice-item-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.voice-content-row { display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; }
+.voice-who {
+  font-size: 10px; font-weight: 700; color: var(--accent2);
+  background: rgba(91, 140, 255, 0.14); border-radius: 6px; padding: 1px 7px;
+  flex: 0 0 auto;
+}
+.voice-content { font-size: 13px; line-height: 1.4; word-break: break-word; }
+.voice-example {
+  font-size: 11px; color: var(--muted); font-style: italic;
+  border-left: 2px solid var(--border); padding-left: 7px; word-break: break-word;
+}
+.voice-item > button { padding: 1px 7px; font-size: 11px; flex: 0 0 auto; }
+
+/* ============================================================
    MOBILE (≤ 760px) — single column + bottom nav
    ============================================================ */
 @media (max-width: 760px) {

@@ -83,6 +83,17 @@ export interface FactRow {
   superseded_by: number | null;
 }
 
+export interface VoiceItemRow {
+  id: number;
+  chat_jid: string;
+  category: string; // phrase | slang | joke | reference | pattern | member_style
+  content: string;
+  example: string | null;
+  member_jid: string | null;
+  created_at: number;
+  superseded_by: number | null;
+}
+
 export interface StickerRow {
   id: number;
   file_path: string;
@@ -112,6 +123,7 @@ export type BusEvent =
   | { kind: 'action'; chatJid: string; ts: number; action: BotAction }
   | { kind: 'stats'; stats: Record<string, number> }
   | { kind: 'fact'; chatJid: string; memberJid: string; fact: string; category: string | null }
+  | { kind: 'voice'; chatJid: string; count: number }
   | { kind: 'sticker'; id: number; description: string | null }
   | { kind: 'status'; status: StatusPayload };
 
@@ -152,6 +164,7 @@ export interface StatusPayload {
   stats: Record<string, number>;
   settings: {
     gatekeeper_model: string;
+    generation_model: string;
     effort: string;
     daily_budget_usd: number;
     msg_prefix: string;

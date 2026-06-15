@@ -111,6 +111,20 @@ export function openDb(): Database.Database {
       ts         INTEGER,
       PRIMARY KEY (poll_id, voter_jid)
     );
+
+    -- voice profiler: per-group learned texting style (phrases, slang, jokes, patterns, per-member style)
+    CREATE TABLE IF NOT EXISTS voice_items (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_jid      TEXT,
+      category      TEXT,
+      content       TEXT NOT NULL,
+      example       TEXT,
+      member_jid    TEXT,
+      created_at    INTEGER,
+      superseded_by INTEGER,
+      UNIQUE(chat_jid, category, content)
+    );
+    CREATE INDEX IF NOT EXISTS idx_voice_chat ON voice_items(chat_jid, superseded_by);
   `);
 
   // migrations for DBs created before multi-group support

@@ -161,6 +161,41 @@ export class Repo {
     this.db.prepare('DELETE FROM facts WHERE id = ?').run(id);
   }
 
+  // ---- voice profiler (per-group learned texting style) ----
+  insertVoiceItem(chatJid: string, category: string, content: string, example: string | null, memberJid: string | null): number | null {
+    try {
+      const res = this.db.prepare(`
+        INSERT INTO voice_items(chat_jid, category, content, example, member_jid, created_at)
+        VALUES(?, ?, ?, ?, ?, ?)
+      `).run(chatJid, category, content, example, memberJid, Date.now());
+      return Number(res.lastInsertRowid);
+    } catch {
+      return null; // UNIQUE violation — already learned this exact item in this group
+    }
+  }
+
+  supersedeVoiceItem(oldId: number, newId: number): void {
+    this.db.prepare('UPDATE voice_items SET superseded_by = ? WHERE id = ?').run(newId, oldId);
+  }
+
+  getVoiceItems(chatJid: string): import('../types.js').VoiceItemRow[] {
+    return this.db.prepare(
+      'SELECT * FROM voice_items WHERE chat_jid = ? AND superseded_by IS NULL ORDER BY category, created_at ASC'
+    ).all(chatJid) as import('../types.js').VoiceItemRow[];
+  }
+
+  deleteVoiceItem(id: number): void {
+    this.db.prepare('DELETE FROM voice_items WHERE id = ?').run(id);
+  }
+
+  getVoiceOverview(chatJid: string): string | null {
+    return this.getConfig(`voice_overview:${chatJid}`);
+  }
+
+  setVoiceOverview(chatJid: string, text: string): void {
+    this.setConfig(`voice_overview:${chatJid}`, text);
+  }
+
   // ---- stickers ----
   insertSticker(filePath: string, sha256: string): { id: number; existed: boolean } {
     const existing = this.db.prepare('SELECT id FROM stickers WHERE sha256 = ?').get(sha256) as { id: number } | undefined;

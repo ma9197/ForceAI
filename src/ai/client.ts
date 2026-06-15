@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { DEFAULT_DAILY_BUDGET_USD, GATEKEEPER_MODELS, GENERATION_MODEL, PRICING, type GatekeeperChoice } from '../config.js';
+import { DEFAULT_DAILY_BUDGET_USD, GATEKEEPER_MODELS, GENERATION_MODEL, GENERATION_MODELS, PRICING, type GatekeeperChoice, type GenerationChoice } from '../config.js';
 import { logger } from '../logger.js';
 import type { Repo } from '../memory/repo.js';
 
@@ -25,12 +25,13 @@ export class AiClient {
   }
 
   get utilityModel(): string {
-    // fact extractor / summary follow the gatekeeper choice
+    // fact extractor / summary / voice profiler follow the gatekeeper choice
     return this.gatekeeperModel;
   }
 
   get generationModel(): string {
-    return GENERATION_MODEL;
+    const choice = (this.repo.getConfig('generation_model') ?? 'sonnet') as GenerationChoice;
+    return GENERATION_MODELS[choice] ?? GENERATION_MODEL;
   }
 
   get effort(): 'low' | 'medium' | 'high' {
@@ -58,7 +59,7 @@ export class AiClient {
     return this.spentTodayMicro() / 1_000_000 >= this.dailyBudgetUsd;
   }
 
-  recordUsage(model: string, usage: Usage, tier: 't1' | 't2' | 'extract', chatJid?: string): void {
+  recordUsage(model: string, usage: Usage, tier: 't1' | 't2' | 'extract' | 'voice', chatJid?: string): void {
     const p = PRICING[model];
     const cacheRead = usage.cache_read_input_tokens ?? 0;
     const cacheWrite = usage.cache_creation_input_tokens ?? 0;

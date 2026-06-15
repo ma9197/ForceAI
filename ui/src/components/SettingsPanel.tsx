@@ -3,6 +3,7 @@ import { api } from '../api';
 
 interface Settings {
   gatekeeper_model: string;
+  generation_model: string;
   effort: string;
   daily_budget_usd: number;
   msg_prefix: string;
@@ -129,6 +130,20 @@ export function SettingsPanel({ onSaved }: { onSaved: () => void }) {
         <select
           value={settings.gatekeeper_model}
           onChange={e => update({ gatekeeper_model: e.target.value })}
+        >
+          <option value="sonnet">Sonnet 4.6</option>
+          <option value="haiku">Haiku 4.5</option>
+        </select>
+      </div>
+
+      <div className="settings-row">
+        <div>
+          <label>Reply-writing model</label>
+          <div className="hint">Writes the actual messages it sends. Sonnet = wittier &amp; on-voice, Haiku = faster + much cheaper.</div>
+        </div>
+        <select
+          value={settings.generation_model}
+          onChange={e => update({ generation_model: e.target.value })}
         >
           <option value="sonnet">Sonnet 4.6</option>
           <option value="haiku">Haiku 4.5</option>

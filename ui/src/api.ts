@@ -19,7 +19,7 @@ export interface Status {
   online: boolean;
   groups: GroupStatus[];
   stats: Record<string, number>;
-  settings: { gatekeeper_model: string; effort: string; daily_budget_usd: number; token_reduction?: boolean };
+  settings: { gatekeeper_model: string; generation_model: string; effort: string; daily_budget_usd: number; token_reduction?: boolean };
 }
 
 export interface GroupInfo { jid: string; subject: string; size: number; linked?: boolean }
@@ -39,6 +39,16 @@ export interface Member {
 
 export interface Sticker {
   id: number; description: string | null; usage_hint: string | null; times_used: number;
+}
+
+export interface VoiceItem {
+  id: number; chat_jid: string; category: string; content: string;
+  example: string | null; member_jid: string | null; member_name: string | null; created_at: number;
+}
+
+export interface VoiceProfile {
+  overview: string | null;
+  items: VoiceItem[];
 }
 
 export async function api<T>(path: string, options?: RequestInit): Promise<T> {

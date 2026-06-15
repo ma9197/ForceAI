@@ -6,6 +6,7 @@ import { logger, waLogger } from './logger.js';
 import { openDb } from './memory/db.js';
 import { Repo } from './memory/repo.js';
 import { FactExtractor } from './memory/extractor.js';
+import { VoiceProfiler } from './memory/voice.js';
 import { JidResolver } from './wa/jid.js';
 import { WaConnection } from './wa/connection.js';
 import { Normalizer } from './wa/inbound.js';
@@ -44,6 +45,7 @@ export class App {
   linkedGroups = new Set<string>();
   private arbiters = new Map<string, Arbiter>();
   private extractors = new Map<string, FactExtractor>();
+  private voiceProfilers = new Map<string, VoiceProfiler>();
 
   getArbiter(jid: string): Arbiter | null {
     return this.arbiters.get(jid) ?? null;
@@ -227,8 +229,13 @@ export class App {
       }
       const arb = this.arbiters.get(norm.chatJid);
       arb?.onMessage(norm); // arbiter has its own staleness + isBot guards
-      // skip fact extraction while asleep — sleep means genuinely zero token spend
-      if (!norm.isBot && fresh && !arb?.asleep) this.extractors.get(norm.chatJid)?.onActivity();
+      if (!norm.isBot && fresh) {
+        // skip fact extraction while asleep — sleep means zero token spend for the chat brain
+        if (!arb?.asleep) this.extractors.get(norm.chatJid)?.onActivity();
+        // voice profiling runs even while asleep — the owner wants the group's voice learned
+        // continuously (overnight too). It still respects the daily budget.
+        this.voiceProfilers.get(norm.chatJid)?.onActivity();
+      }
       this.bus.publish({ kind: 'stats', stats: this.repo.getStats() });
     }
   }
@@ -266,6 +273,12 @@ export class App {
     this.extractors.set(chatJid, new FactExtractor(chatJid, this.repo, this.ai, this.prompts, {
       onFact: (memberJid, fact, category) => {
         this.bus.publish({ kind: 'fact', chatJid, memberJid, fact, category });
+        this.bus.publish({ kind: 'status', status: this.statusPayload() });
+      },
+    }));
+    this.voiceProfilers.set(chatJid, new VoiceProfiler(chatJid, this.repo, this.ai, this.prompts, {
+      onLearned: (count) => {
+        this.bus.publish({ kind: 'voice', chatJid, count });
         this.bus.publish({ kind: 'status', status: this.statusPayload() });
       },
     }));
@@ -314,6 +327,7 @@ export class App {
   getSettings(): StatusPayload['settings'] {
     return {
       gatekeeper_model: this.repo.getConfig('gatekeeper_model') ?? 'sonnet',
+      generation_model: this.repo.getConfig('generation_model') ?? 'sonnet',
       effort: this.repo.getConfig('effort') ?? 'low',
       daily_budget_usd: Number(this.repo.getConfig('daily_budget_usd') ?? DEFAULT_DAILY_BUDGET_USD),
       msg_prefix: this.repo.getConfig('msg_prefix') ?? DEFAULT_MSG_PREFIX,

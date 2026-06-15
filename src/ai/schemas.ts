@@ -76,6 +76,27 @@ export const FactExtractionSchema = z.object({
   ),
 });
 
+export const VOICE_CATEGORIES = ['phrase', 'slang', 'joke', 'reference', 'pattern', 'member_style'] as const;
+
+export const VoiceProfileSchema = z.object({
+  items: z.array(z.object({
+    category: z.enum(VOICE_CATEGORIES).describe(
+      'phrase = a recurring expression/catchphrase; slang = a word/abbreviation and what it means; ' +
+      'joke = a running bit or recurring joke; reference = an inside reference/meme/nickname; ' +
+      'pattern = a general texting habit (cadence, emoji use, language-mixing, formatting); ' +
+      'member_style = how a SPECIFIC member texts.'
+    ),
+    content: z.string().describe('The item itself, written tersely. For slang include the meaning. For member_style start with the member name.'),
+    example: z.string().nullable().describe('A short real example from the chat, or who uses it. Optional.'),
+    member_jid: z.string().nullable().describe('For member_style only: the jid of the member exactly as labeled in the transcript. Else null.'),
+    supersedes_id: z.number().nullable().describe('Id of an existing voice item this refines/replaces, if any.'),
+  })).describe('New or refined voice-profile items learned from this chunk. Only genuinely useful, recurring style — not one-off lines.'),
+  overview_update: z.string().nullable().describe(
+    "A 2-4 sentence portrait of the group's overall texting VOICE/vibe (tone, humor style, languages, energy). Rewrite it if this chunk meaningfully sharpens the picture; otherwise null."
+  ),
+});
+
 export type GateResultOut = z.infer<typeof GateResultSchema>;
 export type ActionPlanOut = z.infer<typeof ActionPlanSchema>;
 export type FactExtractionOut = z.infer<typeof FactExtractionSchema>;
+export type VoiceProfileOut = z.infer<typeof VoiceProfileSchema>;

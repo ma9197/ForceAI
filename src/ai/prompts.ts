@@ -1,4 +1,4 @@
-import { BOT_NAME, MEMORY } from '../config.js';
+import { BOT_NAME, MEMORY, VOICE_PROFILE } from '../config.js';
 import type { Repo } from '../memory/repo.js';
 import type { PollTracker } from '../wa/polls.js';
 import { loadTrainingData } from './fewshots.js';
@@ -24,6 +24,12 @@ CORE STYLE RULES:
 - If you don't know something, say so casually ("yok idea 💀 google et"). Never make up facts presented as real — but absurd obviously-fake jokes are fine.
 - React to language switches, weird behavior, meta moments — you notice things ("ayxan speaking russian now we're cooked 💀💀").
 - You can @ people by name in text (just write their name, e.g. "ayxan cavab ver").
+
+GROUP VOICE (how to actually sound like THIS group):
+- Your context includes a GROUP VOICE PROFILE — real phrases, slang, running jokes, inside references and texting patterns mined from THIS group's own messages, plus how each member texts. It is the group's authentic voice, learned over time.
+- LEARN it and let it shape how you talk: reuse their actual slang and abbreviations, drop their running jokes and inside references when they genuinely fit, match their cadence, message length, emoji habits and language-mixing. The goal is to sound like you truly belong in THIS chat, not a generic Gen-Z bot.
+- But you are still YOU. Do NOT robotically copy or parrot lines word-for-word, do NOT force their phrases in where they don't fit, and NEVER just repeat someone's exact message back at them. Blend their style with your own humor and the ForceAI personality — "one of the group who has his own flavor", not a mirror.
+- If the voice profile is empty or thin, just use your default style; you'll pick up their voice as it fills in.
 
 ACTION SELECTION (how to use your output format):
 - "message" — default. New thought, contributing to convo, answering the room.
@@ -173,6 +179,8 @@ export class PromptBuilder {
 
     const summary = this.repo.getSummary(chatJid)?.summary ?? '(no summary yet)';
 
+    const voiceProfileBlock = this.buildVoiceProfileBlock(chatJid);
+
     const voiceEnabled = this.repo.getConfig('voice_enabled') === '1' && !!process.env.ELEVENLABS_API_KEY;
     const imageEnabled = this.repo.getConfig('image_enabled') === '1' && !!process.env.GEMINI_API_KEY;
 
@@ -202,12 +210,49 @@ export class PromptBuilder {
         ? `CHARACTER ADJUSTMENT (set by your owner — adjusts your mood/style on top of your core persona; core rules still apply):\n${adjustment}`
         : '',
       `GROUP MEMBERS YOU KNOW (facts you have learned about them):\n${memberLines || '(nobody yet)'}`,
+      voiceProfileBlock,
       `YOUR STICKER LIBRARY (send by id when one truly fits):\n${stickerLines}`,
       `RUNNING GROUP SUMMARY (what has been going on):\n${summary}`,
     ].filter(Boolean).join('\n\n');
 
     this.blockBCache.set(chatJid, { text, builtAt: now, version: this.memoryVersion });
     return text;
+  }
+
+  /** GROUP VOICE PROFILE section for Block B — the group's learned texting style. Deterministic (cache-safe). */
+  private buildVoiceProfileBlock(chatJid: string): string {
+    const items = this.repo.getVoiceItems(chatJid).slice(0, VOICE_PROFILE.MAX_ITEMS_IN_PROMPT);
+    const overview = (this.repo.getVoiceOverview(chatJid) ?? '').trim();
+    if (items.length === 0 && !overview) return ''; // nothing learned yet — omit the section entirely
+
+    const members = this.repo.getMembersForChat(chatJid);
+    const nameFor = (jid: string | null) => (jid && members.find(m => m.jid === jid)?.display_name) || (jid ? jid.split('@')[0] : '');
+
+    const headers: Record<string, string> = {
+      phrase: 'Phrases & catchphrases they use',
+      slang: 'Slang & words (with meaning)',
+      joke: 'Running jokes & bits',
+      reference: 'Inside references / nicknames / memes',
+      pattern: 'Texting patterns (cadence, emoji, language-mixing)',
+      member_style: 'How specific members text',
+    };
+    const sections: string[] = [];
+    for (const cat of Object.keys(headers)) {
+      const list = items.filter(i => i.category === cat);
+      if (list.length === 0) continue;
+      const lines = list.map(i => {
+        const who = i.category === 'member_style' && i.member_jid ? `${nameFor(i.member_jid)}: ` : '';
+        const ex = i.example ? ` (e.g. ${i.example})` : '';
+        return `  - ${who}${i.content}${ex}`;
+      }).join('\n');
+      sections.push(`${headers[cat]}:\n${lines}`);
+    }
+
+    return [
+      'GROUP VOICE PROFILE (this group\'s real texting style — learn it, weave it in naturally, but stay yourself):',
+      overview ? `Overall vibe: ${overview}` : '',
+      ...sections,
+    ].filter(Boolean).join('\n');
   }
 
   buildSystemBlocks(chatJid: string): SystemBlock[] {
@@ -277,3 +322,20 @@ Output JSON only.`;
 export const EXTRACTOR_SYSTEM = `You extract durable facts about WhatsApp group members from chat transcripts, for ${BOT_NAME}'s long-term memory.
 
 Only output facts that are DURABLE and USEFUL for future banter and personalization: who supports which team, jobs, relationships, running jokes, memorable events ("the time X did Y"), strong preferences. NOT moment-to-moment chatter, not facts already in the provided known-facts list (unless superseding one — then set supersedes_fact_id). Use member jids exactly as labeled. Confidence < 0.6 facts should be omitted. Also maintain the running group summary: rewrite it if the new chunk meaningfully changes what's worth remembering; otherwise return null.`;
+
+export const VOICE_PROFILER_SYSTEM = `You are a linguistic style analyst building a VOICE PROFILE of a WhatsApp friend group, so an AI member (${BOT_NAME}) can learn to text like they do.
+
+From the transcript chunk, extract the group's recurring TEXTING STYLE — NOT facts or events (a separate system handles those). Capture:
+- phrase: catchphrases / expressions they actually say repeatedly.
+- slang: their slang words and abbreviations, WITH the meaning (especially mixed EN/AZ/TR/RU).
+- joke: running jokes and recurring bits.
+- reference: inside references, nicknames, memes the group reuses.
+- pattern: general texting habits — cadence, message length, emoji usage, capitalization, how/when they switch languages.
+- member_style: how a SPECIFIC member texts (set member_jid to their jid).
+
+RULES:
+- Only capture RECURRING, characteristic style — things that show up more than once or are clearly a defining trait. Ignore one-off lines.
+- Do NOT duplicate items already in the provided known-items list. To refine/replace an existing one, set supersedes_id to its id.
+- Be terse and concrete. Quote real examples in the "example" field when helpful.
+- Keep it tasteful for emulation — capture HOW they talk, never private/sensitive personal info.
+- Also maintain a 2-4 sentence "overview" of the group's overall voice; rewrite it only if this chunk sharpens it, else null.`;

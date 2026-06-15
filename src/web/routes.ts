@@ -119,6 +119,24 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     return { ok: true };
   });
 
+  fastify.get<{ Querystring: { jid?: string } }>('/api/voice', async (req, reply) => {
+    const jid = req.query.jid;
+    if (!jid) return reply.code(400).send({ error: 'jid required' });
+    return {
+      overview: app.repo.getVoiceOverview(jid),
+      items: app.repo.getVoiceItems(jid).map(i => ({
+        ...i,
+        member_name: i.member_jid ? (app.repo.getMember(i.member_jid)?.display_name ?? i.member_jid.split('@')[0]) : null,
+      })),
+    };
+  });
+
+  fastify.delete<{ Params: { id: string } }>('/api/voice/:id', async (req) => {
+    app.repo.deleteVoiceItem(Number(req.params.id));
+    app.prompts.memoryVersion += 1;
+    return { ok: true };
+  });
+
   fastify.get('/api/stickers', async () => app.repo.getStickers());
 
   fastify.get<{ Params: { id: string } }>('/api/stickers/:id/image', async (req, reply) => {
@@ -187,7 +205,7 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
   fastify.get('/api/settings', async () => settingsPayload(app));
 
   fastify.post<{ Body: {
-    gatekeeper_model?: string; effort?: string; daily_budget_usd?: number;
+    gatekeeper_model?: string; generation_model?: string; effort?: string; daily_budget_usd?: number;
     msg_prefix?: string; msg_suffix?: string; voice_enabled?: boolean; voice_id?: string;
     persona_mode?: string; persona_custom?: string;
     sticker_freq?: string; voice_freq?: string; emoji_freq?: string;
@@ -201,6 +219,9 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
       const b = req.body ?? {};
       if (b.gatekeeper_model && ['sonnet', 'haiku'].includes(b.gatekeeper_model)) {
         app.repo.setConfig('gatekeeper_model', b.gatekeeper_model);
+      }
+      if (b.generation_model && ['sonnet', 'haiku'].includes(b.generation_model)) {
+        app.repo.setConfig('generation_model', b.generation_model);
       }
       if (b.effort && ['low', 'medium', 'high'].includes(b.effort)) {
         app.repo.setConfig('effort', b.effort);

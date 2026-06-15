@@ -32,6 +32,18 @@ export const GATEKEEPER_MODELS = {
   haiku: 'claude-haiku-4-5',
 } as const;
 export type GatekeeperChoice = keyof typeof GATEKEEPER_MODELS;
+/** Reply-generation model — separately selectable so the owner can trade quality for cost. */
+export const GENERATION_MODELS = {
+  sonnet: 'claude-sonnet-4-6',
+  haiku: 'claude-haiku-4-5',
+} as const;
+export type GenerationChoice = keyof typeof GENERATION_MODELS;
+/**
+ * Model for the background voice profiler. Pinned to Sonnet on purpose: capturing the group's
+ * nuanced texting style is quality-sensitive, and it runs in the background (incl. during sleep)
+ * so latency doesn't matter. It still respects the daily budget, and only fires every ~50 msgs.
+ */
+export const VOICE_PROFILE_MODEL = 'claude-sonnet-4-6';
 
 // $/MTok pricing for cost accounting (input, output, cacheRead, cacheWrite)
 export const PRICING: Record<string, { in: number; out: number; cacheRead: number; cacheWrite: number }> = {
@@ -83,6 +95,14 @@ export const MEMORY = {
   EXTRACT_IDLE_MIN_MSGS: 10,
   BLOCK_B_REBUILD_MIN_MS: 5 * 60_000,
   STICKER_LEARN_TIMEOUT: 5 * 60_000,
+} as const;
+
+// ---- Voice profiler (learns the group's texting style; runs even while the bot sleeps) ----
+export const VOICE_PROFILE = {
+  EVERY_MSGS: 50,          // analyze when this many new (human) messages have accumulated
+  IDLE_MS: 8 * 60_000,     // or after a lull with enough backlog
+  IDLE_MIN_MSGS: 20,
+  MAX_ITEMS_IN_PROMPT: 50, // cap items injected into the generation prompt (keeps it cheap)
 } as const;
 
 // ---- ElevenLabs voice ----
