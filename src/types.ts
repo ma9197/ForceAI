@@ -92,6 +92,7 @@ export interface VoiceItemRow {
   member_jid: string | null;
   created_at: number;
   superseded_by: number | null;
+  checked: number; // 0 = new/unreviewed, 1 = reviewed by owner
 }
 
 export interface StickerRow {

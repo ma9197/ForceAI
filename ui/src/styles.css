@@ -245,7 +245,42 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent2); }
   font-size: 11px; color: var(--muted); font-style: italic;
   border-left: 2px solid var(--border); padding-left: 7px; word-break: break-word;
 }
-.voice-item > button { padding: 1px 7px; font-size: 11px; flex: 0 0 auto; }
+.voice-item-actions { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+.voice-item-actions button { padding: 1px 7px; font-size: 11px; }
+
+/* new / unreviewed items — yellow highlight until the owner checks them */
+.voice-item--new { border-color: var(--warn); background: rgba(255, 180, 84, 0.09); }
+.voice-item--new:hover { border-color: var(--warn); }
+
+/* per-item review checkbox: empty box when unreviewed, filled green tick when reviewed */
+.voice-check {
+  width: 22px; height: 22px; padding: 0; line-height: 1;
+  border-radius: 6px; border: 1px solid var(--border);
+  background: transparent; color: transparent; font-size: 13px; font-weight: 700;
+}
+.voice-check:hover { border-color: var(--accent); color: var(--accent); }
+.voice-check.on { background: var(--accent); border-color: var(--accent); color: #04210f; }
+
+/* "N new notes to review" bar + Check all */
+.voice-review-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: rgba(255, 180, 84, 0.1); border: 1px solid rgba(255, 180, 84, 0.4);
+  border-radius: 9px; padding: 8px 12px; margin-bottom: 12px; font-size: 12px; color: var(--warn);
+}
+.voice-review-bar button { padding: 5px 12px; font-size: 12px; }
+
+/* inline edit */
+.voice-edit { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+.voice-edit input { width: 100%; font-size: 13px; }
+.voice-edit-actions { display: flex; gap: 6px; }
+.voice-edit-actions button { padding: 4px 12px; font-size: 12px; }
+.voice-edit-error { font-size: 11px; color: var(--danger); }
+
+/* "highlighted" word in the intro */
+.voice-new-pill {
+  background: rgba(255, 180, 84, 0.18); color: var(--warn);
+  border-radius: 5px; padding: 0 5px; font-style: normal;
+}
 
 /* ============================================================
    MOBILE (≤ 760px) — single column + bottom nav

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, post, type VoiceProfile } from '../api';
+import { api, post, type VoiceItem, type VoiceProfile } from '../api';
 
 /** Friendly labels + icons for each voice-item category the profiler emits. */
 const CATS: { key: string; label: string; icon: string; blurb: string }[] = [
@@ -17,7 +17,7 @@ function messageFor(res: LearnResult, source: 'chat' | 'memory'): string {
   switch (res.status) {
     case 'ok':
       return res.learned > 0
-        ? `✓ Learned ${res.learned} new voice ${res.learned === 1 ? 'note' : 'notes'}.`
+        ? `✓ Learned ${res.learned} new voice ${res.learned === 1 ? 'note' : 'notes'} — review them below.`
         : '✓ Already up to date — nothing new found.';
     case 'empty':
       return source === 'chat' ? 'No chat history stored yet to scan.' : 'No memory to mine yet.';
@@ -31,12 +31,18 @@ export function VoiceProfilePanel({ jid, version }: { jid: string; version: numb
   const [profile, setProfile] = useState<VoiceProfile | null>(null);
   const [busy, setBusy] = useState<null | 'chat' | 'memory'>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editText, setEditText] = useState('');
+  const [editError, setEditError] = useState<string | null>(null);
 
   const reload = useCallback(() => {
     return api<VoiceProfile>(`/api/voice?jid=${encodeURIComponent(jid)}`).then(setProfile).catch(() => undefined);
   }, [jid]);
 
   useEffect(() => { void reload(); }, [reload, version]);
+
+  const patchItem = (id: number, patch: Partial<VoiceItem>) =>
+    setProfile(p => (p ? { ...p, items: p.items.map(i => (i.id === id ? { ...i, ...patch } : i)) } : p));
 
   const learn = async (source: 'chat' | 'memory') => {
     if (busy) return;
@@ -53,6 +59,33 @@ export function VoiceProfilePanel({ jid, version }: { jid: string; version: numb
     }
   };
 
+  const check = async (id: number, checked: boolean) => {
+    patchItem(id, { checked: checked ? 1 : 0 });
+    try { await post(`/api/voice/${id}/check`, { checked }); }
+    catch { void reload(); }
+  };
+
+  const checkAll = async () => {
+    setProfile(p => (p ? { ...p, items: p.items.map(i => ({ ...i, checked: 1 })) } : p));
+    try { await post('/api/voice/check-all', { jid }); }
+    catch { void reload(); }
+  };
+
+  const startEdit = (it: VoiceItem) => { setEditingId(it.id); setEditText(it.content); setEditError(null); };
+  const cancelEdit = () => { setEditingId(null); setEditError(null); };
+  const saveEdit = async (id: number) => {
+    const content = editText.trim();
+    if (!content) return;
+    try {
+      await post(`/api/voice/${id}/edit`, { content });
+      patchItem(id, { content });
+      setEditingId(null);
+      setEditError(null);
+    } catch {
+      setEditError('Could not save — that text may duplicate another note.');
+    }
+  };
+
   const deleteItem = async (id: number) => {
     await fetch(`/api/voice/${id}`, { method: 'DELETE' });
     setProfile(p => (p ? { ...p, items: p.items.filter(i => i.id !== id) } : p));
@@ -60,6 +93,7 @@ export function VoiceProfilePanel({ jid, version }: { jid: string; version: numb
 
   const items = profile?.items ?? [];
   const total = items.length;
+  const unchecked = items.filter(i => !i.checked).length;
 
   return (
     <div className="voice">
@@ -67,8 +101,8 @@ export function VoiceProfilePanel({ jid, version }: { jid: string; version: numb
         <h3>🗣️ Group voice</h3>
         <p className="muted">
           What ForceAI picks up about how <b>this group</b> texts — your slang, jokes, references
-          and rhythm. It blends this into its replies to sound like one of you, while keeping its
-          own personality. Learned automatically as you chat — even while it's asleep.
+          and rhythm. New notes show up <span className="voice-new-pill">highlighted</span> until you
+          review them. Check the ones you like, edit any that are off, delete the rest.
         </p>
       </div>
 
@@ -84,6 +118,13 @@ export function VoiceProfilePanel({ jid, version }: { jid: string; version: numb
       <p className="voice-actions-hint muted">
         Pull a fresh update on demand. Safe to run anytime — it only adds what's genuinely new, never duplicates.
       </p>
+
+      {unchecked > 0 && (
+        <div className="voice-review-bar">
+          <span>🟡 {unchecked} new {unchecked === 1 ? 'note' : 'notes'} to review</span>
+          <button onClick={checkAll}>✓ Check all</button>
+        </div>
+      )}
 
       {profile?.overview && (
         <div className="voice-overview">
@@ -118,15 +159,44 @@ export function VoiceProfilePanel({ jid, version }: { jid: string; version: numb
             </div>
             <div className="voice-items">
               {catItems.map(it => (
-                <div key={it.id} className="voice-item">
-                  <div className="voice-item-body">
-                    <div className="voice-content-row">
-                      {it.member_name && <span className="voice-who">{it.member_name}</span>}
-                      <span className="voice-content">{it.content}</span>
+                <div key={it.id} className={`voice-item ${it.checked ? '' : 'voice-item--new'}`}>
+                  {editingId === it.id ? (
+                    <div className="voice-edit">
+                      <input
+                        value={editText}
+                        autoFocus
+                        onChange={e => setEditText(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') void saveEdit(it.id);
+                          if (e.key === 'Escape') cancelEdit();
+                        }}
+                      />
+                      <div className="voice-edit-actions">
+                        <button className="primary" onClick={() => saveEdit(it.id)}>Save</button>
+                        <button onClick={cancelEdit}>Cancel</button>
+                      </div>
+                      {editError && <span className="voice-edit-error">{editError}</span>}
                     </div>
-                    {it.example && <span className="voice-example">e.g. "{it.example}"</span>}
-                  </div>
-                  <button title="Forget this" onClick={() => deleteItem(it.id)}>✕</button>
+                  ) : (
+                    <>
+                      <div className="voice-item-body">
+                        <div className="voice-content-row">
+                          {it.member_name && <span className="voice-who">{it.member_name}</span>}
+                          <span className="voice-content">{it.content}</span>
+                        </div>
+                        {it.example && <span className="voice-example">e.g. "{it.example}"</span>}
+                      </div>
+                      <div className="voice-item-actions">
+                        <button
+                          className={`voice-check ${it.checked ? 'on' : ''}`}
+                          title={it.checked ? 'Reviewed — click to flag as new again' : 'Mark reviewed'}
+                          onClick={() => check(it.id, !it.checked)}
+                        >✓</button>
+                        <button title="Edit text" onClick={() => startEdit(it)}>✎</button>
+                        <button title="Forget this" onClick={() => deleteItem(it.id)}>✕</button>
+                      </div>
+                    </>
+                  )}
                 </div>
               ))}
             </div>

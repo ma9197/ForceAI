@@ -44,6 +44,7 @@ export interface Sticker {
 export interface VoiceItem {
   id: number; chat_jid: string; category: string; content: string;
   example: string | null; member_jid: string | null; member_name: string | null; created_at: number;
+  checked: number; // 0 = new/unreviewed (highlighted), 1 = reviewed
 }
 
 export interface VoiceProfile {

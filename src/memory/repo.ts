@@ -188,6 +188,29 @@ export class Repo {
     this.db.prepare('DELETE FROM voice_items WHERE id = ?').run(id);
   }
 
+  /** Mark a single voice item reviewed/unreviewed. */
+  setVoiceItemChecked(id: number, checked: boolean): void {
+    this.db.prepare('UPDATE voice_items SET checked = ? WHERE id = ?').run(checked ? 1 : 0, id);
+  }
+
+  /** Mark every active voice item in a group as reviewed. Returns how many were flipped. */
+  checkAllVoiceItems(chatJid: string): number {
+    const res = this.db.prepare(
+      'UPDATE voice_items SET checked = 1 WHERE chat_jid = ? AND superseded_by IS NULL AND checked = 0'
+    ).run(chatJid);
+    return res.changes;
+  }
+
+  /** Edit a voice item's text. Returns false if the new content collides with an existing item. */
+  updateVoiceItemContent(id: number, content: string): boolean {
+    try {
+      this.db.prepare('UPDATE voice_items SET content = ? WHERE id = ?').run(content, id);
+      return true;
+    } catch {
+      return false; // UNIQUE(chat_jid, category, content) collision
+    }
+  }
+
   getVoiceOverview(chatJid: string): string | null {
     return this.getConfig(`voice_overview:${chatJid}`);
   }

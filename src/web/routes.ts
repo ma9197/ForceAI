@@ -148,6 +148,29 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
       : await app.learnVoiceFromChat(jid);
   });
 
+  // Owner review: mark items reviewed. Pure UI flag — no memoryVersion bump (doesn't change the
+  // bot prompt; checked + unchecked items both still feed the bot's voice).
+  fastify.post<{ Body: { jid?: string } }>('/api/voice/check-all', async (req, reply) => {
+    const jid = req.body?.jid;
+    if (!jid) return reply.code(400).send({ error: 'jid required' });
+    return { ok: true, checked: app.repo.checkAllVoiceItems(jid) };
+  });
+
+  fastify.post<{ Params: { id: string }; Body: { checked?: boolean } }>('/api/voice/:id/check', async (req) => {
+    app.repo.setVoiceItemChecked(Number(req.params.id), req.body?.checked !== false);
+    return { ok: true };
+  });
+
+  // Edit an item's text. Content feeds the bot prompt, so bump memoryVersion to refresh the cache.
+  fastify.post<{ Params: { id: string }; Body: { content?: string } }>('/api/voice/:id/edit', async (req, reply) => {
+    const content = req.body?.content?.trim();
+    if (!content) return reply.code(400).send({ error: 'content required' });
+    const ok = app.repo.updateVoiceItemContent(Number(req.params.id), content);
+    if (!ok) return reply.code(409).send({ ok: false, reason: 'duplicate' });
+    app.prompts.memoryVersion += 1;
+    return { ok: true };
+  });
+
   fastify.get('/api/stickers', async () => app.repo.getStickers());
 
   fastify.get<{ Params: { id: string } }>('/api/stickers/:id/image', async (req, reply) => {

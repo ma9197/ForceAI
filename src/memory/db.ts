@@ -122,6 +122,7 @@ export function openDb(): Database.Database {
       member_jid    TEXT,
       created_at    INTEGER,
       superseded_by INTEGER,
+      checked       INTEGER NOT NULL DEFAULT 0, -- 0 = new/unreviewed (shown highlighted), 1 = reviewed by owner
       UNIQUE(chat_jid, category, content)
     );
     CREATE INDEX IF NOT EXISTS idx_voice_chat ON voice_items(chat_jid, superseded_by);
@@ -131,6 +132,12 @@ export function openDb(): Database.Database {
   try { db.exec('ALTER TABLE decisions ADD COLUMN chat_jid TEXT'); } catch { /* column exists */ }
   // local path to a downloaded inbound image (for Claude vision)
   try { db.exec('ALTER TABLE messages ADD COLUMN media_path TEXT'); } catch { /* column exists */ }
+  // voice items: owner review flag. Items that predate this column were already in use, so mark
+  // them reviewed (only the ALTER's first run executes the UPDATE; later boots throw + skip).
+  try {
+    db.exec('ALTER TABLE voice_items ADD COLUMN checked INTEGER NOT NULL DEFAULT 0');
+    db.exec('UPDATE voice_items SET checked = 1');
+  } catch { /* column exists */ }
 
   // facts: scope per group (chat_jid) with per-group uniqueness — requires a table rebuild
   const factCols = db.prepare("PRAGMA table_info(facts)").all() as { name: string }[];
