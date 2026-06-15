@@ -46,6 +46,7 @@ export class FactExtractor {
 
   async run(): Promise<void> {
     if (this.running) return;
+    if (this.ai.isOverBudget()) return; // respect the daily budget (matches the voice profiler)
     this.running = true;
     const upToTs = Date.now();
 

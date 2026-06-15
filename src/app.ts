@@ -257,10 +257,9 @@ export class App {
       const arb = this.arbiters.get(norm.chatJid);
       arb?.onMessage(norm); // arbiter has its own staleness + isBot guards
       if (!norm.isBot && fresh) {
-        // skip fact extraction while asleep — sleep means zero token spend for the chat brain
-        if (!arb?.asleep) this.extractors.get(norm.chatJid)?.onActivity();
-        // voice profiling runs even while asleep — the owner wants the group's voice learned
-        // continuously (overnight too). It still respects the daily budget.
+        // both memory (facts) and voice learning run even while asleep — the owner wants the bot's
+        // understanding of the group to keep growing overnight. Both respect the daily budget.
+        this.extractors.get(norm.chatJid)?.onActivity();
         this.voiceProfilers.get(norm.chatJid)?.onActivity();
       }
       this.bus.publish({ kind: 'stats', stats: this.repo.getStats() });
