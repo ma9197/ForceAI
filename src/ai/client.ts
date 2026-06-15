@@ -59,7 +59,7 @@ export class AiClient {
     return this.spentTodayMicro() / 1_000_000 >= this.dailyBudgetUsd;
   }
 
-  recordUsage(model: string, usage: Usage, tier: 't1' | 't2' | 'extract' | 'voice', chatJid?: string): void {
+  recordUsage(model: string, usage: Usage, tier: 't1' | 't2' | 'extract' | 'voice' | 'report', chatJid?: string): void {
     const p = PRICING[model];
     const cacheRead = usage.cache_read_input_tokens ?? 0;
     const cacheWrite = usage.cache_creation_input_tokens ?? 0;

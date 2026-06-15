@@ -7,6 +7,7 @@ import { openDb } from './memory/db.js';
 import { Repo } from './memory/repo.js';
 import { FactExtractor } from './memory/extractor.js';
 import { VoiceProfiler, type VoiceLearnResult } from './memory/voice.js';
+import { MemberReporter, type ReportResult } from './memory/reporter.js';
 import { JidResolver } from './wa/jid.js';
 import { WaConnection } from './wa/connection.js';
 import { Normalizer } from './wa/inbound.js';
@@ -46,6 +47,7 @@ export class App {
   private arbiters = new Map<string, Arbiter>();
   private extractors = new Map<string, FactExtractor>();
   private voiceProfilers = new Map<string, VoiceProfiler>();
+  private memberReporter: MemberReporter;
 
   getArbiter(jid: string): Arbiter | null {
     return this.arbiters.get(jid) ?? null;
@@ -72,6 +74,12 @@ export class App {
       { onSticker: (id, description) => this.bus.publish({ kind: 'sticker', id, description }) },
       () => this.conn.sock,
     );
+    this.memberReporter = new MemberReporter(this.repo, this.ai, this.prompts, {
+      onReports: (count) => {
+        this.bus.publish({ kind: 'report', count });
+        this.bus.publish({ kind: 'status', status: this.statusPayload() });
+      },
+    });
 
     this.loadLinkedGroups();
     this.online = this.repo.getConfig('bot_online') !== '0'; // restore shutdown state across restarts
@@ -157,6 +165,25 @@ export class App {
       for (const a of this.arbiters.values()) a.suspend();
       this.conn.setOffline();
     }
+
+    // weekly member-report scheduler (independent of WhatsApp; checks the clock every 30 min)
+    this.memberReporter.start();
+  }
+
+  /** Manual trigger for the weekly per-person report job (also used for the first backfill). */
+  generateMemberReports(): Promise<ReportResult> {
+    return this.memberReporter.run('manual');
+  }
+
+  lockMemberStat(memberJid: string, statKey: string, locked: boolean): void {
+    this.repo.setStatLock(memberJid, statKey, locked);
+    this.bus.publish({ kind: 'report', count: 0 });
+  }
+
+  deleteMemberReport(memberJid: string): void {
+    this.repo.deleteMemberReport(memberJid);
+    this.prompts.memoryVersion += 1;
+    this.bus.publish({ kind: 'report', count: 0 });
   }
 
   /** Full shutdown: disconnect WhatsApp entirely (linked device goes offline), keep dashboard up.

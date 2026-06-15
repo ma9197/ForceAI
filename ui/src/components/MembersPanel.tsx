@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  api, type GroupStatus, type PersonSummary, type PersonProfile,
+  api, post, type GroupStatus, type PersonSummary, type PersonProfile,
   type StatHistoryEntry, type MemberStat, type MemberCodeStats,
 } from '../api';
 
@@ -14,7 +14,6 @@ const STAT_META: { key: string; label: string; icon: string; hint: string }[] = 
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 const initial = (name: string) => (name.trim()[0] ?? '?').toUpperCase();
 
-/** tiny inline sparkline */
 function Sparkline({ data, w = 96, h = 24 }: { data: number[]; w?: number; h?: number }) {
   if (!data.length || data.every(v => v === 0)) return <span className="muted" style={{ fontSize: 11 }}>—</span>;
   const max = Math.max(1, ...data);
@@ -27,9 +26,10 @@ function Sparkline({ data, w = 96, h = 24 }: { data: number[]; w?: number; h?: n
   );
 }
 
-/** one AI-stat tile with an expandable weekly history timeline */
-function StatTile({ jid, statKey, label, icon, hint, stat }: {
-  jid: string; statKey: string; label: string; icon: string; hint: string; stat: MemberStat | undefined;
+/** one AI-stat tile: value + lock toggle + an expandable weekly history timeline */
+function StatTile({ jid, statKey, label, icon, hint, stat, onLock }: {
+  jid: string; statKey: string; label: string; icon: string; hint: string;
+  stat: MemberStat | undefined; onLock?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [history, setHistory] = useState<StatHistoryEntry[] | null>(null);
@@ -49,10 +49,17 @@ function StatTile({ jid, statKey, label, icon, hint, stat }: {
       <div className="mstat-head" onClick={toggle}>
         <span className="mstat-icon">{icon}</span>
         <div className="mstat-main">
-          <div className="mstat-label">{label}{stat?.locked && <span className="mstat-lock" title="Locked">🔒</span>}</div>
+          <div className="mstat-label">{label}</div>
           <div className="mstat-hint">{hint}</div>
         </div>
         <div className="mstat-val">{has ? Math.round(stat!.value!) : '—'}{has && stat!.label ? <span className="mstat-vlabel">{stat!.label}</span> : null}</div>
+        {onLock && (
+          <button
+            className={`mstat-lockbtn ${stat?.locked ? 'on' : ''}`}
+            title={stat?.locked ? "Locked — the weekly AI won't change it" : 'Lock this value'}
+            onClick={e => { e.stopPropagation(); onLock(); }}
+          >{stat?.locked ? '🔒' : '🔓'}</button>
+        )}
         <span className="mstat-caret">{open ? '▾' : '▸'}</span>
       </div>
       {open && (
@@ -128,21 +135,60 @@ export function MembersPanel({ version, groups }: { version: number; groups: Gro
   const [people, setPeople] = useState<PersonSummary[] | null>(null);
   const [openJid, setOpenJid] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<Record<string, PersonProfile>>({});
+  const [busy, setBusy] = useState(false);
+  const [feedback, setFeedback] = useState<string | null>(null);
 
   const groupName = useCallback((jid: string) =>
     groups.find(g => g.jid === jid)?.name ?? jid.split('@')[0], [groups]);
 
-  useEffect(() => {
-    api<PersonSummary[]>('/api/people').then(setPeople).catch(() => setPeople([]));
-  }, [version]);
+  const reload = useCallback(async () => {
+    await api<PersonSummary[]>('/api/people').then(setPeople).catch(() => undefined);
+    setProfiles({}); // invalidate cached profiles; the open one refetches via the effect below
+  }, []);
 
-  const toggle = (jid: string) => {
-    const next = openJid === jid ? null : jid;
-    setOpenJid(next);
-    if (next && !profiles[next]) {
-      api<PersonProfile>(`/api/people/${encodeURIComponent(next)}`)
-        .then(p => setProfiles(prev => ({ ...prev, [next]: p }))).catch(() => undefined);
+  useEffect(() => { void reload(); }, [reload, version]);
+
+  // (re)fetch the open person's full profile whenever it's not cached
+  useEffect(() => {
+    if (openJid && !profiles[openJid]) {
+      api<PersonProfile>(`/api/people/${encodeURIComponent(openJid)}`)
+        .then(p => setProfiles(prev => ({ ...prev, [openJid]: p }))).catch(() => undefined);
     }
+  }, [openJid, profiles]);
+
+  const generate = async () => {
+    if (busy) return;
+    setBusy(true);
+    setFeedback(null);
+    try {
+      const res = (await post('/api/people/report-now', {})) as { status: string; updated: number };
+      setFeedback(
+        res.status === 'ok' ? (res.updated > 0 ? `✓ Updated ${res.updated} ${res.updated === 1 ? 'dossier' : 'dossiers'}.` : '✓ Nothing to report this period.')
+        : res.status === 'busy' ? 'Already running — give it a moment.'
+        : res.status === 'budget' ? 'Skipped — daily budget reached.'
+        : res.status === 'empty' ? 'No recent activity to analyze yet.'
+        : 'Something went wrong — try again.');
+      await reload();
+    } catch {
+      setFeedback('Something went wrong — try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleLock = async (jid: string, statKey: string, locked: boolean) => {
+    const patch = (s: Record<string, MemberStat>) =>
+      s[statKey] ? { ...s, [statKey]: { ...s[statKey], locked } } : s;
+    setProfiles(prev => (prev[jid] ? { ...prev, [jid]: { ...prev[jid], stats: patch(prev[jid].stats) } } : prev));
+    setPeople(ppl => ppl ? ppl.map(p => (p.jid === jid ? { ...p, stats: patch(p.stats) } : p)) : ppl);
+    try { await post(`/api/people/${encodeURIComponent(jid)}/stat/${statKey}/lock`, { locked }); }
+    catch { void reload(); }
+  };
+
+  const resetReport = async (jid: string, name: string) => {
+    if (!confirm(`Reset ${name}'s dossier? Their bio + all stat history is deleted and rebuilds from scratch on the next report.`)) return;
+    await fetch(`/api/people/${encodeURIComponent(jid)}/report`, { method: 'DELETE' });
+    await reload();
   };
 
   if (people === null) return <p className="muted">Loading…</p>;
@@ -152,11 +198,21 @@ export function MembersPanel({ version, groups }: { version: number; groups: Gro
       <div className="voice-intro">
         <h3>👥 Members</h3>
         <p className="muted">
-          A dossier for each person across <b>all</b> your groups — live analytics now, plus an AI
-          report (bio, mood, sharpness, temperament) that updates every Sunday and keeps a weekly
-          history. Click anyone to expand.
+          A dossier for each person across <b>all</b> your groups — live analytics plus an AI report
+          (bio, mood, sharpness, temperament) that updates every Sunday and keeps a weekly history.
+          Click anyone to expand.
         </p>
       </div>
+
+      <div className="voice-actions">
+        <button disabled={busy} onClick={generate} title="Run the AI report now instead of waiting for Sunday (also does the first build)">
+          {busy ? '⏳ Generating reports…' : '✨ Generate reports now'}
+        </button>
+        {feedback && <span className="voice-feedback">{feedback}</span>}
+      </div>
+      <p className="voice-actions-hint muted">
+        Reports refresh automatically every Sunday morning. Generate on demand here — the first run builds everyone's dossier from your whole history.
+      </p>
 
       {people.length === 0 && <p className="muted">No people yet — they appear here as they chat.</p>}
 
@@ -164,10 +220,11 @@ export function MembersPanel({ version, groups }: { version: number; groups: Gro
         {people.map(p => {
           const open = openJid === p.jid;
           const prof = profiles[p.jid];
+          const stats = prof?.stats ?? p.stats;
           const vibe = p.bio?.split(/(?<=[.!?])\s/)[0] ?? p.talking_style ?? (p.has_report ? null : 'Dossier builds on Sunday');
           return (
             <div key={p.jid} className={`member-card ${open ? 'open' : ''}`}>
-              <div className="member-head" onClick={() => toggle(p.jid)}>
+              <div className="member-head" onClick={() => setOpenJid(open ? null : p.jid)}>
                 <span className="member-avatar">{initial(p.name)}</span>
                 <div className="member-id">
                   <div className="member-name">{p.name}</div>
@@ -175,7 +232,7 @@ export function MembersPanel({ version, groups }: { version: number; groups: Gro
                 </div>
                 <div className="member-chips">
                   {STAT_META.map(s => {
-                    const st = p.stats[s.key];
+                    const st = stats[s.key];
                     if (!st || st.value == null) return null;
                     return <span key={s.key} className="member-chip" title={s.label}>{s.icon} {Math.round(st.value)}</span>;
                   })}
@@ -186,26 +243,24 @@ export function MembersPanel({ version, groups }: { version: number; groups: Gro
 
               {open && (
                 <div className="member-body">
-                  {/* AI dossier */}
                   <div className="member-section">
                     <div className="member-section-title">AI dossier</div>
-                    {p.bio ? <p className="member-bio">{prof?.bio ?? p.bio}</p>
-                      : <p className="muted" style={{ fontSize: 12 }}>No weekly report yet — the AI dossier (bio + mood/IQ/temperament) activates with the report job. Live analytics below are already tracking.</p>}
+                    {(prof?.bio ?? p.bio) ? <p className="member-bio">{prof?.bio ?? p.bio}</p>
+                      : <p className="muted" style={{ fontSize: 12 }}>No report yet — hit <b>Generate reports now</b> above (or wait for Sunday). Live analytics below already track.</p>}
                     <div className="mstat-list">
                       {STAT_META.map(s => (
-                        <StatTile key={s.key} jid={p.jid} statKey={s.key} label={s.label} icon={s.icon} hint={s.hint} stat={p.stats[s.key]} />
+                        <StatTile key={s.key} jid={p.jid} statKey={s.key} label={s.label} icon={s.icon} hint={s.hint}
+                          stat={stats[s.key]} onLock={() => toggleLock(p.jid, s.key, !(stats[s.key]?.locked))} />
                       ))}
                     </div>
                   </div>
 
-                  {/* live code analytics */}
                   <div className="member-section">
                     <div className="member-section-title">Live analytics <span className="muted">· no tokens</span></div>
                     {p.code ? <CodeStatsView code={prof?.code ?? p.code} replyNetwork={prof?.reply_network ?? []} />
                       : <p className="muted" style={{ fontSize: 12 }}>Not enough recent activity.</p>}
                   </div>
 
-                  {/* groups */}
                   {prof && prof.groups.length > 0 && (
                     <div className="member-section">
                       <div className="member-section-title">Seen in</div>
@@ -215,6 +270,10 @@ export function MembersPanel({ version, groups }: { version: number; groups: Gro
                         ))}
                       </div>
                     </div>
+                  )}
+
+                  {p.has_report && (
+                    <button className="member-reset" onClick={() => resetReport(p.jid, p.name)}>Reset dossier</button>
                   )}
                 </div>
               )}

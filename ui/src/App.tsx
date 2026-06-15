@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { type CSSProperties, type MouseEvent as ReactMouseEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { api, post, type Status } from './api';
 import { useWs, type WsEvent } from './useWs';
 import { QrLogin } from './components/QrLogin';
@@ -24,6 +24,38 @@ export default function App() {
   const [selectedJid, setSelectedJid] = useState<string | null>(null);
   const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null);
   const [mobileView, setMobileView] = useState<'chat' | 'side'>('chat'); // mobile: chat vs side panel
+  // draggable divider between feed and the controls/tabs panel (desktop). Persisted across reloads.
+  const [sideWidth, setSideWidth] = useState<number | null>(() => {
+    const v = typeof localStorage !== 'undefined' ? localStorage.getItem('sideWidth') : null;
+    return v ? Number(v) : null;
+  });
+  const mainRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (sideWidth != null) localStorage.setItem('sideWidth', String(sideWidth));
+  }, [sideWidth]);
+
+  const startResize = (e: ReactMouseEvent) => {
+    e.preventDefault();
+    const main = mainRef.current;
+    if (!main) return;
+    const rect = main.getBoundingClientRect();
+    const onMove = (ev: globalThis.MouseEvent) => {
+      const w = rect.right - ev.clientX; // side panel grows as you drag left
+      setSideWidth(Math.max(300, Math.min(rect.width - 380, w)));
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+  const resetResize = () => { setSideWidth(null); localStorage.removeItem('sideWidth'); };
 
   const refreshStatus = useCallback(() => {
     api<Status>('/api/status').then(setStatus).catch(() => undefined);
@@ -167,7 +199,12 @@ export default function App() {
             <button className="addtab" onClick={() => setShowPicker(true)}>+ Add group</button>
           </div>
 
-          <div className="main" data-mobile={mobileView}>
+          <div
+            className={`main ${sideWidth != null ? 'resized' : ''}`}
+            data-mobile={mobileView}
+            ref={mainRef}
+            style={sideWidth != null ? ({ '--side-w': `${sideWidth}px` } as CSSProperties) : undefined}
+          >
             <div className="feed-col">
               <LiveFeed
                 items={feed}
@@ -199,6 +236,12 @@ export default function App() {
                 <button onClick={() => selectedJid && post('/api/sleep', { jid: selectedJid })} title="Put ForceAI to sleep until someone says 'ForceAI'">Sleep 💤</button>
               </div>
             </div>
+            <div
+              className="col-resizer"
+              onMouseDown={startResize}
+              onDoubleClick={resetResize}
+              title="Drag to resize · double-click to reset"
+            />
             <div className="side-col">
               <div className="tabs">
                 {(['memory', 'voice', 'members', 'stickers', 'stats', 'settings'] as Tab[]).map(t => (

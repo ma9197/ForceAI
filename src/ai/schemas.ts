@@ -96,6 +96,32 @@ export const VoiceProfileSchema = z.object({
   ),
 });
 
+const StatJudgmentSchema = z.object({
+  value: z.number().describe('Numeric score. mood & aggression: 0-100. iq: a playful sharpness score, roughly 55-145.'),
+  label: z.string().describe('One or two word descriptor, e.g. "upbeat", "sharp", "heated", "chill".'),
+  reason: z.string().describe('One short line: why this value, or what changed since last week (the basis for the move).'),
+});
+
+export const MemberReportSchema = z.object({
+  bio: z.string().describe('2-5 sentence evolving portrait: their texting personality, how they deal with others, recurring traits, overall vibe. Refine the prior bio rather than rewriting from scratch.'),
+  talking_style: z.string().describe('Short phrase capturing how they text.'),
+  week_summary: z.string().describe('1-2 lines on what they were up to / anything notable this period.'),
+  mood: StatJudgmentSchema.describe('Mood & energy. 0 = low/down, 100 = upbeat/high-energy.'),
+  iq: StatJudgmentSchema.describe('Playful "sharpness" — based on argument quality, wit, references, coherence. NOT a real IQ test. ~55-145.'),
+  aggression: StatJudgmentSchema.describe('Temperament. 0 = calm/gentle, 100 = heated/aggressive.'),
+});
+
+/** Wrapper used for both deep (single member) and batched (several members) report calls. */
+export const BatchReportSchema = z.object({
+  reports: z.array(z.object({
+    member_jid: z.string().describe('The member jid, exactly as labeled in the input.'),
+    report: MemberReportSchema,
+  })).describe('One entry per member you were given.'),
+});
+
+export type MemberReportOut = z.infer<typeof MemberReportSchema>;
+export type BatchReportOut = z.infer<typeof BatchReportSchema>;
+
 export type GateResultOut = z.infer<typeof GateResultSchema>;
 export type ActionPlanOut = z.infer<typeof ActionPlanSchema>;
 export type FactExtractionOut = z.infer<typeof FactExtractionSchema>;

@@ -227,6 +227,22 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
   fastify.get<{ Params: { jid: string; statKey: string } }>('/api/people/:jid/stat/:statKey/history', async (req) =>
     app.repo.getStatHistory(decodeURIComponent(req.params.jid), req.params.statKey));
 
+  // Manually run the weekly report job (also does the first backfill). Returns {status, updated}.
+  fastify.post('/api/people/report-now', async () => app.generateMemberReports());
+
+  // Lock/unlock a stat so the weekly AI pass won't change it.
+  fastify.post<{ Params: { jid: string; statKey: string }; Body: { locked?: boolean } }>(
+    '/api/people/:jid/stat/:statKey/lock', async (req) => {
+      app.lockMemberStat(decodeURIComponent(req.params.jid), req.params.statKey, req.body?.locked !== false);
+      return { ok: true };
+    });
+
+  // Delete/reset a person's whole report (and its history + locks) so it rebuilds from scratch.
+  fastify.delete<{ Params: { jid: string } }>('/api/people/:jid/report', async (req) => {
+    app.deleteMemberReport(decodeURIComponent(req.params.jid));
+    return { ok: true };
+  });
+
   fastify.get('/api/stickers', async () => app.repo.getStickers());
 
   fastify.get<{ Params: { id: string } }>('/api/stickers/:id/image', async (req, reply) => {

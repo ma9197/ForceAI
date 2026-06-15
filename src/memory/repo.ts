@@ -419,6 +419,41 @@ export class Repo {
     this.db.prepare('DELETE FROM member_observations WHERE ts < ?').run(beforeTs);
   }
 
+  // ---- inputs for the weekly reporter job (all pooled across a person's groups) ----
+
+  /** Humans (excl. bot/owner) who sent a message since `sinceTs`, with their count in that window. */
+  getActiveMemberCounts(sinceTs: number): Map<string, number> {
+    const rows = this.db.prepare(`
+      SELECT sender_jid, COUNT(*) AS c FROM messages
+      WHERE is_bot = 0 AND is_owner = 0 AND type != 'reaction' AND ts > ?
+      GROUP BY sender_jid
+    `).all(sinceTs) as { sender_jid: string; c: number }[];
+    return new Map(rows.map(r => [r.sender_jid, r.c]));
+  }
+
+  /** All current facts about a person, pooled across every group. */
+  getFactsForMember(memberJid: string): FactRow[] {
+    return this.db.prepare(
+      'SELECT * FROM facts WHERE member_jid = ? AND superseded_by IS NULL ORDER BY created_at ASC'
+    ).all(memberJid) as FactRow[];
+  }
+
+  /** member_style voice notes about a person, pooled across groups. */
+  getMemberStyleNotes(memberJid: string): { content: string; example: string | null }[] {
+    return this.db.prepare(
+      "SELECT content, example FROM voice_items WHERE category = 'member_style' AND member_jid = ? AND superseded_by IS NULL"
+    ).all(memberJid) as { content: string; example: string | null }[];
+  }
+
+  /** A recent sample of a person's own text messages (across groups) for the report digest. */
+  getMemberMessageSample(memberJid: string, sinceTs: number, limit: number): { chat_jid: string; text: string; ts: number }[] {
+    return this.db.prepare(`
+      SELECT chat_jid, text, ts FROM messages
+      WHERE sender_jid = ? AND is_bot = 0 AND type != 'reaction' AND text IS NOT NULL AND text != '' AND ts > ?
+      ORDER BY ts DESC LIMIT ?
+    `).all(memberJid, sinceTs, limit) as { chat_jid: string; text: string; ts: number }[];
+  }
+
   // ---- stickers ----
   insertSticker(filePath: string, sha256: string): { id: number; existed: boolean } {
     const existing = this.db.prepare('SELECT id FROM stickers WHERE sha256 = ?').get(sha256) as { id: number } | undefined;
