@@ -170,12 +170,20 @@ export function openDb(): Database.Database {
       ts          INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_member_obs ON member_observations(member_jid, ts);
+
+    -- people the owner has permanently removed: never profiled/tracked again (their data is wiped on ignore)
+    CREATE TABLE IF NOT EXISTS member_ignored (
+      jid         TEXT PRIMARY KEY,
+      created_at  INTEGER
+    );
   `);
 
   // migrations for DBs created before multi-group support
   try { db.exec('ALTER TABLE decisions ADD COLUMN chat_jid TEXT'); } catch { /* column exists */ }
   // local path to a downloaded inbound image (for Claude vision)
   try { db.exec('ALTER TABLE messages ADD COLUMN media_path TEXT'); } catch { /* column exists */ }
+  // owner-set member names: locked so WhatsApp pushName never overwrites a manual rename
+  try { db.exec('ALTER TABLE members ADD COLUMN name_locked INTEGER NOT NULL DEFAULT 0'); } catch { /* column exists */ }
   // voice items: owner review flag. New items default to 0 (unreviewed) so the owner vets them.
   // checked is only a visual marker — items feed the bot's voice whether reviewed or not.
   try { db.exec('ALTER TABLE voice_items ADD COLUMN checked INTEGER NOT NULL DEFAULT 0'); } catch { /* column exists */ }

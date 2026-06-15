@@ -116,6 +116,9 @@ export class Normalizer {
     if (!fromMe && senderJid.includes('@')) {
       this.repo.upsertMember(senderJid, msg.pushName ?? null, pn, ts);
       this.repo.bumpMemberMessageCount(senderJid);
+      // use the canonical name (so an owner-set rename shows in feed + transcript, not the pushName)
+      const canonical = this.repo.getMember(senderJid)?.display_name;
+      if (canonical) norm.senderName = canonical;
     }
 
     return norm;

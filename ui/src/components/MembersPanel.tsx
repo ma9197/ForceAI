@@ -137,12 +137,17 @@ export function MembersPanel({ version, groups }: { version: number; groups: Gro
   const [profiles, setProfiles] = useState<Record<string, PersonProfile>>({});
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameText, setRenameText] = useState('');
+  const [ignored, setIgnored] = useState<{ jid: string; name: string }[]>([]);
+  const [showIgnored, setShowIgnored] = useState(false);
 
   const groupName = useCallback((jid: string) =>
     groups.find(g => g.jid === jid)?.name ?? jid.split('@')[0], [groups]);
 
   const reload = useCallback(async () => {
     await api<PersonSummary[]>('/api/people').then(setPeople).catch(() => undefined);
+    await api<{ jid: string; name: string }[]>('/api/people/ignored').then(setIgnored).catch(() => undefined);
     setProfiles({}); // invalidate cached profiles; the open one refetches via the effect below
   }, []);
 
@@ -188,6 +193,26 @@ export function MembersPanel({ version, groups }: { version: number; groups: Gro
   const resetReport = async (jid: string, name: string) => {
     if (!confirm(`Reset ${name}'s dossier? Their bio + all stat history is deleted and rebuilds from scratch on the next report.`)) return;
     await fetch(`/api/people/${encodeURIComponent(jid)}/report`, { method: 'DELETE' });
+    await reload();
+  };
+
+  const saveRename = async (jid: string) => {
+    const name = renameText.trim();
+    if (!name) return;
+    await post(`/api/people/${encodeURIComponent(jid)}/rename`, { name });
+    setRenaming(null);
+    await reload();
+  };
+
+  const ignorePerson = async (jid: string, name: string) => {
+    if (!confirm(`Stop tracking ${name} permanently?\n\nTheir dossier, facts and voice notes are deleted and the bot will never profile them again. Their chat messages stay, and you can undo this from "Ignored people".`)) return;
+    await post(`/api/people/${encodeURIComponent(jid)}/ignore`, {});
+    if (openJid === jid) setOpenJid(null);
+    await reload();
+  };
+
+  const unignorePerson = async (jid: string) => {
+    await post(`/api/people/${encodeURIComponent(jid)}/unignore`, {});
     await reload();
   };
 
@@ -272,15 +297,49 @@ export function MembersPanel({ version, groups }: { version: number; groups: Gro
                     </div>
                   )}
 
-                  {p.has_report && (
-                    <button className="member-reset" onClick={() => resetReport(p.jid, p.name)}>Reset dossier</button>
-                  )}
+                  <div className="member-actions">
+                    {renaming === p.jid ? (
+                      <>
+                        <input
+                          className="member-rename-input" value={renameText} autoFocus
+                          onChange={e => setRenameText(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') void saveRename(p.jid); if (e.key === 'Escape') setRenaming(null); }}
+                        />
+                        <button className="primary" onClick={() => saveRename(p.jid)}>Save name</button>
+                        <button onClick={() => setRenaming(null)}>Cancel</button>
+                      </>
+                    ) : (
+                      <>
+                        <button onClick={() => { setRenaming(p.jid); setRenameText(p.name); }}>✎ Rename</button>
+                        {p.has_report && <button onClick={() => resetReport(p.jid, p.name)}>Reset dossier</button>}
+                        <button className="member-ignore" onClick={() => ignorePerson(p.jid, p.name)}>🚫 Stop tracking</button>
+                      </>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
           );
         })}
       </div>
+
+      {ignored.length > 0 && (
+        <div className="member-ignored-sec">
+          <button className="member-ignored-toggle" onClick={() => setShowIgnored(v => !v)}>
+            {showIgnored ? '▾' : '▸'} Ignored people ({ignored.length})
+          </button>
+          {showIgnored && (
+            <div className="member-ignored-list">
+              {ignored.map(ig => (
+                <div key={ig.jid} className="member-ignored-row">
+                  <span>🚫 {ig.name}</span>
+                  <button onClick={() => unignorePerson(ig.jid)}>Resume tracking</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

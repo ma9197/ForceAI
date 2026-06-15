@@ -334,8 +334,17 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent2); }
 .mstat-lockbtn { padding: 2px 6px; font-size: 12px; border-radius: 6px; background: transparent; border: 1px solid var(--border); opacity: 0.55; line-height: 1; }
 .mstat-lockbtn:hover { opacity: 1; border-color: var(--accent2); }
 .mstat-lockbtn.on { opacity: 1; border-color: var(--warn); background: rgba(255, 180, 84, 0.12); }
-.member-reset { margin-top: 2px; align-self: flex-start; font-size: 11px; padding: 4px 11px; color: var(--danger); }
-.member-reset:hover { border-color: var(--danger); }
+.member-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; align-items: center; }
+.member-actions button { font-size: 11px; padding: 4px 10px; }
+.member-rename-input { font-size: 13px; padding: 5px 9px; flex: 1; min-width: 130px; }
+.member-ignore { color: var(--danger); }
+.member-ignore:hover { border-color: var(--danger); }
+.member-ignored-sec { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 8px; }
+.member-ignored-toggle { background: transparent; border: none; color: var(--muted); font-size: 12px; padding: 4px 0; }
+.member-ignored-toggle:hover { color: var(--text); border: none; }
+.member-ignored-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.member-ignored-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--muted); padding: 3px 2px; }
+.member-ignored-row button { font-size: 11px; padding: 3px 9px; }
 .mstat-body { padding: 0 10px 10px; }
 .mstat-reason { font-size: 12px; color: var(--text); margin: 2px 0 8px; font-style: italic; }
 .mstat-timeline { display: flex; flex-direction: column; gap: 7px; border-left: 2px solid var(--border); padding-left: 10px; }

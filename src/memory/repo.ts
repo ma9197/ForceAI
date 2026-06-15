@@ -23,10 +23,40 @@ export class Repo {
       INSERT INTO members(jid, pn_jid, display_name, first_seen, last_seen, message_count)
       VALUES(?, ?, ?, ?, ?, 0)
       ON CONFLICT(jid) DO UPDATE SET
-        display_name = COALESCE(excluded.display_name, members.display_name),
+        display_name = CASE WHEN members.name_locked = 1 THEN members.display_name
+                            ELSE COALESCE(excluded.display_name, members.display_name) END,
         pn_jid = COALESCE(excluded.pn_jid, members.pn_jid),
         last_seen = excluded.last_seen
     `).run(jid, pnJid, name, ts, ts);
+  }
+
+  /** Owner rename: set the name and lock it so WhatsApp's pushName never overwrites it. */
+  setMemberName(jid: string, name: string): void {
+    this.db.prepare('UPDATE members SET display_name = ?, name_locked = 1 WHERE jid = ?').run(name, jid);
+    // rewrite the stored transcript/feed name on existing messages so the rename shows retroactively
+    this.db.prepare('UPDATE messages SET sender_name = ? WHERE sender_jid = ?').run(name, jid);
+  }
+
+  // ---- ignore list: people the owner has permanently removed from tracking ----
+  isIgnored(jid: string): boolean {
+    return !!this.db.prepare('SELECT 1 FROM member_ignored WHERE jid = ?').get(jid);
+  }
+
+  getIgnoredJids(): string[] {
+    return (this.db.prepare('SELECT jid FROM member_ignored ORDER BY created_at DESC').all() as { jid: string }[]).map(r => r.jid);
+  }
+
+  /** Permanently stop tracking a person: wipe all their profile data + block future profiling. */
+  ignoreMember(jid: string): void {
+    this.db.prepare('INSERT OR IGNORE INTO member_ignored(jid, created_at) VALUES(?, ?)').run(jid, Date.now());
+    this.db.prepare('DELETE FROM facts WHERE member_jid = ?').run(jid);
+    this.db.prepare("DELETE FROM voice_items WHERE category = 'member_style' AND member_jid = ?").run(jid);
+    this.deleteMemberReport(jid); // reports + stat history + locks
+    this.db.prepare('DELETE FROM member_observations WHERE member_jid = ?').run(jid);
+  }
+
+  unignoreMember(jid: string): void {
+    this.db.prepare('DELETE FROM member_ignored WHERE jid = ?').run(jid);
   }
 
   bumpMemberMessageCount(jid: string): void {
@@ -123,6 +153,7 @@ export class Repo {
 
   // ---- facts (scoped per group — groups never share memory) ----
   insertFact(chatJid: string, memberJid: string, fact: string, category: string | null, confidence: number | null, sourceMessageId: string | null): number | null {
+    if (this.isIgnored(memberJid)) return null; // never profile an ignored person
     try {
       const res = this.db.prepare(`
         INSERT INTO facts(chat_jid, member_jid, fact, category, confidence, source_message_id, created_at)
@@ -149,12 +180,13 @@ export class Repo {
     ).all(chatJid) as FactRow[];
   }
 
-  /** Members who have actually spoken in this group — keeps group memory views isolated. */
+  /** Members who have actually spoken in this group — keeps group memory views isolated.
+   *  Excludes ignored people, so the bot never profiles or references them in memory/voice. */
   getMembersForChat(chatJid: string): MemberRow[] {
     return this.db.prepare(`
       SELECT * FROM members WHERE jid IN (
         SELECT DISTINCT sender_jid FROM messages WHERE chat_jid = ? AND is_bot = 0 AND is_owner = 0
-      ) ORDER BY message_count DESC
+      ) AND jid NOT IN (SELECT jid FROM member_ignored) ORDER BY message_count DESC
     `).all(chatJid) as MemberRow[];
   }
 
@@ -164,6 +196,7 @@ export class Repo {
 
   // ---- voice profiler (per-group learned texting style) ----
   insertVoiceItem(chatJid: string, category: string, content: string, example: string | null, memberJid: string | null): number | null {
+    if (memberJid && this.isIgnored(memberJid)) return null; // never profile an ignored person
     try {
       const res = this.db.prepare(`
         INSERT INTO voice_items(chat_jid, category, content, example, member_jid, created_at)
@@ -232,12 +265,12 @@ export class Repo {
 
   // ---- member reports (per-PERSON dossiers, global across groups) ----
 
-  /** Every real human who has spoken in any group (excludes the bot + owner). */
+  /** Every real human who has spoken in any group (excludes the bot, owner, and ignored people). */
   getPeople(): MemberRow[] {
     return this.db.prepare(`
       SELECT * FROM members WHERE jid IN (
         SELECT DISTINCT sender_jid FROM messages WHERE is_bot = 0 AND is_owner = 0
-      ) ORDER BY message_count DESC
+      ) AND jid NOT IN (SELECT jid FROM member_ignored) ORDER BY message_count DESC
     `).all() as MemberRow[];
   }
 
@@ -426,6 +459,7 @@ export class Repo {
     const rows = this.db.prepare(`
       SELECT sender_jid, COUNT(*) AS c FROM messages
       WHERE is_bot = 0 AND is_owner = 0 AND type != 'reaction' AND ts > ?
+        AND sender_jid NOT IN (SELECT jid FROM member_ignored)
       GROUP BY sender_jid
     `).all(sinceTs) as { sender_jid: string; c: number }[];
     return new Map(rows.map(r => [r.sender_jid, r.c]));

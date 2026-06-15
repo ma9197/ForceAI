@@ -243,6 +243,31 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     return { ok: true };
   });
 
+  // Rename a person — reflected everywhere the AI refers to them (transcript, memory, voice, reports).
+  fastify.post<{ Params: { jid: string }; Body: { name?: string } }>('/api/people/:jid/rename', async (req, reply) => {
+    const name = req.body?.name?.trim();
+    if (!name) return reply.code(400).send({ error: 'name required' });
+    app.repo.setMemberName(decodeURIComponent(req.params.jid), name);
+    app.prompts.memoryVersion += 1;
+    return { ok: true };
+  });
+
+  // Permanently stop tracking a person: wipe their data + never profile them again.
+  fastify.post<{ Params: { jid: string } }>('/api/people/:jid/ignore', async (req) => {
+    app.repo.ignoreMember(decodeURIComponent(req.params.jid));
+    app.prompts.memoryVersion += 1;
+    return { ok: true };
+  });
+
+  fastify.post<{ Params: { jid: string } }>('/api/people/:jid/unignore', async (req) => {
+    app.repo.unignoreMember(decodeURIComponent(req.params.jid));
+    app.prompts.memoryVersion += 1;
+    return { ok: true };
+  });
+
+  fastify.get('/api/people/ignored', async () =>
+    app.repo.getIgnoredJids().map(jid => ({ jid, name: app.repo.getMember(jid)?.display_name ?? jid.split('@')[0] })));
+
   fastify.get('/api/stickers', async () => app.repo.getStickers());
 
   fastify.get<{ Params: { id: string } }>('/api/stickers/:id/image', async (req, reply) => {
