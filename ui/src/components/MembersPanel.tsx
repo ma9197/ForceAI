@@ -293,10 +293,11 @@ export function MembersPanel({ version, groups }: { version: number; groups: Gro
                   <div className="member-section">
                     <div className="member-section-title">🚫 Boundaries <span className="muted">· highest priority · all groups</span></div>
                     <p className="muted" style={{ fontSize: 12, margin: '0 0 6px' }}>
-                      Hard limits for how ForceAI treats <b>{p.name}</b>, applied in every group. These override its
-                      persona, memories, jokes, and even your own in-chat Admin/Influence — it will never cross them.
-                      e.g. <i>"Never roast or be toxic to him, keep it respectful and positive even if he loses an
-                      argument. Never joke about his ex."</i> Leave empty for normal treatment.
+                      Hard limits for how ForceAI treats <b>{p.name}</b>, applied in every group and <b>every context</b> —
+                      not just direct replies. It won't roast or target them even if other members bait it, joke about them,
+                      or ask a question aimed at them. Overrides its persona, memories, and even your own in-chat
+                      Admin/Influence. e.g. <i>"Never roast or be toxic to him, keep it respectful and positive even if he
+                      loses an argument. Never joke about his ex."</i> Leave empty for normal treatment.
                     </p>
                     <textarea
                       className="member-instr"
@@ -309,7 +310,7 @@ export function MembersPanel({ version, groups }: { version: number; groups: Gro
                       <button className="primary" disabled={instrBusy === p.jid} onClick={() => saveInstructions(p.jid)}>
                         {instrBusy === p.jid ? 'Saving…' : 'Save boundaries'}
                       </button>
-                      {instrSaved === p.jid && <span className="voice-feedback">✓ Saved — applies on the next reply</span>}
+                      {instrSaved === p.jid && <span className="voice-feedback">✓ Saved — active in every context from its next message</span>}
                       {instrSaved === '__err' && <span className="voice-feedback" style={{ color: 'var(--warn)' }}>Couldn't save — try again</span>}
                     </div>
                   </div>
