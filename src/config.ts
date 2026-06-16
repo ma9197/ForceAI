@@ -171,19 +171,22 @@ export const DEFAULT_MSG_SUFFIX = '';
 export const BOT_NAME = 'ForceAI';
 export const BOT_NAME_REGEX = /\bforce\s?ai\b/i;
 
-// The group's local timezone — the bot's sense of "now". A clear anchor it can convert from.
-export const BOT_TIMEZONE = 'Asia/Baku';
-export const BOT_TIMEZONE_LABEL = 'Baku, UTC+4';
+// The bot's "now" is anchored to Baku. Azerbaijan is UTC+4 ALL YEAR (no daylight saving), so we add
+// the offset to UTC with plain arithmetic — never relying on the host's timezone database, which
+// mis-converted named zones on the server (returned UTC for "Asia/Baku").
+export const BOT_UTC_OFFSET_HOURS = 4;
 
 /** One-line real-world date/time stamp for AI requests, so the bot knows the current day/time/year. */
 export function currentTimeLine(): string {
   const now = new Date();
-  const local = new Intl.DateTimeFormat('en-GB', {
-    timeZone: BOT_TIMEZONE, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
-    hour: '2-digit', minute: '2-digit', hour12: false,
-  }).format(now);
-  const utc = `${now.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
-  return `Current real-world date & time: ${local} (${BOT_TIMEZONE_LABEL}) — ${utc}. Most of the time you won't need this, but use it for any date/time/"how long ago" awareness; work out other cities from the UTC value.`;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  // shift the timestamp by the offset, then read UTC fields — this gives Baku wall-clock reliably
+  const b = new Date(now.getTime() + BOT_UTC_OFFSET_HOURS * 3_600_000);
+  const baku = `${days[b.getUTCDay()]} ${b.getUTCDate()} ${months[b.getUTCMonth()]} ${b.getUTCFullYear()}, ${pad(b.getUTCHours())}:${pad(b.getUTCMinutes())}`;
+  const utc = `${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())} on ${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}`;
+  return `Current real-world time is ${baku} in Baku (UTC+4) — i.e. ${utc} UTC. To name another city's time, add its UTC offset to the UTC time above. Current offsets (these regions have NO daylight saving): Baku/Tbilisi/Dubai +4, Istanbul/Moscow +3, Astana/Almaty/Tashkent +5; Europe & the US shift with DST, so work those out from UTC for today's date. You usually won't need this — use it only for date/time awareness.`;
 }
 export const ADMIN_PREFIX = /^admin:\s*/i;
 export const INTRO_MESSAGE = 'Yooo @ForceAI is here 💀🔥';
