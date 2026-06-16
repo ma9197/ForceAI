@@ -50,7 +50,7 @@ export const ActionSchema = z.discriminatedUnion('type', [
   }),
   z.object({
     type: z.literal('sleep'),
-  }).describe('Go to sleep (super idle) — ONLY when your OWNER tells you to rest/sleep/be quiet. You may pair it with a short goodbye message action.'),
+  }).describe('Go to sleep (super idle) — when your OWNER tells you to rest, OR when any member genuinely wants you to stop/go quiet/go away (they got annoyed). You may pair it with a short goodbye message action. Wakes when someone says your name again.'),
   z.object({
     type: z.literal('nothing'),
   }),
