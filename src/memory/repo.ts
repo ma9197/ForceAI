@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import type { FactRow, MemberRow, MemberCodeStats, MemberReportRow, MemberStatHistoryRow, NormalizedMessage, StickerRow } from '../types.js';
-import { REPORT } from '../config.js';
+import { REPORT, DEFAULT_CLOCK_CITIES, type ClockCity } from '../config.js';
 
 export class Repo {
   constructor(public db: Database.Database) {}
@@ -15,6 +15,23 @@ export class Repo {
     this.db.prepare(
       'INSERT INTO config(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
     ).run(key, value);
+  }
+
+  // ---- world clock (cities the bot is time-aware of) ----
+  getClockCities(): ClockCity[] {
+    const raw = this.getConfig('clock_cities');
+    if (!raw) return DEFAULT_CLOCK_CITIES;
+    try {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr) && arr.every((c) => c && typeof c.label === 'string' && typeof c.offset === 'number')) {
+        return arr as ClockCity[];
+      }
+    } catch { /* fall through to default */ }
+    return DEFAULT_CLOCK_CITIES;
+  }
+
+  setClockCities(cities: ClockCity[]): void {
+    this.setConfig('clock_cities', JSON.stringify(cities));
   }
 
   // ---- members ----

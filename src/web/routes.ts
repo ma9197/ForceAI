@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import type { App } from '../app.js';
-import { DATA_DIR, resolveStickerPath, applyMentions } from '../config.js';
+import { DATA_DIR, resolveStickerPath, applyMentions, CITY_CATALOG, cityNow, type ClockCity } from '../config.js';
 import { logger } from '../logger.js';
 import { FREQ_LEVELS, PERSONA_PRESETS } from '../ai/prompts.js';
 
@@ -282,6 +282,31 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
   fastify.delete<{ Params: { id: string } }>('/api/initiative/:id', async (req) => {
     app.deleteInitiativePrinciple(Number(req.params.id));
     return { ok: true };
+  });
+
+  // ---- world clock (cities the bot is time-aware of) ----
+  fastify.get('/api/clock', async () => {
+    const cities = app.repo.getClockCities();
+    const now = new Date();
+    return {
+      cities: cities.map((c) => ({ ...c, now: cityNow(c, now) })),
+      catalog: CITY_CATALOG.map((c) => c.label),
+    };
+  });
+  fastify.post<{ Body: { labels?: string[] } }>('/api/clock', async (req, reply) => {
+    const labels = req.body?.labels;
+    if (!Array.isArray(labels)) return reply.code(400).send({ error: 'labels[] required' });
+    // resolve each chosen label to its catalog entry (offset + dst) — drop unknowns, dedup, keep order
+    const seen = new Set<string>();
+    const cities: ClockCity[] = [];
+    for (const label of labels) {
+      if (seen.has(label)) continue;
+      const match = CITY_CATALOG.find((c) => c.label === label);
+      if (match) { cities.push(match); seen.add(label); }
+    }
+    app.repo.setClockCities(cities);
+    const now = new Date();
+    return { cities: cities.map((c) => ({ ...c, now: cityNow(c, now) })), catalog: CITY_CATALOG.map((c) => c.label) };
   });
 
   // feed media: an image/sticker from any message (inbound or bot-sent), lazily fetched + cached

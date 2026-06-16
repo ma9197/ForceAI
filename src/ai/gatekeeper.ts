@@ -1,5 +1,5 @@
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
-import { ARBITER, currentTimeLine } from '../config.js';
+import { ARBITER, formatCityTimes } from '../config.js';
 import { logger } from '../logger.js';
 import type { Repo } from '../memory/repo.js';
 import type { GateResult } from '../types.js';
@@ -37,7 +37,7 @@ export class Gatekeeper {
         system: GATEKEEPER_SYSTEM,
         messages: [{
           role: 'user',
-          content: `${transcript}\n${currentTimeLine()}${contextNote}${forceNote}`,
+          content: `${transcript}\n${formatCityTimes(this.repo.getClockCities())}${contextNote}${forceNote}`,
         }],
         output_config: { format: zodOutputFormat(GateResultSchema) },
       });

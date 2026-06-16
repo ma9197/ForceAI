@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { InitiativePrinciples } from './InitiativePrinciples';
+import { WorldClock } from './WorldClock';
 
 interface Settings {
   gatekeeper_model: string;
@@ -121,6 +122,8 @@ export function SettingsPanel({ onSaved }: { onSaved: () => void }) {
           style={{ width: 18, height: 18 }}
         />
       </div>
+
+      <WorldClock />
 
       <h3 style={{ margin: '18px 0 4px' }}>AI</h3>
 

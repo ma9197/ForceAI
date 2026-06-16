@@ -171,22 +171,70 @@ export const DEFAULT_MSG_SUFFIX = '';
 export const BOT_NAME = 'ForceAI';
 export const BOT_NAME_REGEX = /\bforce\s?ai\b/i;
 
-// The bot's "now" is anchored to Baku. Azerbaijan is UTC+4 ALL YEAR (no daylight saving), so we add
-// the offset to UTC with plain arithmetic — never relying on the host's timezone database, which
-// mis-converted named zones on the server (returned UTC for "Asia/Baku").
-export const BOT_UTC_OFFSET_HOURS = 4;
+// ---- World clock (the bot's real-world time awareness) ----
+// We compute every city's wall-clock time IN CODE from the (NTP-accurate) server UTC clock and hand
+// the model only the finished, labelled answers — no UTC value, no offsets, nothing for it to
+// recalculate. Earlier versions gave the model UTC + an offset and it reliably grabbed the wrong
+// number / botched the arithmetic. Pure UTC math also avoids the host timezone DB (Intl returned
+// UTC for named zones on the server). DST is applied with explicit rules so it stays correct.
+export type ClockCity = { label: string; offset: number; dst?: 'eu' | 'us' };
 
-/** One-line real-world date/time stamp for AI requests, so the bot knows the current day/time/year. */
-export function currentTimeLine(): string {
-  const now = new Date();
+// Catalog for the dashboard dropdown. offset = standard UTC offset in hours; `dst` marks cities that
+// shift +1h in summer. Caucasus / Russia / Central Asia / Gulf / Turkey have NO DST (fixed offsets).
+export const CITY_CATALOG: ClockCity[] = [
+  { label: 'Baku', offset: 4 }, { label: 'Tbilisi', offset: 4 }, { label: 'Yerevan', offset: 4 },
+  { label: 'Dubai', offset: 4 }, { label: 'Istanbul', offset: 3 }, { label: 'Moscow', offset: 3 },
+  { label: 'Minsk', offset: 3 }, { label: 'Kyiv', offset: 2, dst: 'eu' }, { label: 'Astana', offset: 5 },
+  { label: 'Almaty', offset: 5 }, { label: 'Tashkent', offset: 5 }, { label: 'Bishkek', offset: 6 },
+  { label: 'Tehran', offset: 3.5 }, { label: 'Karachi', offset: 5 }, { label: 'Delhi', offset: 5.5 },
+  { label: 'London', offset: 0, dst: 'eu' }, { label: 'Berlin', offset: 1, dst: 'eu' },
+  { label: 'Paris', offset: 1, dst: 'eu' }, { label: 'Warsaw', offset: 1, dst: 'eu' },
+  { label: 'Madrid', offset: 1, dst: 'eu' }, { label: 'Rome', offset: 1, dst: 'eu' },
+  { label: 'Amsterdam', offset: 1, dst: 'eu' }, { label: 'Stockholm', offset: 1, dst: 'eu' },
+  { label: 'Athens', offset: 2, dst: 'eu' }, { label: 'New York', offset: -5, dst: 'us' },
+  { label: 'Toronto', offset: -5, dst: 'us' }, { label: 'Chicago', offset: -6, dst: 'us' },
+  { label: 'Denver', offset: -7, dst: 'us' }, { label: 'Los Angeles', offset: -8, dst: 'us' },
+  { label: 'Tokyo', offset: 9 }, { label: 'Beijing', offset: 8 }, { label: 'Singapore', offset: 8 },
+];
+
+export const DEFAULT_CLOCK_CITIES: ClockCity[] = [
+  { label: 'Baku', offset: 4 }, { label: 'Astana', offset: 5 },
+  { label: 'Istanbul', offset: 3 }, { label: 'Moscow', offset: 3 },
+];
+
+const _CLOCK_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const _CLOCK_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function nthSundayUTC(year: number, monthIdx0: number, n: number): number {
+  const dow = new Date(Date.UTC(year, monthIdx0, 1)).getUTCDay();
+  return Date.UTC(year, monthIdx0, 1 + ((7 - dow) % 7) + (n - 1) * 7);
+}
+function lastSundayUTC(year: number, monthIdx0: number): number {
+  const last = new Date(Date.UTC(year, monthIdx0 + 1, 0));
+  return Date.UTC(year, monthIdx0, last.getUTCDate() - last.getUTCDay());
+}
+/** +1 hour during summer DST, else 0. EU: last-Sun-Mar→last-Sun-Oct. US: 2nd-Sun-Mar→1st-Sun-Nov. */
+function dstShiftHours(now: Date, rule?: 'eu' | 'us'): number {
+  if (!rule) return 0;
+  const y = now.getUTCFullYear();
+  const t = now.getTime();
+  if (rule === 'eu') return t >= lastSundayUTC(y, 2) + 3_600_000 && t < lastSundayUTC(y, 9) + 3_600_000 ? 1 : 0;
+  return t >= nthSundayUTC(y, 2, 2) + 7 * 3_600_000 && t < nthSundayUTC(y, 10, 1) + 6 * 3_600_000 ? 1 : 0;
+}
+
+/** Current wall-clock time in a city, computed purely from UTC arithmetic (no host timezone DB). */
+export function cityNow(city: ClockCity, now = new Date()): string {
+  const d = new Date(now.getTime() + (city.offset + dstShiftHours(now, city.dst)) * 3_600_000);
   const pad = (n: number) => String(n).padStart(2, '0');
-  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-  // shift the timestamp by the offset, then read UTC fields — this gives Baku wall-clock reliably
-  const b = new Date(now.getTime() + BOT_UTC_OFFSET_HOURS * 3_600_000);
-  const baku = `${days[b.getUTCDay()]} ${b.getUTCDate()} ${months[b.getUTCMonth()]} ${b.getUTCFullYear()}, ${pad(b.getUTCHours())}:${pad(b.getUTCMinutes())}`;
-  const utc = `${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())} on ${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())}`;
-  return `Current real-world time is ${baku} in Baku (UTC+4) — i.e. ${utc} UTC. To name another city's time, add its UTC offset to the UTC time above. Current offsets (these regions have NO daylight saving): Baku/Tbilisi/Dubai +4, Istanbul/Moscow +3, Astana/Almaty/Tashkent +5; Europe & the US shift with DST, so work those out from UTC for today's date. You usually won't need this — use it only for date/time awareness.`;
+  return `${_CLOCK_DAYS[d.getUTCDay()]} ${d.getUTCDate()} ${_CLOCK_MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}, ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+}
+
+/** Pre-computed real-world times block for AI requests — the model reads these off; no math, no UTC. */
+export function formatCityTimes(cities: ClockCity[]): string {
+  const list = cities?.length ? cities : DEFAULT_CLOCK_CITIES;
+  const now = new Date();
+  const lines = list.map((c) => `• ${c.label}: ${cityNow(c, now)}`);
+  return `Current real-world time right now (already converted for each city — read these off exactly; do NOT recalculate or mention UTC):\n${lines.join('\n')}\nFor a city not in this list, estimate it relative to the nearest one above. You usually won't need this — use it only when the time or date genuinely matters.`;
 }
 export const ADMIN_PREFIX = /^admin:\s*/i;
 export const INTRO_MESSAGE = 'Yooo @ForceAI is here 💀🔥';
