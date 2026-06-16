@@ -66,12 +66,14 @@ export interface MemberCodeStats {
 export interface PersonSummary {
   jid: string; name: string; message_count: number; last_seen: number;
   bio: string | null; talking_style: string | null; has_report: boolean;
+  has_boundaries?: boolean;
   stats: Record<string, MemberStat>;
   code: MemberCodeStats | null;
 }
 
 export interface PersonProfile extends PersonSummary {
   first_seen: number; summary: string | null; week_start: number | null;
+  custom_instructions: string | null;
   groups: { chat_jid: string; count: number }[];
   reply_network: { jid: string; count: number; name: string }[];
 }

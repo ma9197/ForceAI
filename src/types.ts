@@ -67,6 +67,7 @@ export interface MemberRow {
   pn_jid: string | null;
   display_name: string | null;
   personality_notes: string | null;
+  custom_instructions: string | null;
   first_seen: number;
   last_seen: number;
   message_count: number;

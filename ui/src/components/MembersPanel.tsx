@@ -141,6 +141,9 @@ export function MembersPanel({ version, groups }: { version: number; groups: Gro
   const [renameText, setRenameText] = useState('');
   const [ignored, setIgnored] = useState<{ jid: string; name: string }[]>([]);
   const [showIgnored, setShowIgnored] = useState(false);
+  const [instrDraft, setInstrDraft] = useState<Record<string, string>>({});
+  const [instrBusy, setInstrBusy] = useState<string | null>(null);
+  const [instrSaved, setInstrSaved] = useState<string | null>(null);
 
   const groupName = useCallback((jid: string) =>
     groups.find(g => g.jid === jid)?.name ?? jid.split('@')[0], [groups]);
@@ -204,6 +207,25 @@ export function MembersPanel({ version, groups }: { version: number; groups: Gro
     await reload();
   };
 
+  const saveInstructions = async (jid: string) => {
+    const text = instrDraft[jid] ?? profiles[jid]?.custom_instructions ?? '';
+    setInstrBusy(jid);
+    try {
+      await post(`/api/people/${encodeURIComponent(jid)}/instructions`, { instructions: text });
+      const saved = text.trim() || null;
+      setProfiles(prev => (prev[jid] ? { ...prev, [jid]: { ...prev[jid], custom_instructions: saved } } : prev));
+      setPeople(ppl => ppl ? ppl.map(p => (p.jid === jid ? { ...p, has_boundaries: !!saved } : p)) : ppl);
+      setInstrDraft(prev => { const n = { ...prev }; delete n[jid]; return n; });
+      setInstrSaved(jid);
+      setTimeout(() => setInstrSaved(s => (s === jid ? null : s)), 2500);
+    } catch {
+      setInstrSaved('__err');
+      setTimeout(() => setInstrSaved(s => (s === '__err' ? null : s)), 2500);
+    } finally {
+      setInstrBusy(null);
+    }
+  };
+
   const ignorePerson = async (jid: string, name: string) => {
     if (!confirm(`Stop tracking ${name} permanently?\n\nTheir dossier, facts and voice notes are deleted and the bot will never profile them again. Their chat messages stay, and you can undo this from "Ignored people".`)) return;
     await post(`/api/people/${encodeURIComponent(jid)}/ignore`, {});
@@ -252,7 +274,7 @@ export function MembersPanel({ version, groups }: { version: number; groups: Gro
               <div className="member-head" onClick={() => setOpenJid(open ? null : p.jid)}>
                 <span className="member-avatar">{initial(p.name)}</span>
                 <div className="member-id">
-                  <div className="member-name">{p.name}</div>
+                  <div className="member-name">{p.name}{p.has_boundaries && <span className="member-boundary-badge" title="Has custom boundaries">🚫</span>}</div>
                   <div className="member-vibe muted">{vibe}</div>
                 </div>
                 <div className="member-chips">
@@ -268,6 +290,30 @@ export function MembersPanel({ version, groups }: { version: number; groups: Gro
 
               {open && (
                 <div className="member-body">
+                  <div className="member-section">
+                    <div className="member-section-title">🚫 Boundaries <span className="muted">· highest priority · all groups</span></div>
+                    <p className="muted" style={{ fontSize: 12, margin: '0 0 6px' }}>
+                      Hard limits for how ForceAI treats <b>{p.name}</b>, applied in every group. These override its
+                      persona, memories, jokes, and even your own in-chat Admin/Influence — it will never cross them.
+                      e.g. <i>"Never roast or be toxic to him, keep it respectful and positive even if he loses an
+                      argument. Never joke about his ex."</i> Leave empty for normal treatment.
+                    </p>
+                    <textarea
+                      className="member-instr"
+                      value={instrDraft[p.jid] ?? prof?.custom_instructions ?? ''}
+                      placeholder="e.g. Always keep it kind and respectful with him. No roasts, no toxic jokes, no sarcasm — only positive, supportive replies."
+                      onChange={e => setInstrDraft(prev => ({ ...prev, [p.jid]: e.target.value }))}
+                      rows={3}
+                    />
+                    <div className="member-instr-actions">
+                      <button className="primary" disabled={instrBusy === p.jid} onClick={() => saveInstructions(p.jid)}>
+                        {instrBusy === p.jid ? 'Saving…' : 'Save boundaries'}
+                      </button>
+                      {instrSaved === p.jid && <span className="voice-feedback">✓ Saved — applies on the next reply</span>}
+                      {instrSaved === '__err' && <span className="voice-feedback" style={{ color: 'var(--warn)' }}>Couldn't save — try again</span>}
+                    </div>
+                  </div>
+
                   <div className="member-section">
                     <div className="member-section-title">AI dossier</div>
                     {(prof?.bio ?? p.bio) ? <p className="member-bio">{prof?.bio ?? p.bio}</p>

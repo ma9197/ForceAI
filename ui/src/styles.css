@@ -396,6 +396,9 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent2); }
 .member-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; align-items: center; }
 .member-actions button { font-size: 11px; padding: 4px 10px; }
 .member-rename-input { font-size: 13px; padding: 5px 9px; flex: 1; min-width: 130px; }
+.member-instr { width: 100%; box-sizing: border-box; font-family: inherit; font-size: 13px; line-height: 1.5; padding: 8px 10px; resize: vertical; }
+.member-instr-actions { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.member-boundary-badge { font-size: 11px; margin-left: 6px; vertical-align: middle; }
 .member-ignore { color: var(--danger); }
 .member-ignore:hover { border-color: var(--danger); }
 .member-ignored-sec { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 8px; }

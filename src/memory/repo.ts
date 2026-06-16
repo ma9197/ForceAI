@@ -54,6 +54,19 @@ export class Repo {
     this.db.prepare('UPDATE messages SET sender_name = ? WHERE sender_jid = ?').run(name, jid);
   }
 
+  /** Owner-set per-person boundaries (global, all groups). Empty/blank clears them. */
+  setMemberInstructions(jid: string, text: string): void {
+    const v = text.trim();
+    this.db.prepare('UPDATE members SET custom_instructions = ? WHERE jid = ?').run(v || null, jid);
+  }
+
+  /** Members in this chat who have owner-set boundaries — fed (highest-priority) into every request. */
+  getBoundariesForChat(chatJid: string): { jid: string; name: string; instructions: string }[] {
+    return this.getMembersForChat(chatJid)
+      .filter(m => m.custom_instructions && m.custom_instructions.trim())
+      .map(m => ({ jid: m.jid, name: m.display_name ?? m.jid.split('@')[0], instructions: m.custom_instructions!.trim() }));
+  }
+
   // ---- ignore list: people the owner has permanently removed from tracking ----
   isIgnored(jid: string): boolean {
     return !!this.db.prepare('SELECT 1 FROM member_ignored WHERE jid = ?').get(jid);

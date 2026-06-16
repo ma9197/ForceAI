@@ -202,6 +202,7 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
         bio: report?.bio ?? null,
         talking_style: report?.talking_style ?? null,
         has_report: !!report,
+        has_boundaries: !!(m.custom_instructions && m.custom_instructions.trim()),
         stats: latestStatsObj(m.jid),
         code: code.get(m.jid) ?? null,
       };
@@ -220,6 +221,7 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
       message_count: m.message_count,
       first_seen: m.first_seen,
       last_seen: m.last_seen,
+      custom_instructions: m.custom_instructions ?? null,
       bio: report?.bio ?? null,
       summary: report?.summary ?? null,
       talking_style: report?.talking_style ?? null,
@@ -257,6 +259,13 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     if (!name) return reply.code(400).send({ error: 'name required' });
     app.repo.setMemberName(decodeURIComponent(req.params.jid), name);
     app.prompts.memoryVersion += 1;
+    return { ok: true };
+  });
+
+  // owner-set per-person boundaries (global, all groups) — highest-priority rule in the prompt
+  fastify.post<{ Params: { jid: string }; Body: { instructions?: string } }>('/api/people/:jid/instructions', async (req) => {
+    app.repo.setMemberInstructions(decodeURIComponent(req.params.jid), req.body?.instructions ?? '');
+    app.prompts.memoryVersion += 1; // refresh Block B in every group
     return { ok: true };
   });
 

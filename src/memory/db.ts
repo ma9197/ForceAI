@@ -204,6 +204,9 @@ export function openDb(): Database.Database {
   try { db.exec('ALTER TABLE messages ADD COLUMN media_path TEXT'); } catch { /* column exists */ }
   // owner-set member names: locked so WhatsApp pushName never overwrites a manual rename
   try { db.exec('ALTER TABLE members ADD COLUMN name_locked INTEGER NOT NULL DEFAULT 0'); } catch { /* column exists */ }
+  // owner-set per-person boundaries/instructions (global across all groups) — highest-priority rule,
+  // overrides persona, memory and even in-chat owner/Admin/Influence. Injected into every request.
+  try { db.exec('ALTER TABLE members ADD COLUMN custom_instructions TEXT'); } catch { /* column exists */ }
   // voice items: owner review flag. New items default to 0 (unreviewed) so the owner vets them.
   // checked is only a visual marker — items feed the bot's voice whether reviewed or not.
   try { db.exec('ALTER TABLE voice_items ADD COLUMN checked INTEGER NOT NULL DEFAULT 0'); } catch { /* column exists */ }

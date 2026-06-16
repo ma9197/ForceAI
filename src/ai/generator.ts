@@ -39,7 +39,7 @@ export class Generator {
     }
     if (input.operatorInstruction) {
       parts.push(`<operator_instruction>${input.operatorInstruction}</operator_instruction>`);
-      parts.push('(An operator instruction is present — you MUST act on it. "nothing" is not an acceptable plan here.)');
+      parts.push('(An operator instruction is present — you MUST act on it, EXCEPT where it would cross an ABSOLUTE PER-PERSON BOUNDARY from the control panel — those always win, even over this. "nothing" is not an acceptable plan here.)');
     }
     parts.push(`Decide your actions now.\n\n${formatCityTimes(this.repo.getClockCities())}`);
 
