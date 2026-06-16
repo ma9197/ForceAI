@@ -170,6 +170,21 @@ export const DEFAULT_MSG_SUFFIX = '';
 
 export const BOT_NAME = 'ForceAI';
 export const BOT_NAME_REGEX = /\bforce\s?ai\b/i;
+
+// The group's local timezone — the bot's sense of "now". A clear anchor it can convert from.
+export const BOT_TIMEZONE = 'Asia/Baku';
+export const BOT_TIMEZONE_LABEL = 'Baku, UTC+4';
+
+/** One-line real-world date/time stamp for AI requests, so the bot knows the current day/time/year. */
+export function currentTimeLine(): string {
+  const now = new Date();
+  const local = new Intl.DateTimeFormat('en-GB', {
+    timeZone: BOT_TIMEZONE, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(now);
+  const utc = `${now.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+  return `Current real-world date & time: ${local} (${BOT_TIMEZONE_LABEL}) — ${utc}. Most of the time you won't need this, but use it for any date/time/"how long ago" awareness; work out other cities from the UTC value.`;
+}
 export const ADMIN_PREFIX = /^admin:\s*/i;
 export const INTRO_MESSAGE = 'Yooo @ForceAI is here 💀🔥';
 

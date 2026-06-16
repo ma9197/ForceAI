@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
-import { ARBITER, VISION } from '../config.js';
+import { ARBITER, VISION, currentTimeLine } from '../config.js';
 import { logger } from '../logger.js';
 import type { Repo } from '../memory/repo.js';
 import type { ActionPlan } from '../types.js';
@@ -41,7 +41,7 @@ export class Generator {
       parts.push(`<operator_instruction>${input.operatorInstruction}</operator_instruction>`);
       parts.push('(An operator instruction is present — you MUST act on it. "nothing" is not an acceptable plan here.)');
     }
-    parts.push(`Decide your actions now. Current time: ${new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`);
+    parts.push(`Decide your actions now. ${currentTimeLine()}`);
 
     // attach the most recent inbound images so Claude can actually SEE them (vision)
     const sinceTs = input.consumedUpToTs ?? Date.now() - 10 * 60_000;
