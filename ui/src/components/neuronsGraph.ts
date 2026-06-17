@@ -45,9 +45,10 @@ const PARTICLE_CAP = 400;  // keep travelling "firing" pulses ~constant regardle
  * under d3AlphaDecay=0.
  *
  * Geometry: a hash-shuffled backbone RING guarantees a single connected component (min degree 2, no
- * orphans). On top, each node gets K hash-seeded CHORDS whose targets span the full shuffled range
- * (including ~N/2 diametric jumps), folding the 1-D ring into a 2-D small-world mesh (avg degree ~4)
- * whose minimal-energy embedding under charge+link is a FILLED disc — not a hollow ring, not a line.
+ * orphans). On top, each node gets K chords to RANDOM (hash-seeded) other nodes. Random targets are
+ * essential: FIXED chord offsets (i+N/2, i+N/3, …) make a *circulant* graph whose minimal-energy
+ * layout is a rigid, symmetric lattice of concentric polygons — not the organic blob we want. Random
+ * targets give an irregular Erdős–Rényi-style small-world mesh whose layout is a natural rounded blob.
  * Deterministic (seeded by node id) so the web is byte-identical across reloads. O(N log N).
  */
 export function buildEdges(nodes: NeuronNode[]): NeuronLink[] {
@@ -74,14 +75,11 @@ export function buildEdges(nodes: NeuronNode[]): NeuronLink[] {
   };
 
   for (let i = 0; i < N; i++) {
-    add(i, (i + 1) % N); // (1) backbone ring → one connected component, degree >= 2
-    if (N > 6) {         // (2) long-range chords across the order → collapse the ring's hole → filled disc
-      const h = hash(ord[i].id);
-      const bases = [N >> 1, Math.floor(N / 3), Math.floor(N / 7) || 1]; // ~diametric + thirds + sevenths
-      for (let c = 0; c < CHORDS_PER_NODE; c++) {
-        const jitter = ((h >>> (c * 8)) & 0xff) % Math.max(1, Math.floor(N / 12) + 1); // de-band
-        add(i, (i + ((bases[c] + jitter) % N)) % N);
-      }
+    add(i, (i + 1) % N); // (1) backbone ring → one connected component, min degree 2
+    // (2) chords to RANDOM nodes (deterministic, seeded by id+chord-index). NOT fixed offsets — those
+    // would form a circulant graph that lays out as a geometric lattice instead of an organic blob.
+    for (let c = 0; c < CHORDS_PER_NODE; c++) {
+      add(i, hash(ord[i].id + ':' + c) % N);
     }
   }
 

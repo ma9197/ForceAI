@@ -12,7 +12,7 @@ export function NeuronsPanel({ active, version, onClose }: { active: boolean; ve
   const graphRef = useRef<any>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const masterRef = useRef<NeuronNode[]>([]); // stable node objects (force-graph mutates x/y on them)
-  const breatheReady = useRef(false);
+  const forcesReady = useRef(false);         // one-time force config applied
   const fetchedRef = useRef(false);          // initial /api/neurons fired exactly once (StrictMode-safe)
   const [docHidden, setDocHidden] = useState(() => typeof document !== 'undefined' && document.hidden);
   const shouldRun = active && !docHidden;    // single source of truth: run sim + measure only while visible
@@ -103,38 +103,25 @@ export function NeuronsPanel({ active, version, onClose }: { active: boolean; ve
     return c;
   }, [visibleNodes]);
 
-  // ---- "alive" forces: a stable, well-spread web that shimmers in place forever ----
-  // We disable d3's alpha cooldown (d3AlphaDecay={0} below) so the real charge/link forces stay at
-  // full strength permanently — they define and *hold* the spread. A strong charge balanced against
-  // a very weak center-pull gives a fixed equilibrium size (no roaming, no slow collapse). On top of
-  // that, a tiny per-tick velocity jitter keeps everything gently breathing rather than frozen.
+  // ---- forces: spread out, settle into one organic blob, then come to rest (and be draggable) ----
+  // UNcapped repulsion pushes nodes apart so they fill the void with room to breathe; the random link
+  // mesh pulls connected nodes together; force-graph's default center force keeps the whole blob
+  // framed (translation only — no squeeze). Alpha cools naturally (default d3AlphaDecay) so it SETTLES
+  // and stops instead of shaking forever — dragging a node briefly reheats it, then it settles again.
   useEffect(() => {
     const fg = graphRef.current;
-    if (!fg || breatheReady.current || fullGraph.nodes.length === 0) return;
-    breatheReady.current = true;
+    if (!fg || forcesReady.current || fullGraph.nodes.length === 0) return;
+    forcesReady.current = true;
     try {
-      fg.d3Force('charge')?.strength?.(-30);     // one mesh has many short links; slightly softer keeps it round
-      fg.d3Force('charge')?.distanceMax?.(220);  // bound the never-cooling repulsion → stable blob radius at 2-4k
-      fg.d3Force('link')?.distance?.(28);        // marginally tighter → compact single ball
-      let simNodes: NeuronNode[] = [];
-      const breathe = () => {
-        for (const n of simNodes) {
-          // a faint shimmer + a *very* weak pull toward origin: the full-strength charge balances
-          // this pull to a fixed, stable size (no collapse, no fly-away). Keep the jitter tiny so the
-          // web only slowly breathes/drifts in place rather than visibly spinning off-frame.
-          n.vx = (n.vx ?? 0) + (Math.random() - 0.5) * 0.006 - (n.x ?? 0) * 0.00022;
-          n.vy = (n.vy ?? 0) + (Math.random() - 0.5) * 0.006 - (n.y ?? 0) * 0.00022;
-        }
-      };
-      breathe.initialize = (ns: NeuronNode[]) => { simNodes = ns; };
-      fg.d3Force('breathe', breathe);
+      fg.d3Force('charge')?.strength?.(-55);            // strong repulsion → roomy, unpacked spread
+      fg.d3Force('charge')?.distanceMax?.(Infinity);    // UNcap it (was 220) — the cap is what packed them
+      fg.d3Force('link')?.distance?.(36);
     } catch { /* lib internals changed — ignore */ }
-    // Frame the brain once it has spread to its stable size. A single fixed-delay fit is fragile —
-    // on a slower load the sim hasn't spread yet, so the fit is a no-op and the graph stays tiny.
-    // Fit several times over the first few seconds (the last catches the settled equilibrium on any
-    // machine), then pull back slightly so the gentle drift has room to roam without clipping.
+    // Frame the brain after it settles. A single fixed-delay fit is fragile (fires before it spreads),
+    // so fit several times over the first few seconds; the last catches the settled layout. These are
+    // one-shot — after settling there is no auto-fit, so dragging never yanks the camera.
     const fit = () => { const el = wrapRef.current; if (el?.clientWidth && el.clientHeight) { try { fg.zoomToFit?.(600, 80); } catch { /* */ } } };
-    const timers = [setTimeout(fit, 700), setTimeout(fit, 1700), setTimeout(fit, 3200)];
+    const timers = [setTimeout(fit, 800), setTimeout(fit, 2500), setTimeout(fit, 5500)];
     return () => timers.forEach(clearTimeout);
   }, [fullGraph.nodes.length]);
 
@@ -211,10 +198,8 @@ export function NeuronsPanel({ active, version, onClose }: { active: boolean; ve
           linkDirectionalParticleSpeed={0.006}
           linkDirectionalParticleWidth={1.8}
           linkDirectionalParticleColor={() => 'rgba(255,255,255,0.92)'}
-          cooldownTime={Infinity}
-          d3AlphaDecay={0}
-          d3VelocityDecay={0.75}
-          enableNodeDrag={false}
+          d3VelocityDecay={0.5}
+          enableNodeDrag={true}
           onNodeClick={(n: any) => setSelected(n as NeuronNode)}
           onBackgroundClick={() => setSelected(null)}
         />
