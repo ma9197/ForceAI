@@ -612,6 +612,40 @@ export class Repo {
     return this.db.prepare('SELECT * FROM stickers ORDER BY id ASC').all() as StickerRow[];
   }
 
+  // ---- neurons aggregation: cross-group reads of every saved item, for the Neurons visualization ----
+  getAllFacts(): { id: number; chat_jid: string; member_jid: string; fact: string; category: string | null; created_at: number }[] {
+    return this.db.prepare('SELECT id, chat_jid, member_jid, fact, category, created_at FROM facts WHERE superseded_by IS NULL')
+      .all() as { id: number; chat_jid: string; member_jid: string; fact: string; category: string | null; created_at: number }[];
+  }
+  getAllVoiceItems(): { id: number; chat_jid: string; category: string; content: string; member_jid: string | null; created_at: number }[] {
+    return this.db.prepare('SELECT id, chat_jid, category, content, member_jid, created_at FROM voice_items WHERE superseded_by IS NULL')
+      .all() as { id: number; chat_jid: string; category: string; content: string; member_jid: string | null; created_at: number }[];
+  }
+  getAllMemberReports(): { id: number; member_jid: string; week_start: number; bio: string | null; summary: string | null; created_at: number }[] {
+    return this.db.prepare('SELECT id, member_jid, week_start, bio, summary, created_at FROM member_reports')
+      .all() as { id: number; member_jid: string; week_start: number; bio: string | null; summary: string | null; created_at: number }[];
+  }
+  getAllStatHistory(): { id: number; member_jid: string; stat_key: string; value: number | null; label: string | null; reason: string | null; created_at: number }[] {
+    return this.db.prepare('SELECT id, member_jid, stat_key, value, label, reason, created_at FROM member_stat_history')
+      .all() as { id: number; member_jid: string; stat_key: string; value: number | null; label: string | null; reason: string | null; created_at: number }[];
+  }
+  getAllObservations(): { id: number; member_jid: string; chat_jid: string | null; observation: string; ts: number }[] {
+    return this.db.prepare('SELECT id, member_jid, chat_jid, observation, ts FROM member_observations')
+      .all() as { id: number; member_jid: string; chat_jid: string | null; observation: string; ts: number }[];
+  }
+  getAllInfluenceLessons(): { id: number; chat_jid: string | null; text: string; why: string | null; ts: number }[] {
+    return this.db.prepare('SELECT id, chat_jid, text, why, ts FROM influence_lessons')
+      .all() as { id: number; chat_jid: string | null; text: string; why: string | null; ts: number }[];
+  }
+  getAllPrinciples(): { id: number; content: string; example: string | null; created_at: number }[] {
+    return this.db.prepare('SELECT id, content, example, created_at FROM initiative_principles WHERE superseded_by IS NULL')
+      .all() as { id: number; content: string; example: string | null; created_at: number }[];
+  }
+  getAllSummaries(): { chat_jid: string; summary: string; updated_at: number }[] {
+    return this.db.prepare('SELECT chat_jid, summary, updated_at FROM group_summary')
+      .all() as { chat_jid: string; summary: string; updated_at: number }[];
+  }
+
   getSticker(id: number): StickerRow | undefined {
     return this.db.prepare('SELECT * FROM stickers WHERE id = ?').get(id) as StickerRow | undefined;
   }

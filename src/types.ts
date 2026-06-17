@@ -73,6 +73,20 @@ export interface MemberRow {
   message_count: number;
 }
 
+/** One saved knowledge item, as a node for the "Neurons" visualization. Edges are generated
+ *  client-side (purely visual), so the payload is just the node list. */
+export type NeuronType = 'fact' | 'voice' | 'report' | 'stat' | 'observation' | 'lesson' | 'principle' | 'sticker' | 'summary';
+export interface NeuronNode {
+  id: string;            // `${type}:${rowId}` — stable, unique
+  type: NeuronType;
+  t: number;             // normalized epoch ms (created_at / ts / added_at / updated_at)
+  label: string;         // short hover label
+  text: string;          // full content for the click-to-inspect card (trimmed)
+  group: string | null;  // human-readable group name, or null for global items
+  member: string | null; // member display name where applicable
+  category: string | null; // facts.category / voice_items.category / stat_key — for sub-coloring
+}
+
 export interface FactRow {
   id: number;
   member_jid: string;

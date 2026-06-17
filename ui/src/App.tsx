@@ -11,8 +11,9 @@ import { MembersPanel } from './components/MembersPanel';
 import { StickerGrid } from './components/StickerGrid';
 import { StatsPanel } from './components/StatsPanel';
 import { SettingsPanel } from './components/SettingsPanel';
+import { NeuronsPanel } from './components/NeuronsPanel';
 
-type Tab = 'memory' | 'voice' | 'members' | 'stickers' | 'stats' | 'settings';
+type Tab = 'memory' | 'voice' | 'members' | 'stickers' | 'stats' | 'neurons' | 'settings';
 
 export default function App() {
   const [status, setStatus] = useState<Status | null>(null);
@@ -298,7 +299,7 @@ export default function App() {
             />
             <div className="side-col">
               <div className="tabs">
-                {(['memory', 'voice', 'members', 'stickers', 'stats', 'settings'] as Tab[]).map(t => (
+                {(['memory', 'voice', 'members', 'stickers', 'stats', 'neurons', 'settings'] as Tab[]).map(t => (
                   <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>
                     {t === 'voice' ? 'Voice' : t === 'members' ? 'Members' : t[0].toUpperCase() + t.slice(1)}
                   </button>
@@ -321,17 +322,19 @@ export default function App() {
               className={mobileView === 'chat' ? 'active' : ''}
               onClick={() => setMobileView('chat')}
             >💬<span>Chat</span></button>
-            {(['memory', 'voice', 'members', 'stickers', 'stats', 'settings'] as Tab[]).map(t => (
+            {(['memory', 'voice', 'members', 'stickers', 'stats', 'neurons', 'settings'] as Tab[]).map(t => (
               <button
                 key={t}
                 className={mobileView === 'side' && tab === t ? 'active' : ''}
                 onClick={() => { setTab(t); setMobileView('side'); }}
               >
-                {t === 'memory' ? '🧠' : t === 'voice' ? '🗣️' : t === 'members' ? '👥' : t === 'stickers' ? '🖼️' : t === 'stats' ? '📊' : '⚙️'}
+                {t === 'memory' ? '🧠' : t === 'voice' ? '🗣️' : t === 'members' ? '👥' : t === 'stickers' ? '🖼️' : t === 'stats' ? '📊' : t === 'neurons' ? '🕸️' : '⚙️'}
                 <span>{t === 'voice' ? 'Voice' : t === 'members' ? 'Members' : t[0].toUpperCase() + t.slice(1)}</span>
               </button>
             ))}
           </div>
+
+          {tab === 'neurons' && <NeuronsPanel version={memoryVersion} onClose={() => setTab('memory')} />}
         </>
       )}
     </>

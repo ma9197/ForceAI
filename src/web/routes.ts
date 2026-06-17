@@ -300,6 +300,9 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
 
   // ---- initiative learning (principles distilled from flagged Influences) ----
   fastify.get('/api/initiative', async () => app.getInitiativeData());
+
+  // every saved knowledge item across all groups, as nodes for the Neurons visualization
+  fastify.get('/api/neurons', async () => app.buildNeurons());
   fastify.post('/api/initiative/distill', async () => app.distillInitiative());
   fastify.delete<{ Params: { id: string } }>('/api/initiative/:id', async (req) => {
     app.deleteInitiativePrinciple(Number(req.params.id));

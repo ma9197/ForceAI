@@ -628,5 +628,200 @@ export const demoData = {
     "pending": 0,
     "enabled": false
   },
-  "groups": []
+  "groups": [],
+  "neurons": {
+    "nodes": [
+      {
+        "id": "fact:1",
+        "type": "fact",
+        "t": 1781195427019,
+        "label": "Barcelona fan — despises Real Madrid",
+        "text": "Barcelona fan — despises Real Madrid",
+        "group": "The Boys 🔥",
+        "member": "Murad",
+        "category": "football"
+      },
+      {
+        "id": "fact:2",
+        "type": "fact",
+        "t": 1781368227019,
+        "label": "Always certain he is right in football d…",
+        "text": "Always certain he is right in football debates",
+        "group": "The Boys 🔥",
+        "member": "Murad",
+        "category": "personality"
+      },
+      {
+        "id": "fact:3",
+        "type": "fact",
+        "t": 1781541027019,
+        "label": "Die-hard Real Madrid supporter",
+        "text": "Die-hard Real Madrid supporter",
+        "group": "The Boys 🔥",
+        "member": "Kanan",
+        "category": "football"
+      },
+      {
+        "id": "fact:4",
+        "type": "fact",
+        "t": 1781713827019,
+        "label": "Loud and confident, folds when proven wr…",
+        "text": "Loud and confident, folds when proven wrong",
+        "group": "The Boys 🔥",
+        "member": "Kanan",
+        "category": "personality"
+      },
+      {
+        "id": "voice:1",
+        "type": "voice",
+        "t": 1781195427019,
+        "label": "washed = past their prime / no longer go…",
+        "text": "washed = past their prime / no longer good",
+        "group": "The Boys 🔥",
+        "member": null,
+        "category": "slang"
+      },
+      {
+        "id": "voice:2",
+        "type": "voice",
+        "t": 1781454627019,
+        "label": "running bit: making the losing side \"go …",
+        "text": "running bit: making the losing side \"go quiet\"",
+        "group": "The Boys 🔥",
+        "member": null,
+        "category": "joke"
+      },
+      {
+        "id": "voice:3",
+        "type": "voice",
+        "t": 1781713827019,
+        "label": "Kanan: short, cocky one-liners; lots of …",
+        "text": "Kanan: short, cocky one-liners; lots of 🤡 and 💀",
+        "group": "The Boys 🔥",
+        "member": "Kanan",
+        "category": "member_style"
+      },
+      {
+        "id": "report:1",
+        "type": "report",
+        "t": 1781281827019,
+        "label": "A loyal Barça die-hard who treats every …",
+        "text": "A loyal Barça die-hard who treats every football take as a hill to die on — loud bravado over a genuinely warm core.",
+        "group": null,
+        "member": "Murad",
+        "category": null
+      },
+      {
+        "id": "report:2",
+        "type": "report",
+        "t": 1781713827019,
+        "label": "A confident Madridista, quick to talk tr…",
+        "text": "A confident Madridista, quick to talk trash and quicker to go quiet the moment he is proven wrong.",
+        "group": null,
+        "member": "Kanan",
+        "category": null
+      },
+      {
+        "id": "stat:1",
+        "type": "stat",
+        "t": 1779985827019,
+        "label": "upbeat — banter energy running high",
+        "text": "upbeat — banter energy running high",
+        "group": null,
+        "member": "Murad",
+        "category": "mood"
+      },
+      {
+        "id": "stat:2",
+        "type": "stat",
+        "t": 1780331427019,
+        "label": "sharp, fact-backed football takes",
+        "text": "sharp, fact-backed football takes",
+        "group": null,
+        "member": "Murad",
+        "category": "iq"
+      },
+      {
+        "id": "stat:3",
+        "type": "stat",
+        "t": 1780677027019,
+        "label": "chill — debate intensity this week",
+        "text": "chill — debate intensity this week",
+        "group": null,
+        "member": "Murad",
+        "category": "aggression"
+      },
+      {
+        "id": "stat:4",
+        "type": "stat",
+        "t": 1781022627019,
+        "label": "upbeat — banter energy running high",
+        "text": "upbeat — banter energy running high",
+        "group": null,
+        "member": "Kanan",
+        "category": "mood"
+      },
+      {
+        "id": "stat:5",
+        "type": "stat",
+        "t": 1781368227019,
+        "label": "sharp, fact-backed football takes",
+        "text": "sharp, fact-backed football takes",
+        "group": null,
+        "member": "Kanan",
+        "category": "iq"
+      },
+      {
+        "id": "stat:6",
+        "type": "stat",
+        "t": 1781713827019,
+        "label": "heated — debate intensity this week",
+        "text": "heated — debate intensity this week",
+        "group": null,
+        "member": "Kanan",
+        "category": "aggression"
+      },
+      {
+        "id": "lesson:1",
+        "type": "lesson",
+        "t": 1781713827019,
+        "label": "hype them up when a match kicks off",
+        "text": "hype them up when a match kicks off",
+        "group": "The Boys 🔥",
+        "member": null,
+        "category": null
+      },
+      {
+        "id": "principle:1",
+        "type": "principle",
+        "t": 1781195427019,
+        "label": "When a live football debate stalls, drop…",
+        "text": "When a live football debate stalls, drop a spicy poll to reignite it.",
+        "group": null,
+        "member": null,
+        "category": null
+      },
+      {
+        "id": "principle:2",
+        "type": "principle",
+        "t": 1781713827019,
+        "label": "Call out the losing side once results ar…",
+        "text": "Call out the losing side once results are in, but keep it playful.",
+        "group": null,
+        "member": null,
+        "category": null
+      },
+      {
+        "id": "summary:demo-group@g.us",
+        "type": "summary",
+        "t": 1781713827019,
+        "label": "A football-obsessed friend group; the Mu…",
+        "text": "A football-obsessed friend group; the Murad (Barça) vs Kanan (Madrid) rivalry is the running bit the bot loves to stoke.",
+        "group": "The Boys 🔥",
+        "member": null,
+        "category": null
+      }
+    ],
+    "generatedAt": 1781715210459
+  }
 } as const;

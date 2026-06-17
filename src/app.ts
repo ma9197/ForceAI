@@ -23,7 +23,7 @@ import { Generator } from './ai/generator.js';
 import { Arbiter } from './arbiter/arbiter.js';
 import { StickerLearning } from './stickers/learning.js';
 import { Bus } from './web/bus.js';
-import type { FeedMessage, GroupStatus, NormalizedMessage, StatusPayload } from './types.js';
+import type { FeedMessage, GroupStatus, NeuronNode, NormalizedMessage, StatusPayload } from './types.js';
 
 export class App {
   bus = new Bus();
@@ -241,6 +241,26 @@ export class App {
     this.repo.insertVoiceItem(jid, 'slang', 'washed = past their prime / no longer good', 'they are washed', null);
     this.repo.insertVoiceItem(jid, 'joke', 'running bit: making the losing side "go quiet"', 'about to go very quiet', null);
     this.repo.insertVoiceItem(jid, 'member_style', 'Kanan: short, cocky one-liners; lots of 🤡 and 💀', 'nobody asked 🤡', KANAN);
+
+    // richer brain for the Neurons demo: a few more saved-item types so multiple "lobes" appear
+    const wk = (n: number) => t0 - n * 7 * 86_400_000;
+    this.repo.insertMemberReport(MURAD, wk(1), 'A loyal Barça die-hard who treats every football take as a hill to die on — loud bravado over a genuinely warm core.', 'Spent the week roasting Madrid fans.', 'declarative, lots of 💀');
+    this.repo.insertMemberReport(KANAN, wk(1), 'A confident Madridista, quick to talk trash and quicker to go quiet the moment he is proven wrong.', 'Lost the title argument, took it on the chin.', 'short cocky one-liners');
+    for (const [m, mood, iq, agg] of [[MURAD, 72, 130, 58], [KANAN, 64, 119, 76]] as const) {
+      this.repo.insertStatSnapshot(m, wk(1), 'mood', mood, mood > 60 ? 'upbeat' : 'flat', 'banter energy running high');
+      this.repo.insertStatSnapshot(m, wk(1), 'iq', iq, null, 'sharp, fact-backed football takes');
+      this.repo.insertStatSnapshot(m, wk(1), 'aggression', agg, agg > 70 ? 'heated' : 'chill', 'debate intensity this week');
+    }
+    this.repo.insertInfluenceLesson(jid, 'hype them up when a match kicks off', 'keeps the group energy high', null, 'pre-match banter');
+    this.repo.insertInitiativePrinciple('When a live football debate stalls, drop a spicy poll to reignite it.', 'Madrid or Barça — vote 💀');
+    this.repo.insertInitiativePrinciple('Call out the losing side once results are in, but keep it playful.', 'told you 🤭 kanan went quiet');
+    this.repo.setSummary(jid, 'A football-obsessed friend group; the Murad (Barça) vs Kanan (Madrid) rivalry is the running bit the bot loves to stoke.', t0);
+
+    // spread the demo's saved-item timestamps across the past few weeks so the Neurons timeline has range
+    const now = Date.now(), day = 86_400_000;
+    for (const [tbl, col, step] of [['facts', 'created_at', 2], ['voice_items', 'created_at', 3], ['member_reports', 'created_at', 5], ['member_stat_history', 'created_at', 4], ['initiative_principles', 'created_at', 6], ['influence_lessons', 'ts', 5], ['group_summary', 'updated_at', 1]] as const) {
+      try { this.repo.db.prepare(`UPDATE ${tbl} SET ${col} = ? - ((SELECT MAX(rowid) FROM ${tbl}) - rowid) * ?`).run(now, step * day); } catch { /* table empty */ }
+    }
 
     // believable stats
     const bump = (k: string, n: number) => this.repo.bumpStat(k, n);
@@ -517,6 +537,35 @@ export class App {
     if (arbiter) arbiter.setPaused(paused);
     else this.repo.setConfig(`paused_${jid}`, paused ? '1' : '0');
     this.bus.publish({ kind: 'status', status: this.statusPayload() });
+  }
+
+  /** Aggregate every saved knowledge item across all groups into nodes for the Neurons viz.
+   *  Edges are generated client-side (purely visual), so we only return the node list. */
+  buildNeurons(): { nodes: NeuronNode[]; generatedAt: number } {
+    const nodes: NeuronNode[] = [];
+    const trim = (s: string | null | undefined, n = 280): string => {
+      const v = (s ?? '').trim();
+      return v.length > n ? v.slice(0, n) + '…' : v;
+    };
+    const label = (s: string): string => (s.length > 40 ? s.slice(0, 40) + '…' : s) || '(no text)';
+    const groupName = (jid: string | null): string | null => (jid ? (this.groups.subjectOf(jid) ?? jid.split('@')[0]) : null);
+    const memberName = (jid: string | null): string | null => (jid ? (this.repo.getMember(jid)?.display_name ?? jid.split('@')[0]) : null);
+    const push = (id: string, type: NeuronNode['type'], t: number, raw: string, opts: { group?: string | null; member?: string | null; category?: string | null } = {}) => {
+      const text = trim(raw) || '(no text)';
+      nodes.push({ id, type, t: t || 0, label: label(text), text, group: opts.group ?? null, member: opts.member ?? null, category: opts.category ?? null });
+    };
+
+    for (const f of this.repo.getAllFacts()) push(`fact:${f.id}`, 'fact', f.created_at, f.fact, { group: groupName(f.chat_jid), member: memberName(f.member_jid), category: f.category });
+    for (const v of this.repo.getAllVoiceItems()) push(`voice:${v.id}`, 'voice', v.created_at, v.content, { group: groupName(v.chat_jid), member: memberName(v.member_jid), category: v.category });
+    for (const r of this.repo.getAllMemberReports()) push(`report:${r.id}`, 'report', r.created_at, r.bio || r.summary || '', { member: memberName(r.member_jid) });
+    for (const s of this.repo.getAllStatHistory()) push(`stat:${s.id}`, 'stat', s.created_at, [s.label, s.reason].filter(Boolean).join(' — ') || `${s.stat_key}: ${s.value ?? '?'}`, { member: memberName(s.member_jid), category: s.stat_key });
+    for (const o of this.repo.getAllObservations()) push(`observation:${o.id}`, 'observation', o.ts, o.observation, { group: groupName(o.chat_jid), member: memberName(o.member_jid) });
+    for (const l of this.repo.getAllInfluenceLessons()) push(`lesson:${l.id}`, 'lesson', l.ts, l.text, { group: groupName(l.chat_jid) });
+    for (const p of this.repo.getAllPrinciples()) push(`principle:${p.id}`, 'principle', p.created_at, p.content);
+    for (const st of this.repo.getStickers()) push(`sticker:${st.id}`, 'sticker', st.added_at, st.description || st.usage_hint || 'sticker');
+    for (const g of this.repo.getAllSummaries()) push(`summary:${g.chat_jid}`, 'summary', g.updated_at, g.summary, { group: groupName(g.chat_jid) });
+
+    return { nodes, generatedAt: Date.now() };
   }
 
   getSettings(): StatusPayload['settings'] {
