@@ -58,11 +58,19 @@ export function NeuronsPanel({ version, onClose }: { version: number; onClose: (
   // ---- responsive canvas size (re-run once the canvas actually mounts, i.e. after loading) ----
   useEffect(() => {
     const el = wrapRef.current; if (!el) return; // null while the loading/empty screen is shown
-    const apply = () => setDims({ w: el.clientWidth, h: el.clientHeight });
+    let fitT: ReturnType<typeof setTimeout>;
+    const apply = () => {
+      setDims({ w: el.clientWidth, h: el.clientHeight });
+      // Re-frame shortly after any size change. Crucially this also *recovers* from late reflows
+      // (web-font swaps, the analytics beacon on the hosted demo, devtools, etc.) that can reset the
+      // canvas's zoom transform and leave the whole brain as a tiny dot at center.
+      clearTimeout(fitT);
+      fitT = setTimeout(() => { try { graphRef.current?.zoomToFit?.(500, 80); } catch { /* */ } }, 400);
+    };
     const ro = new ResizeObserver(apply);
     ro.observe(el);
     apply();
-    return () => ro.disconnect();
+    return () => { ro.disconnect(); clearTimeout(fitT); };
   }, [loading, error]);
 
   // ---- full graph, built once per fetch (stable reference → no re-simulation on timeline scrub).
@@ -112,12 +120,8 @@ export function NeuronsPanel({ version, onClose }: { version: number; onClose: (
     // on a slower load the sim hasn't spread yet, so the fit is a no-op and the graph stays tiny.
     // Fit several times over the first few seconds (the last catches the settled equilibrium on any
     // machine), then pull back slightly so the gentle drift has room to roam without clipping.
-    const fit = () => { try { fg.zoomToFit?.(600, 70); } catch { /* */ } };
-    const timers = [
-      setTimeout(fit, 700),
-      setTimeout(fit, 1700),
-      setTimeout(() => { fit(); setTimeout(() => { try { fg.zoom?.(fg.zoom() * 0.85, 500); } catch { /* */ } }, 700); }, 2900),
-    ];
+    const fit = () => { try { fg.zoomToFit?.(600, 80); } catch { /* */ } };  // padding leaves drift margin
+    const timers = [setTimeout(fit, 700), setTimeout(fit, 1700), setTimeout(fit, 3200)];
     return () => timers.forEach(clearTimeout);
   }, [fullGraph.nodes.length]);
 
