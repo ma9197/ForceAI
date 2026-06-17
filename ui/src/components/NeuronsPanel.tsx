@@ -195,6 +195,7 @@ export function NeuronsPanel({ active, version, onClose }: { active: boolean; ve
           linkColor={() => 'rgba(255,255,255,0.10)'}
           linkWidth={0.5}
           linkDirectionalParticles={(l: any) => (l as NeuronLink).__p ?? 0}
+          linkDirectionalParticleOffset={(l: any) => (l as NeuronLink).__phase ?? 0}  // random start phase → desynced
           linkDirectionalParticleSpeed={0.006}
           linkDirectionalParticleWidth={1.8}
           linkDirectionalParticleColor={() => 'rgba(255,255,255,0.92)'}

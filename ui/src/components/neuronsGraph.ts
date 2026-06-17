@@ -1,6 +1,6 @@
 import type { NeuronNode, NeuronType } from '../api';
 
-export interface NeuronLink { source: string; target: string; __p?: number }
+export interface NeuronLink { source: string; target: string; __p?: number; __phase?: number }
 
 // Distinct per-type colors (the "lobes" of the brain).
 export const NEURON_COLORS: Record<NeuronType, string> = {
@@ -84,8 +84,13 @@ export function buildEdges(nodes: NeuronNode[]): NeuronLink[] {
   }
 
   // Mark ~PARTICLE_CAP links (by index) to carry a travelling "firing" pulse — an exact cap
-  // regardless of edge count keeps the animation smooth at thousands of edges.
+  // regardless of edge count keeps the animation smooth at thousands of edges. Each gets a stable
+  // random start PHASE [0,1) so the pulses are desynchronised (they no longer all leave at once);
+  // speed stays a fraction-of-length, so every pulse still crosses its line in the same time.
   const every = Math.max(1, Math.ceil(links.length / PARTICLE_CAP));
-  for (let i = 0; i < links.length; i++) links[i].__p = i % every === 0 ? 1 : 0;
+  for (let i = 0; i < links.length; i++) {
+    links[i].__p = i % every === 0 ? 1 : 0;
+    links[i].__phase = (hash(links[i].source + '|' + links[i].target) % 997) / 997;
+  }
   return links;
 }
