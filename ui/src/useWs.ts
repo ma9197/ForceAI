@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { STATIC_DEMO } from './api';
 
 export type WsEvent =
   | { kind: 'qr'; dataUrl: string }
@@ -19,6 +20,7 @@ export function useWs(onEvent: (e: WsEvent) => void): void {
   handler.current = onEvent;
 
   useEffect(() => {
+    if (STATIC_DEMO) return; // static demo: no backend, no live events
     let ws: WebSocket | null = null;
     let closed = false;
     let retry = 1000;

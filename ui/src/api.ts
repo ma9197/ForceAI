@@ -1,3 +1,5 @@
+import { demoData } from './demoData';
+
 export interface GroupStatus {
   jid: string;
   name: string | null;
@@ -85,7 +87,31 @@ export interface StatHistoryEntry {
   week_start: number; value: number | null; label: string | null; reason: string | null;
 }
 
+// Static demo build (Cloudflare Pages): there is NO backend — api() serves bundled fixtures so the
+// whole UI is clickable as a pure static site. Enabled at build time with VITE_DEMO_STATIC=1.
+export const STATIC_DEMO = (import.meta.env as Record<string, string | undefined>).VITE_DEMO_STATIC === '1';
+
+function staticDemoResponse(path: string, options?: RequestInit): unknown {
+  if ((options?.method ?? 'GET').toUpperCase() !== 'GET') return { ok: true, demo: true }; // writes are no-ops
+  const url = path.split('?')[0];
+  const d = demoData as Record<string, unknown>;
+  const exact: Record<string, unknown> = {
+    '/api/status': d.status, '/api/feed': d.feed, '/api/people': d.people,
+    '/api/people/ignored': d.peopleIgnored, '/api/members': d.members, '/api/voice': d.voice,
+    '/api/clock': d.clock, '/api/stickers': d.stickers, '/api/settings': d.settings,
+    '/api/initiative': d.initiative, '/api/groups': d.groups,
+  };
+  if (url in exact) return exact[url];
+  if (url.includes('/stat/') && url.endsWith('/history')) return []; // per-member stat timeline
+  if (url.startsWith('/api/people/')) {
+    const jid = decodeURIComponent(url.slice('/api/people/'.length));
+    return (d.profiles as Record<string, unknown>)[jid] ?? null;
+  }
+  return null;
+}
+
 export async function api<T>(path: string, options?: RequestInit): Promise<T> {
+  if (STATIC_DEMO) return staticDemoResponse(path, options) as T;
   const res = await fetch(path, {
     headers: { 'Content-Type': 'application/json' },
     ...options,

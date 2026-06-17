@@ -18,7 +18,10 @@ There's nothing to hand-edit. On first launch the dashboard shows a **setup guid
 3. `npm run build:ui`
 4. Double-click **start.bat** (or `npm run dev`) → open <http://localhost:3008> → follow the setup guide.
 
-**Just want to look around?** Run with `DEMO_MODE=1` for a read-only demo with fake seeded data — no keys, no WhatsApp, nothing to set up.
+**Just want to look around?** Try the **[live demo](https://forceai-demo.pages.dev)** — a read-only walkthrough with fake data, no setup. (Run locally with `DEMO_MODE=1` for the same thing.)
+
+The demo is hosted as a fully static site (no backend) on Cloudflare Pages. To rebuild + redeploy it:
+`cd ui && VITE_DEMO_STATIC=1 vite build --outDir dist-demo` then `wrangler pages deploy ui/dist-demo --project-name forceai-demo`. The seeded fixtures live in `ui/src/demoData.ts` (regenerate by capturing a local `DEMO_MODE=1` run's `/api/*` responses).
 
 ## Using it
 
