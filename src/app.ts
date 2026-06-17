@@ -195,31 +195,31 @@ export class App {
     this.groups.setCachedSubject(jid, 'The Boys 🔥');
     this.linkedGroups.add(jid);
 
-    const EYYUB = 'demo-eyyub@s.whatsapp.net';
-    const AYXAN = 'demo-ayxan@s.whatsapp.net';
+    const MURAD = 'demo-murad@s.whatsapp.net';
+    const KANAN = 'demo-kanan@s.whatsapp.net';
     const OWNER = 'demo-owner@s.whatsapp.net';
     const t0 = Date.now() - 30 * 60_000;
-    this.repo.upsertMember(EYYUB, 'Eyyub', null, t0);
-    this.repo.upsertMember(AYXAN, 'Ayxan', null, t0);
+    this.repo.upsertMember(MURAD, 'Murad', null, t0);
+    this.repo.upsertMember(KANAN, 'Kanan', null, t0);
     this.repo.upsertMember(OWNER, 'Said', null, t0);
 
-    type Line = { who: 'eyyub' | 'ayxan' | 'owner' | 'bot'; text: string; type?: NormalizedMessage['type'] };
+    type Line = { who: 'murad' | 'kanan' | 'owner' | 'bot'; text: string; type?: NormalizedMessage['type'] };
     const script: Line[] = [
-      { who: 'eyyub', text: "lads who's watching the match tonight 👀" },
-      { who: 'ayxan', text: 'obviously. madrid gonna destroy them' },
-      { who: 'eyyub', text: 'madrid?? 💀 bro they are washed' },
-      { who: 'bot', text: "ayxan really said madrid like it's 2017 😭 keep up king" },
-      { who: 'ayxan', text: 'nobody asked 🤡' },
+      { who: 'murad', text: "lads who's watching the match tonight 👀" },
+      { who: 'kanan', text: 'obviously. madrid gonna destroy them' },
+      { who: 'murad', text: 'madrid?? 💀 bro they are washed' },
+      { who: 'bot', text: "kanan really said madrid like it's 2017 😭 keep up king" },
+      { who: 'kanan', text: 'nobody asked 🤡' },
       { who: 'bot', text: 'and yet here you are replying to me 🤭' },
       { who: 'owner', text: 'calm down both of you 😂' },
-      { who: 'eyyub', text: 'forceai settle it, who wins tonight' },
-      { who: 'bot', text: 'madrid by 2. ayxan about to go very quiet after 💀' },
-      { who: 'ayxan', text: "if i'm wrong i'll send a voice note apologizing" },
-      { who: 'eyyub', text: 'screenshot this 📸' },
+      { who: 'murad', text: 'forceai settle it, who wins tonight' },
+      { who: 'bot', text: 'madrid by 2. kanan about to go very quiet after 💀' },
+      { who: 'kanan', text: "if i'm wrong i'll send a voice note apologizing" },
+      { who: 'murad', text: 'screenshot this 📸' },
       { who: 'bot', text: "already saved it 🤝 don't worry i'll remind him" },
     ];
-    const jidOf = { eyyub: EYYUB, ayxan: AYXAN, owner: OWNER, bot: OWNER } as const;
-    const nameOf = { eyyub: 'Eyyub', ayxan: 'Ayxan', owner: 'Said', bot: 'ForceAI' } as const;
+    const jidOf = { murad: MURAD, kanan: KANAN, owner: OWNER, bot: OWNER } as const;
+    const nameOf = { murad: 'Murad', kanan: 'Kanan', owner: 'Said', bot: 'ForceAI' } as const;
     script.forEach((line, i) => {
       const isBot = line.who === 'bot';
       const isOwner = line.who === 'owner';
@@ -234,13 +234,13 @@ export class App {
     });
 
     // a little learned memory + voice so those tabs aren't empty
-    this.repo.insertFact(jid, EYYUB, 'Barcelona fan — despises Real Madrid', 'football', 0.95, null);
-    this.repo.insertFact(jid, EYYUB, 'Always certain he is right in football debates', 'personality', 0.8, null);
-    this.repo.insertFact(jid, AYXAN, 'Die-hard Real Madrid supporter', 'football', 0.95, null);
-    this.repo.insertFact(jid, AYXAN, 'Loud and confident, folds when proven wrong', 'personality', 0.75, null);
+    this.repo.insertFact(jid, MURAD, 'Barcelona fan — despises Real Madrid', 'football', 0.95, null);
+    this.repo.insertFact(jid, MURAD, 'Always certain he is right in football debates', 'personality', 0.8, null);
+    this.repo.insertFact(jid, KANAN, 'Die-hard Real Madrid supporter', 'football', 0.95, null);
+    this.repo.insertFact(jid, KANAN, 'Loud and confident, folds when proven wrong', 'personality', 0.75, null);
     this.repo.insertVoiceItem(jid, 'slang', 'washed = past their prime / no longer good', 'they are washed', null);
     this.repo.insertVoiceItem(jid, 'joke', 'running bit: making the losing side "go quiet"', 'about to go very quiet', null);
-    this.repo.insertVoiceItem(jid, 'member_style', 'Ayxan: short, cocky one-liners; lots of 🤡 and 💀', 'nobody asked 🤡', AYXAN);
+    this.repo.insertVoiceItem(jid, 'member_style', 'Kanan: short, cocky one-liners; lots of 🤡 and 💀', 'nobody asked 🤡', KANAN);
 
     // believable stats
     const bump = (k: string, n: number) => this.repo.bumpStat(k, n);

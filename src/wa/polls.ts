@@ -118,7 +118,7 @@ export class PollTracker {
     return { pollId, question: poll.name, voterJid, voterName, selected };
   }
 
-  /** "yes": Eyyub, Said · "no": Ayxan — for transcripts and the dashboard. */
+  /** "yes": Murad, Said · "no": Kanan — for transcripts and the dashboard. */
   formatResults(pollId: string): string {
     const votes = this.repo.getPollVotes(pollId);
     const byOption = new Map<string, string[]>();
