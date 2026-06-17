@@ -2,7 +2,9 @@ node_modules/
 dist/
 ui/dist/
 ui/dist-demo/
+ui/dist-demo-cf/
 ui/node_modules/
+cf-demo-proxy/node_modules/
 data/
 .env
 *.log

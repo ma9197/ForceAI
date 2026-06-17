@@ -18,10 +18,10 @@ There's nothing to hand-edit. On first launch the dashboard shows a **setup guid
 3. `npm run build:ui`
 4. Double-click **start.bat** (or `npm run dev`) → open <http://localhost:3008> → follow the setup guide.
 
-**Just want to look around?** Try the **[live demo](https://forceai-demo.pages.dev)** — a read-only walkthrough with fake data, no setup. (Run locally with `DEMO_MODE=1` for the same thing.)
+**Just want to look around?** Try the **[live demo](https://mirsaidabbasov.com/forceai-demo)** — a read-only walkthrough with fake data, no setup. (Run locally with `DEMO_MODE=1` for the same thing.)
 
-The demo is hosted as a fully static site (no backend) on Cloudflare Pages. To rebuild + redeploy it:
-`cd ui && VITE_DEMO_STATIC=1 vite build --outDir dist-demo` then `wrangler pages deploy ui/dist-demo --project-name forceai-demo`. The seeded fixtures live in `ui/src/demoData.ts` (regenerate by capturing a local `DEMO_MODE=1` run's `/api/*` responses).
+The demo is a fully static site (no backend): with `VITE_DEMO_STATIC=1`, `api()` serves bundled fixtures from `ui/src/demoData.ts` and the WebSocket is a no-op. It's hosted on Cloudflare Pages (the `forceai-demo` project) and surfaced at `mirsaidabbasov.com/forceai-demo` via a small reverse-proxy Worker (`cf-demo-proxy/`). To rebuild + redeploy (use a shell that won't mangle the `--base` arg, e.g. PowerShell):
+`cd ui && VITE_DEMO_STATIC=1 vite build --base=/forceai-demo/ --outDir dist-demo`, place the output under a `forceai-demo/` folder, then `wrangler pages deploy <wrapped-dir> --project-name forceai-demo`.
 
 ## Using it
 

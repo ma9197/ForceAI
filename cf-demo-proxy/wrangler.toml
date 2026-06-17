@@ -1,0 +1,9 @@
+name = "forceai-demo-proxy"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+account_id = "e96e2b917e34c596ef5c2a410ee1bc0c"
+workers_dev = false
+
+routes = [
+  { pattern = "mirsaidabbasov.com/forceai-demo*", zone_name = "mirsaidabbasov.com" }
+]
