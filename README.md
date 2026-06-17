@@ -10,7 +10,15 @@ An AI member for your WhatsApp group chats. It logs in as a WhatsApp account (QR
 
 There's nothing to hand-edit. On first launch the dashboard shows a **setup guide** that walks you through everything: paste your **Anthropic API key** (the only required one — [get one here](https://console.anthropic.com/settings/keys)), optionally add Gemini (images) and ElevenLabs (voice), then **scan the WhatsApp QR** and **pick a group**.
 
-**Run it online (no terminal, no Windows):** click **Deploy on Railway** above → you get your own private instance → open its URL → the setup guide takes over. You bring your own API key and pay only your own usage. For real use, add a Railway **Volume** mounted at `/app/data` (so memory survives redeploys) and set a `DASHBOARD_PASSWORD` (so only you can open it).
+**Deploy your own online (no terminal, no Windows):**
+
+1. Sign in to [Railway](https://railway.com) (free trial — you pay only your own usage). Click **Deploy on Railway** above, or in Railway do **New Project → Deploy from GitHub repo → ForceAI**.
+2. Railway builds it from this repo's Dockerfile (~2–3 min) and gives you a private URL.
+3. In the service's **Variables**, set `DASHBOARD_PASSWORD` to something long & random — this is what stops strangers opening your dashboard (and entering keys that spend your money).
+4. Recommended: **Settings → Volumes → Add a Volume**, mount path `/app/data`. This keeps the bot's memory + WhatsApp login across redeploys (skip it and they reset each deploy).
+5. Open your URL → the **setup guide** walks you through the rest: paste your **Anthropic key** (required — [get one](https://console.anthropic.com/settings/keys)), optionally add Gemini (images) / ElevenLabs (voice), **scan the WhatsApp QR**, and **pick a group**.
+
+Use a **spare / second WhatsApp number** — automation can get a number banned. Running cost ≈ your Anthropic usage + a few \$/month of Railway.
 
 **Run it locally (Windows):**
 1. Install [Node.js 22+](https://nodejs.org).
