@@ -200,9 +200,19 @@ export interface GroupStatus {
 export interface StatusPayload {
   connection: string;
   online: boolean;
+  needsSetup: boolean;
+  demo: boolean;
+  keys: { anthropic: boolean; gemini: boolean; elevenlabs: boolean };
   groups: GroupStatus[];
   stats: Record<string, number>;
   settings: {
+    anthropic_key_set: boolean;
+    anthropic_key_last4: string | null;
+    gemini_key_set: boolean;
+    gemini_key_last4: string | null;
+    elevenlabs_key_set: boolean;
+    elevenlabs_key_last4: string | null;
+    dashboard_protected: boolean;
     gatekeeper_model: string;
     generation_model: string;
     effort: string;

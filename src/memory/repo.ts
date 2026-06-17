@@ -17,6 +17,23 @@ export class Repo {
     ).run(key, value);
   }
 
+  // ---- API keys (entered in the dashboard, stored in config; env is the fallback) ----
+  // DB value wins over env so the UI can override a stale env var. NEVER log these values.
+  private static readonly KEY_ENV: Record<string, string> = {
+    anthropic_api_key: 'ANTHROPIC_API_KEY',
+    gemini_api_key: 'GEMINI_API_KEY',
+    elevenlabs_api_key: 'ELEVENLABS_API_KEY',
+  };
+
+  getKey(name: 'anthropic_api_key' | 'gemini_api_key' | 'elevenlabs_api_key'): string {
+    const env = Repo.KEY_ENV[name];
+    return (this.getConfig(name) ?? (env ? process.env[env] : '') ?? '').trim();
+  }
+
+  hasKey(name: 'anthropic_api_key' | 'gemini_api_key' | 'elevenlabs_api_key'): boolean {
+    return this.getKey(name).length > 0;
+  }
+
   // ---- world clock (cities the bot is time-aware of) ----
   getClockCities(): ClockCity[] {
     const raw = this.getConfig('clock_cities');

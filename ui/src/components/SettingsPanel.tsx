@@ -4,6 +4,13 @@ import { InitiativePrinciples } from './InitiativePrinciples';
 import { WorldClock } from './WorldClock';
 
 interface Settings {
+  anthropic_key_set: boolean;
+  anthropic_key_last4: string | null;
+  gemini_key_set: boolean;
+  gemini_key_last4: string | null;
+  elevenlabs_key_set: boolean;
+  elevenlabs_key_last4: string | null;
+  dashboard_protected: boolean;
   gatekeeper_model: string;
   generation_model: string;
   effort: string;
@@ -43,6 +50,36 @@ const FREQ_LABELS: Record<string, string> = {
   often: 'Often',
   always: 'Every time',
 };
+
+/** A single API-key row: write-only password input (the real key is never sent back), a "Get a key"
+ *  link, status (set + last4), and Save / optional Clear. */
+function KeyRow({ label, hint, link, set, last4, clearable, onSave }: {
+  label: string; hint: string; link: string; set: boolean; last4: string | null;
+  clearable?: boolean; onSave: (value: string) => Promise<void>;
+}) {
+  const [val, setVal] = useState('');
+  const [saved, setSaved] = useState(false);
+  const save = async (v: string) => { await onSave(v); setVal(''); setSaved(true); setTimeout(() => setSaved(false), 1800); };
+  return (
+    <div className="settings-row">
+      <div>
+        <label>{label} {set && <span className="key-set">✓ set{last4 ? ` ··${last4}` : ''}</span>}</label>
+        <div className="hint">{hint} <a href={link} target="_blank" rel="noreferrer">Get a key ↗</a></div>
+      </div>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <input
+          type="password" value={val} placeholder={set ? 'paste to replace' : 'paste key'}
+          onChange={e => setVal(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && val.trim()) void save(val.trim()); }}
+          style={{ width: 150 }}
+        />
+        <button className="primary" disabled={!val.trim()} onClick={() => save(val.trim())}>Save</button>
+        {clearable && set && <button onClick={() => save('')} title="Remove this key">Clear</button>}
+        {saved && <span className="voice-feedback">✓</span>}
+      </div>
+    </div>
+  );
+}
 
 function FreqSlider({ label, hint, value, disabled, onChange }: {
   label: string; hint: string; value: string; disabled?: boolean;
@@ -92,7 +129,47 @@ export function SettingsPanel({ onSaved }: { onSaved: () => void }) {
 
   return (
     <div>
-      <h3 style={{ margin: '0 0 4px' }}>Phone &amp; system</h3>
+      <div className="voice-intro">
+        <h3>⚙️ Settings</h3>
+        <p className="muted">
+          Everything ForceAI does, in one place — your API keys, which AI models it uses, how chatty it
+          is, its personality, spending limits and more. Changes apply on its next message; nothing needs
+          a restart.
+        </p>
+      </div>
+
+      <h3 style={{ margin: '0 0 4px' }}>API keys</h3>
+      <p className="hint" style={{ margin: '0 0 8px' }}>
+        Keys are stored on your own server and never shown again — paste a new value to replace one.
+      </p>
+      <KeyRow
+        label="Anthropic (Claude)" hint="Required — powers all of ForceAI's thinking & replies."
+        link="https://console.anthropic.com/settings/keys"
+        set={settings.anthropic_key_set} last4={settings.anthropic_key_last4}
+        onSave={v => update({ anthropic_api_key: v } as Partial<Settings>)}
+      />
+      <KeyRow
+        label="Google Gemini" hint="Optional — unlocks image generation (memes, visual roasts). Free tier available."
+        link="https://aistudio.google.com/apikey"
+        set={settings.gemini_key_set} last4={settings.gemini_key_last4} clearable
+        onSave={v => update({ gemini_api_key: v } as Partial<Settings>)}
+      />
+      <KeyRow
+        label="ElevenLabs" hint="Optional — unlocks spoken voice notes."
+        link="https://elevenlabs.io/app/settings/api-keys"
+        set={settings.elevenlabs_key_set} last4={settings.elevenlabs_key_last4} clearable
+        onSave={v => update({ elevenlabs_api_key: v } as Partial<Settings>)}
+      />
+      {!settings.dashboard_protected && (
+        <div className="settings-row">
+          <div>
+            <label style={{ color: 'var(--warn)' }}>⚠ Dashboard has no password</label>
+            <div className="hint">Anyone who reaches this page can enter keys and spend your money. Set <b>DASHBOARD_PASSWORD</b> in your host's environment variables.</div>
+          </div>
+        </div>
+      )}
+
+      <h3 style={{ margin: '18px 0 4px' }}>Phone &amp; system</h3>
 
       <div className="settings-row">
         <div>
@@ -239,7 +316,7 @@ export function SettingsPanel({ onSaved }: { onSaved: () => void }) {
           <div className="hint">
             {settings.voice_available
               ? 'AI can send spoken voice notes when the moment calls for it.'
-              : 'Set ELEVENLABS_API_KEY in .env to unlock.'}
+              : 'Add an ElevenLabs key in API keys above to unlock.'}
           </div>
         </div>
         <input
@@ -332,7 +409,7 @@ export function SettingsPanel({ onSaved }: { onSaved: () => void }) {
       />
       <FreqSlider
         label="Voice note usage"
-        hint={settings.voice_available ? 'How often replies become spoken voice notes.' : 'Requires ELEVENLABS_API_KEY + voice enabled above.'}
+        hint={settings.voice_available ? 'How often replies become spoken voice notes.' : 'Add an ElevenLabs key (API keys above) + enable voice.'}
         value={settings.voice_freq}
         disabled={!settings.voice_available || !settings.voice_enabled}
         onChange={v => update({ voice_freq: v })}
@@ -348,7 +425,7 @@ export function SettingsPanel({ onSaved }: { onSaved: () => void }) {
         label="Image generation usage"
         hint={settings.image_available
           ? `How eagerly it generates images (~$0.04 each). ${settings.images_today}/${settings.images_per_day} used today.`
-          : 'Requires GEMINI_API_KEY in .env + enabled below.'}
+          : 'Add a Gemini key (API keys above) + enable images below.'}
         value={settings.image_freq}
         disabled={!settings.image_available || !settings.image_enabled}
         onChange={v => update({ image_freq: v })}
@@ -362,7 +439,7 @@ export function SettingsPanel({ onSaved }: { onSaved: () => void }) {
           <div className="hint">
             {settings.image_available
               ? 'Lets ForceAI create & edit images (memes, roasts) via Google Gemini.'
-              : 'Set GEMINI_API_KEY in .env to unlock (free tier: 500 images/day).'}
+              : 'Add a Gemini key in API keys above to unlock (free tier available).'}
           </div>
         </div>
         <input
@@ -456,6 +533,20 @@ export function SettingsPanel({ onSaved }: { onSaved: () => void }) {
       </div>
 
       <InitiativePrinciples />
+
+      <h3 style={{ margin: '18px 0 4px' }}>About</h3>
+      <p className="hint" style={{ margin: '0 0 10px' }}>
+        ForceAI is an AI member for WhatsApp group chats — it reads along and joins in with banter in the
+        group's own voice, while you steer it from this dashboard. Built by Said.{' '}
+        <a href="https://github.com/ma9197/ForceAI" target="_blank" rel="noreferrer">View the project ↗</a>
+      </p>
+      <div className="settings-row">
+        <div>
+          <label>Replay the setup guide</label>
+          <div className="hint">Show the first-run welcome, key entry and tips again.</div>
+        </div>
+        <button onClick={() => { localStorage.removeItem('forceai_onboarded'); location.reload(); }}>↺ Re-run guide</button>
+      </div>
     </div>
   );
 }

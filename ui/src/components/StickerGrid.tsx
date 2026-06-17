@@ -21,10 +21,14 @@ export function StickerGrid({ version }: { version: number }) {
 
   return (
     <div>
-      <p className="muted" style={{ fontSize: 12 }}>
-        Teach stickers from WhatsApp: open your self-chat (message yourself), send <b>"Sticker"</b>,
-        then the sticker, then its meaning.
-      </p>
+      <div className="voice-intro">
+        <h3>🖼️ Stickers</h3>
+        <p className="muted">
+          The stickers ForceAI can send, and what each one means. To teach a new one: open your WhatsApp
+          self-chat (message yourself), send the word <b>"Sticker"</b>, then the sticker, then a short
+          description of when to use it.
+        </p>
+      </div>
       <div className="sticker-grid">
         {stickers.map(s => (
           <div

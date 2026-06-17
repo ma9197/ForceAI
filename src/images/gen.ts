@@ -14,11 +14,11 @@ export interface GenResult {
 export async function geminiGenerateImage(
   prompt: string,
   model: ImageModelChoice,
+  apiKey: string,
   editImage?: { data: Buffer; mimeType: string },
 ): Promise<GenResult | null> {
-  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    logger.warn('GEMINI_API_KEY not set — image generation disabled');
+    logger.warn('No Gemini API key set — image generation disabled');
     return null;
   }
 

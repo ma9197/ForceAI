@@ -178,7 +178,7 @@ export class Outbound {
         }
 
         if (this.typingOn()) { try { await this.getSock()?.sendPresenceUpdate('composing', chatJid); } catch { /* ignore */ } }
-        const gen = await geminiGenerateImage(action.prompt, model, editImage);
+        const gen = await geminiGenerateImage(action.prompt, model, this.repo.getKey('gemini_api_key'), editImage);
         if (!gen) {
           const text = this.decorate('couldn\'t cook that image up 💀');
           return (await sock.sendMessage(chatJid, { text })) ?? null;
@@ -197,7 +197,7 @@ export class Outbound {
         const voiceId = this.repo.getConfig('voice_id') || ELEVENLABS.DEFAULT_VOICE_ID;
         // "recording" presence while TTS renders (only if typing indicators enabled)
         if (this.typingOn()) { try { await sock.sendPresenceUpdate('recording', chatJid); } catch { /* ignore */ } }
-        const audio = await elevenLabsTts(action.text, voiceId);
+        const audio = await elevenLabsTts(action.text, voiceId, this.repo.getKey('elevenlabs_api_key'));
         if (!audio) {
           logger.warn('TTS failed — falling back to text message');
           const text = this.decorate(action.text);

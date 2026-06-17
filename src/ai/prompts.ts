@@ -186,8 +186,8 @@ export class PromptBuilder {
     const memberReadBlock = this.buildMemberReadBlock(chatJid);
     const initiativeBlock = this.buildInitiativeBlock();
 
-    const voiceEnabled = this.repo.getConfig('voice_enabled') === '1' && !!process.env.ELEVENLABS_API_KEY;
-    const imageEnabled = this.repo.getConfig('image_enabled') === '1' && !!process.env.GEMINI_API_KEY;
+    const voiceEnabled = this.repo.getConfig('voice_enabled') === '1' && this.repo.hasKey('elevenlabs_api_key');
+    const imageEnabled = this.repo.getConfig('image_enabled') === '1' && this.repo.hasKey('gemini_api_key');
 
     // usage dials — generous defaults per owner's preference
     const stickerFreq = freqLevel(this.repo.getConfig('sticker_freq'), 'often');

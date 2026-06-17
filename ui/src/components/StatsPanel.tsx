@@ -27,6 +27,13 @@ export function StatsPanel({ group, globalStats }: { group: GroupStatus | null; 
 
   return (
     <div>
+      <div className="voice-intro">
+        <h3>📊 Stats</h3>
+        <p className="muted">
+          Activity and spend — for the selected group and across all of them. "Cost" is what ForceAI
+          has spent on AI so far; keep an eye on it against your daily budget in Settings.
+        </p>
+      </div>
       {group && (
         <>
           <h3 style={{ margin: '0 0 8px' }}>This group — {group.name ?? group.jid.split('@')[0]}</h3>

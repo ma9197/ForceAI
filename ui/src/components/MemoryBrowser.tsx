@@ -17,7 +17,14 @@ export function MemoryBrowser({ jid, version }: { jid: string; version: number }
 
   return (
     <div>
-      <p className="muted" style={{ fontSize: 11, marginTop: 0 }}>Memory for THIS group only — groups never share facts.</p>
+      <div className="voice-intro">
+        <h3>🧠 Memory</h3>
+        <p className="muted">
+          Facts ForceAI has picked up about each person <b>in this group</b> — who supports which team,
+          running jokes, jobs, and so on. It uses these to make replies personal. Groups never share
+          memory. Delete anything that's wrong or you'd rather it forget.
+        </p>
+      </div>
       {known.length === 0 && <p className="muted">Nobody learned yet — members appear here as they talk.</p>}
       {known.map(m => (
         <div key={m.jid} className="card">

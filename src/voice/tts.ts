@@ -5,10 +5,9 @@ import { logger } from '../logger.js';
  * ElevenLabs text-to-speech → Ogg/Opus buffer (WhatsApp's native voice-note format).
  * Returns null on any failure — callers fall back to sending text.
  */
-export async function elevenLabsTts(text: string, voiceId: string): Promise<Buffer | null> {
-  const apiKey = process.env.ELEVENLABS_API_KEY;
+export async function elevenLabsTts(text: string, voiceId: string, apiKey: string): Promise<Buffer | null> {
   if (!apiKey) {
-    logger.warn('ELEVENLABS_API_KEY not set — voice disabled');
+    logger.warn('No ElevenLabs API key set — voice disabled');
     return null;
   }
 

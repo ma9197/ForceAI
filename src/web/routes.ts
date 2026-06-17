@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import type { App } from '../app.js';
-import { DATA_DIR, resolveStickerPath, applyMentions, CITY_CATALOG, cityNow, type ClockCity } from '../config.js';
+import { DATA_DIR, DEMO_MODE, resolveStickerPath, applyMentions, CITY_CATALOG, cityNow, type ClockCity } from '../config.js';
 import { logger } from '../logger.js';
 import { FREQ_LEVELS, PERSONA_PRESETS } from '../ai/prompts.js';
 
@@ -15,6 +15,19 @@ function settingsPayload(app: App) {
 }
 
 export async function registerRoutes(fastify: FastifyInstance, app: App): Promise<void> {
+  // Routes that spend tokens / drive the AI. Blocked during first-run setup (no key yet) and
+  // turned into harmless no-ops in the read-only public demo.
+  const AI_ACTION_PATHS = new Set([
+    '/api/influence', '/api/continue', '/api/voice/learn', '/api/people/report-now', '/api/initiative/distill',
+  ]);
+  fastify.addHook('preHandler', async (req, reply) => {
+    const path = req.url.split('?')[0];
+    if (req.method === 'POST' && AI_ACTION_PATHS.has(path)) {
+      if (DEMO_MODE) return reply.send({ ok: true, demo: true });
+      if (app.needsSetup) return reply.code(409).send({ error: 'Add your Anthropic API key first (Settings → API keys).' });
+    }
+  });
+
   fastify.get('/api/status', async () => app.statusPayload());
 
   fastify.get('/api/groups', async () => {
@@ -402,10 +415,19 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     super_idle_minutes?: number;
     image_enabled?: boolean; image_model?: string; image_freq?: string; images_per_day?: number;
     typing_indicators?: boolean; token_reduction?: boolean; initiative_enabled?: boolean;
+    anthropic_api_key?: string; gemini_api_key?: string; elevenlabs_api_key?: string;
   } }>(
     '/api/settings',
     async (req) => {
       const b = req.body ?? {};
+      // API keys — entered in the dashboard, stored in config. Empty string clears (reverts to env).
+      if (b.gemini_api_key !== undefined) app.repo.setConfig('gemini_api_key', b.gemini_api_key.trim());
+      if (b.elevenlabs_api_key !== undefined) app.repo.setConfig('elevenlabs_api_key', b.elevenlabs_api_key.trim());
+      if (b.anthropic_api_key !== undefined) {
+        app.repo.setConfig('anthropic_api_key', b.anthropic_api_key.trim());
+        app.ai.reload();              // hot-swap the Anthropic client to the new key
+        if (b.anthropic_api_key.trim()) app.completeSetup(); // leave needs-setup mode + start WhatsApp
+      }
       if (b.gatekeeper_model && ['sonnet', 'haiku'].includes(b.gatekeeper_model)) {
         app.repo.setConfig('gatekeeper_model', b.gatekeeper_model);
       }
@@ -488,4 +510,10 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
       return settingsPayload(app);
     },
   );
+
+  // setup wizard: check an Anthropic key works before relying on it (tests `key` if given, else current).
+  // Not in the AI_ACTION guard above because the wizard needs it DURING setup; demo short-circuits it
+  // so it can't be abused as a public key-testing oracle.
+  fastify.post<{ Body: { key?: string } }>('/api/keys/validate', async (req) =>
+    DEMO_MODE ? { ok: true } : app.ai.validateAnthropicKey(req.body?.key));
 }

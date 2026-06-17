@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { downloadMediaMessage, type WAMessage } from 'baileys';
-import { INTRO_MESSAGE, DEFAULT_DAILY_BUDGET_USD, DEFAULT_MSG_PREFIX, DEFAULT_MSG_SUFFIX, ELEVENLABS, IMAGE_DIR, IMAGE_GEN, INITIATIVE, applyMentions } from './config.js';
+import { INTRO_MESSAGE, DEFAULT_DAILY_BUDGET_USD, DEFAULT_MSG_PREFIX, DEFAULT_MSG_SUFFIX, DEMO_MODE, ELEVENLABS, IMAGE_DIR, IMAGE_GEN, INITIATIVE, applyMentions } from './config.js';
 import { logger, waLogger } from './logger.js';
 import { openDb } from './memory/db.js';
 import { Repo } from './memory/repo.js';
@@ -43,6 +43,9 @@ export class App {
 
   /** false = full shutdown (WhatsApp disconnected, dashboard still up). Persisted across restarts. */
   online = true;
+  /** true until an Anthropic key exists — the dashboard shows the setup wizard and no AI/WhatsApp runs.
+   *  Computed at boot only (clearing a key later just disables features, doesn't re-enter the wizard). */
+  needsSetup = false;
   /** all groups the bot is currently live in — each has its own arbiter/extractor */
   linkedGroups = new Set<string>();
   private arbiters = new Map<string, Arbiter>();
@@ -88,6 +91,7 @@ export class App {
 
     this.loadLinkedGroups();
     this.online = this.repo.getConfig('bot_online') !== '0'; // restore shutdown state across restarts
+    this.needsSetup = !DEMO_MODE && !this.ai.hasAnthropicKey(); // no key yet → first-run setup wizard
     // NOTE: we intentionally do NOT reset paused/asleep on boot — each group is restored to
     // its EXACT prior state (live / sleeping / paused) so restarts and updates are seamless.
     // (paused_<jid> and asleep_<jid> are persisted in config; the arbiter reads them.)
@@ -162,7 +166,15 @@ export class App {
       }
     });
 
-    if (this.online) {
+    if (DEMO_MODE) {
+      logger.info('booting in DEMO mode — no WhatsApp, seeded data, outbound disabled');
+      this.conn.setOffline();
+      this.seedDemo();
+    } else if (this.needsSetup) {
+      // no Anthropic key yet — stay disconnected (no AI calls) until the wizard saves one
+      logger.info('booting in SETUP mode — WhatsApp not connected until an API key is entered');
+      this.conn.setOffline();
+    } else if (this.online) {
       await this.conn.start();
     } else {
       // booted in shutdown state — keep the dashboard up but stay disconnected
@@ -172,7 +184,85 @@ export class App {
     }
 
     // weekly member-report scheduler (independent of WhatsApp; checks the clock every 30 min)
+    if (!this.needsSetup && !DEMO_MODE) this.memberReporter.start();
+  }
+
+  /** Seed a believable fake group so the public demo (DEMO_MODE) is fully clickable with no keys/phone.
+   *  Writes only to the ephemeral in-memory demo DB (see openDb). */
+  private seedDemo(): void {
+    if (this.linkedGroups.size > 0) return; // already seeded
+    const jid = 'demo-group@g.us';
+    this.groups.setCachedSubject(jid, 'The Boys 🔥');
+    this.linkedGroups.add(jid);
+
+    const EYYUB = 'demo-eyyub@s.whatsapp.net';
+    const AYXAN = 'demo-ayxan@s.whatsapp.net';
+    const OWNER = 'demo-owner@s.whatsapp.net';
+    const t0 = Date.now() - 30 * 60_000;
+    this.repo.upsertMember(EYYUB, 'Eyyub', null, t0);
+    this.repo.upsertMember(AYXAN, 'Ayxan', null, t0);
+    this.repo.upsertMember(OWNER, 'Said', null, t0);
+
+    type Line = { who: 'eyyub' | 'ayxan' | 'owner' | 'bot'; text: string; type?: NormalizedMessage['type'] };
+    const script: Line[] = [
+      { who: 'eyyub', text: "lads who's watching the match tonight 👀" },
+      { who: 'ayxan', text: 'obviously. madrid gonna destroy them' },
+      { who: 'eyyub', text: 'madrid?? 💀 bro they are washed' },
+      { who: 'bot', text: "ayxan really said madrid like it's 2017 😭 keep up king" },
+      { who: 'ayxan', text: 'nobody asked 🤡' },
+      { who: 'bot', text: 'and yet here you are replying to me 🤭' },
+      { who: 'owner', text: 'calm down both of you 😂' },
+      { who: 'eyyub', text: 'forceai settle it, who wins tonight' },
+      { who: 'bot', text: 'madrid by 2. ayxan about to go very quiet after 💀' },
+      { who: 'ayxan', text: "if i'm wrong i'll send a voice note apologizing" },
+      { who: 'eyyub', text: 'screenshot this 📸' },
+      { who: 'bot', text: "already saved it 🤝 don't worry i'll remind him" },
+    ];
+    const jidOf = { eyyub: EYYUB, ayxan: AYXAN, owner: OWNER, bot: OWNER } as const;
+    const nameOf = { eyyub: 'Eyyub', ayxan: 'Ayxan', owner: 'Said', bot: 'ForceAI' } as const;
+    script.forEach((line, i) => {
+      const isBot = line.who === 'bot';
+      const isOwner = line.who === 'owner';
+      this.repo.insertMessage({
+        id: `demo-m${i}`, shortId: `m${i + 1}`, chatJid: jid,
+        senderJid: jidOf[line.who], senderName: nameOf[line.who],
+        fromMe: isBot || isOwner, isBot, isOwner,
+        type: line.type ?? 'text', text: line.text, mentionedJids: [], ts: t0 + i * 90_000,
+        raw: { key: { id: `demo-m${i}`, remoteJid: jid, fromMe: isBot || isOwner } },
+      });
+      if (!isBot && !isOwner) this.repo.bumpMemberMessageCount(jidOf[line.who]);
+    });
+
+    // a little learned memory + voice so those tabs aren't empty
+    this.repo.insertFact(jid, EYYUB, 'Barcelona fan — despises Real Madrid', 'football', 0.95, null);
+    this.repo.insertFact(jid, EYYUB, 'Always certain he is right in football debates', 'personality', 0.8, null);
+    this.repo.insertFact(jid, AYXAN, 'Die-hard Real Madrid supporter', 'football', 0.95, null);
+    this.repo.insertFact(jid, AYXAN, 'Loud and confident, folds when proven wrong', 'personality', 0.75, null);
+    this.repo.insertVoiceItem(jid, 'slang', 'washed = past their prime / no longer good', 'they are washed', null);
+    this.repo.insertVoiceItem(jid, 'joke', 'running bit: making the losing side "go quiet"', 'about to go very quiet', null);
+    this.repo.insertVoiceItem(jid, 'member_style', 'Ayxan: short, cocky one-liners; lots of 🤡 and 💀', 'nobody asked 🤡', AYXAN);
+
+    // believable stats
+    const bump = (k: string, n: number) => this.repo.bumpStat(k, n);
+    bump('messages_read', 9); bump(`messages_read:${jid}`, 9);
+    bump('messages_sent', 3); bump(`messages_sent:${jid}`, 3);
+    bump('facts_learned', 4); bump(`facts_learned:${jid}`, 4);
+    bump('voice_items_learned', 3); bump(`voice_items_learned:${jid}`, 3);
+    bump('t1_calls', 9); bump(`t1_calls:${jid}`, 9);
+    bump('t2_calls', 3); bump(`t2_calls:${jid}`, 3);
+    bump('cost_microusd', 14_200); bump(`cost_microusd:${jid}`, 14_200);
+    bump('input_tokens', 48_000); bump('output_tokens', 1_900); bump('cache_read_tokens', 120_000);
+  }
+
+  /** Called when the first Anthropic key is saved via the dashboard: leave setup mode and bring the
+   *  bot online (begin the WhatsApp QR + start the background scheduler), live, with no restart. */
+  completeSetup(): void {
+    if (!this.needsSetup) return;
+    this.needsSetup = false;
+    logger.info('Anthropic key saved — leaving SETUP mode');
+    if (this.online) { void this.conn.start(); }
     this.memberReporter.start();
+    this.bus.publish({ kind: 'status', status: this.statusPayload() });
   }
 
   /** Manual trigger for the weekly per-person report job (also used for the first backfill). */
@@ -430,7 +520,18 @@ export class App {
   }
 
   getSettings(): StatusPayload['settings'] {
+    const last4 = (k: 'anthropic_api_key' | 'gemini_api_key' | 'elevenlabs_api_key') => {
+      const v = this.repo.getKey(k);
+      return v.length >= 4 ? v.slice(-4) : null;
+    };
     return {
+      anthropic_key_set: this.repo.hasKey('anthropic_api_key'),
+      anthropic_key_last4: last4('anthropic_api_key'),
+      gemini_key_set: this.repo.hasKey('gemini_api_key'),
+      gemini_key_last4: last4('gemini_api_key'),
+      elevenlabs_key_set: this.repo.hasKey('elevenlabs_api_key'),
+      elevenlabs_key_last4: last4('elevenlabs_api_key'),
+      dashboard_protected: !!process.env.DASHBOARD_PASSWORD,
       gatekeeper_model: this.repo.getConfig('gatekeeper_model') ?? 'sonnet',
       generation_model: this.repo.getConfig('generation_model') ?? 'sonnet',
       effort: this.repo.getConfig('effort') ?? 'low',
@@ -438,7 +539,7 @@ export class App {
       msg_prefix: this.repo.getConfig('msg_prefix') ?? DEFAULT_MSG_PREFIX,
       msg_suffix: this.repo.getConfig('msg_suffix') ?? DEFAULT_MSG_SUFFIX,
       voice_enabled: this.repo.getConfig('voice_enabled') === '1',
-      voice_available: !!process.env.ELEVENLABS_API_KEY,
+      voice_available: this.repo.hasKey('elevenlabs_api_key'),
       voice_id: this.repo.getConfig('voice_id') || ELEVENLABS.DEFAULT_VOICE_ID,
       persona_mode: this.repo.getConfig('persona_mode') ?? 'default',
       persona_custom: this.repo.getConfig('persona_custom') ?? '',
@@ -451,7 +552,7 @@ export class App {
       rate_per_hour: Number(this.repo.getConfig('rate_per_hour') ?? 30),
       super_idle_minutes: Number(this.repo.getConfig('super_idle_minutes') ?? 30),
       image_enabled: this.repo.getConfig('image_enabled') === '1',
-      image_available: !!process.env.GEMINI_API_KEY,
+      image_available: this.repo.hasKey('gemini_api_key'),
       image_model: this.repo.getConfig('image_model') ?? 'flash',
       image_freq: this.repo.getConfig('image_freq') ?? 'rare',
       images_per_day: Number(this.repo.getConfig('images_per_day') ?? IMAGE_GEN.DEFAULT_PER_DAY),
@@ -492,8 +593,16 @@ export class App {
     stats['cost_today_usd_cents'] = Math.round(this.ai.spentTodayMicro() / 10_000);
 
     return {
-      connection: this.conn.state,
-      online: this.online,
+      // demo: report a connected/online bot (there's no real WhatsApp) so the UI shows the main view
+      connection: DEMO_MODE ? 'open' : this.conn.state,
+      online: DEMO_MODE ? true : this.online,
+      needsSetup: this.needsSetup,
+      demo: DEMO_MODE,
+      keys: {
+        anthropic: this.repo.hasKey('anthropic_api_key'),
+        gemini: this.repo.hasKey('gemini_api_key'),
+        elevenlabs: this.repo.hasKey('elevenlabs_api_key'),
+      },
       groups,
       stats,
       settings: this.getSettings(),

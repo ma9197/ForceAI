@@ -4,12 +4,13 @@ import { App } from './app.js';
 import { startWebServer } from './web/server.js';
 
 async function main(): Promise<void> {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    logger.error('ANTHROPIC_API_KEY is not set — copy .env.example to .env and fill it in');
-    process.exit(1);
-  }
-
+  // No hard exit when the Anthropic key is missing — the app boots into "setup mode" and the
+  // dashboard's first-run wizard collects the key (and the WhatsApp QR). It only spends/connects
+  // once a key is entered. This is what makes the app usable without hand-editing .env.
   const app = new App();
+  if (app.needsSetup) {
+    logger.warn('No Anthropic API key yet — starting in SETUP mode. Open the dashboard to finish setup.');
+  }
   await startWebServer(app);
   await app.start();
 

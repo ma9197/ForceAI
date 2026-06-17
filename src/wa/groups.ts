@@ -44,4 +44,9 @@ export class Groups {
   subjectOf(jid: string): string | null {
     return this.cache.get(jid)?.subject ?? null;
   }
+
+  /** Inject a subject into the cache (used by demo-mode seeding, which has no real WhatsApp). */
+  setCachedSubject(jid: string, subject: string): void {
+    this.cache.set(jid, { id: jid, subject, participants: [] } as unknown as GroupMetadata);
+  }
 }

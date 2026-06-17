@@ -15,7 +15,40 @@ export class AiClient {
   client: Anthropic;
 
   constructor(private repo: Repo) {
-    this.client = new Anthropic(); // ANTHROPIC_API_KEY from env
+    this.client = this.build();
+  }
+
+  /** Build an Anthropic client from the resolved key (DB || env). Empty → SDK's own env fallback. */
+  private build(): Anthropic {
+    const key = this.repo.getKey('anthropic_api_key');
+    return new Anthropic(key ? { apiKey: key } : {});
+  }
+
+  /** Hot-swap the client after the key is changed in the dashboard (calls read this.client per-request). */
+  reload(): void {
+    this.client = this.build();
+  }
+
+  hasAnthropicKey(): boolean {
+    return this.repo.hasKey('anthropic_api_key');
+  }
+
+  /** Cheap liveness check for an Anthropic key (used by the setup wizard). Tests `key` if given,
+   *  else the configured one. A 429 means the key works but is throttled — treated as valid. */
+  async validateAnthropicKey(key?: string): Promise<{ ok: boolean; reason?: string }> {
+    const apiKey = (key ?? this.repo.getKey('anthropic_api_key')).trim();
+    if (!apiKey) return { ok: false, reason: 'No key provided' };
+    try {
+      const client = new Anthropic({ apiKey });
+      await client.messages.create({ model: GATEKEEPER_MODELS.haiku, max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] });
+      return { ok: true };
+    } catch (err) {
+      const status = (err as { status?: number })?.status;
+      if (status === 429) return { ok: true };
+      const reason = status === 401 || status === 403 ? 'Key was rejected — double-check you pasted it correctly'
+        : (err as { message?: string })?.message ?? 'Could not verify the key';
+      return { ok: false, reason };
+    }
   }
 
   // ---- settings ----

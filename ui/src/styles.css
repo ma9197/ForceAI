@@ -197,6 +197,11 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent2); }
 .influence-learn input[type="checkbox"] { flex: 0 0 auto; width: 16px; height: 16px; margin: 0; }
 .controls-sys { display: flex; gap: 8px; flex: 0 0 auto; }
 
+.demo-badge { font-size: 12px; color: var(--sleep); border: 1px solid var(--sleep); border-radius: 999px; padding: 3px 12px; white-space: nowrap; }
+
+/* one-time discoverability tip above the feed */
+.feed-tip { display: flex; align-items: center; gap: 8px; margin: 8px 16px 0; padding: 8px 12px; background: var(--panel2); border: 1px solid var(--accent2); border-radius: 8px; font-size: 12.5px; color: var(--text); }
+
 /* tabs */
 .tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--panel); }
 .tabs button { border: none; border-radius: 0; background: transparent; padding: 11px 16px; color: var(--muted); border-bottom: 2px solid transparent; }
@@ -225,6 +230,26 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent2); }
 /* centered screens (QR / group picker) */
 .center-screen { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 40px; }
 .center-screen img.qr { border-radius: 12px; background: white; padding: 10px; }
+
+/* first-run setup wizard (full screen, no topbar) */
+.wizard { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--bg); z-index: 50; }
+.wizard-top { display: flex; align-items: center; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--border); }
+.wizard-steps { display: flex; gap: 8px; flex-wrap: wrap; }
+.wstep { font-size: 12px; color: var(--muted); padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border); }
+.wstep.on { color: var(--bg); background: var(--accent); border-color: var(--accent); font-weight: 600; }
+.wstep.done { color: var(--accent); border-color: var(--accent); }
+.wizard-content { flex: 1; display: flex; flex-direction: column; overflow-y: auto; }
+.wizard-keys { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 440px; }
+.wkey { display: flex; flex-direction: column; gap: 4px; text-align: left; }
+.wkey > span { font-size: 13px; }
+.wkey > span i { color: var(--muted); font-weight: 400; font-style: normal; font-size: 12px; }
+.wkey > span b.req { color: var(--warn); font-size: 11px; margin-left: 4px; }
+.wkey input { width: 100%; box-sizing: border-box; }
+.wkey a { font-size: 11px; color: var(--accent2); }
+.wizard-err { color: var(--warn); font-size: 13px; max-width: 440px; text-align: center; }
+.wizard-tips { list-style: none; padding: 0; margin: 4px 0; max-width: 480px; display: flex; flex-direction: column; gap: 9px; font-size: 13px; line-height: 1.45; }
+.wizard-skip { position: absolute; bottom: 16px; right: 20px; background: none; border: none; color: var(--muted); font-size: 12px; cursor: pointer; }
+.wizard-skip:hover { color: var(--text); }
 .group-list { width: 100%; max-width: 480px; display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y: auto; }
 .group-item { display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; cursor: pointer; }
 .group-item:hover { border-color: var(--accent); }
@@ -233,6 +258,7 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent2); }
 .settings-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--border); }
 .settings-row label { color: var(--text); }
 .settings-row .hint { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.key-set { font-size: 11px; color: var(--accent); font-weight: 600; }
 
 /* world clock (cities the bot is time-aware of) */
 .clock-cities { display: flex; flex-wrap: wrap; gap: 8px; }

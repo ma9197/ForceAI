@@ -14,6 +14,10 @@ export const UI_DIST = path.join(ROOT_DIR, 'ui', 'dist');
 
 export const PORT = Number(process.env.PORT ?? 3008);
 
+/** Public showcase mode: seeds fake data, skips the real WhatsApp connection, blocks outbound sends —
+ *  so a hosted demo is fully clickable with no keys/phone. Set DEMO_MODE=1 in the env. */
+export const DEMO_MODE = process.env.DEMO_MODE === '1';
+
 /**
  * Resolve a sticker's actual file location from whatever path is stored in the DB.
  * The stored path may be a Windows absolute path (from a local install) or a Linux one

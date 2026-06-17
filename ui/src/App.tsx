@@ -3,6 +3,7 @@ import { api, post, type Status } from './api';
 import { useWs, type WsEvent } from './useWs';
 import { QrLogin } from './components/QrLogin';
 import { GroupPicker } from './components/GroupPicker';
+import { SetupWizard } from './components/SetupWizard';
 import { LiveFeed, type FeedItem, type ReplyTarget } from './components/LiveFeed';
 import { MemoryBrowser } from './components/MemoryBrowser';
 import { VoiceProfilePanel } from './components/VoiceProfilePanel';
@@ -26,6 +27,10 @@ export default function App() {
   const [why, setWhy] = useState(''); // optional rationale behind an Influence
   const [learn, setLearn] = useState(false); // teach the bot initiative from this move
   const [mobileView, setMobileView] = useState<'chat' | 'side'>('chat'); // mobile: chat vs side panel
+  const [onboarded, setOnboarded] = useState(() =>
+    typeof localStorage !== 'undefined' && localStorage.getItem('forceai_onboarded') === '1');
+  const [tipClickReply, setTipClickReply] = useState(() =>
+    typeof localStorage === 'undefined' || localStorage.getItem('tip_click_reply') !== '1');
   // draggable divider between feed and the controls/tabs panel (desktop). Persisted across reloads.
   const [sideWidth, setSideWidth] = useState<number | null>(() => {
     const v = typeof localStorage !== 'undefined' ? localStorage.getItem('sideWidth') : null;
@@ -133,6 +138,18 @@ export default function App() {
     await post('/api/group/unlink', { jid });
   };
 
+  // first-run setup guide: shown until there's an Anthropic key AND the user has finished the guide.
+  // (Never in demo mode.) It's the outermost gate — full screen, no topbar.
+  if (status && !status.demo && (status.needsSetup || !onboarded)) {
+    return (
+      <SetupWizard
+        status={status}
+        qr={qr}
+        onFinish={() => { localStorage.setItem('forceai_onboarded', '1'); setOnboarded(true); refreshStatus(); }}
+      />
+    );
+  }
+
   return (
     <>
       <div className="topbar">
@@ -140,7 +157,8 @@ export default function App() {
         <span className={`dot ${conn}`} title={conn} />
         <span className="muted">{conn}</span>
         <div className="grow" />
-        {status && status.online && selected && (
+        {status?.demo && <span className="demo-badge">🎭 Demo — read-only, no real WhatsApp or keys</span>}
+        {!status?.demo && status && status.online && selected && (
           <>
             <span className="phase-chip">{selected.phase}</span>
             <button
@@ -151,7 +169,7 @@ export default function App() {
             </button>
           </>
         )}
-        {status && (status.online ? (
+        {!status?.demo && status && (status.online ? (
           <button
             className="danger"
             title="Fully disconnect WhatsApp (linked device goes offline). Memory + states are kept."
@@ -210,6 +228,13 @@ export default function App() {
             style={sideWidth != null ? ({ '--side-w': `${sideWidth}px` } as CSSProperties) : undefined}
           >
             <div className="feed-col">
+              {!hideInfluence && tipClickReply && (
+                <div className="feed-tip">
+                  💡 <b>Tip:</b> click any message below to make ForceAI reply to it.
+                  <span className="gclose" style={{ marginLeft: 'auto', cursor: 'pointer' }}
+                    onClick={() => { localStorage.setItem('tip_click_reply', '1'); setTipClickReply(false); }}>✕</span>
+                </div>
+              )}
               <LiveFeed
                 items={feed}
                 selectedShortId={replyTarget?.shortId}

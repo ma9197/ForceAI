@@ -17,6 +17,9 @@ export interface GroupStatus {
 export interface Status {
   connection: string;
   online: boolean;
+  needsSetup: boolean;
+  demo: boolean;
+  keys: { anthropic: boolean; gemini: boolean; elevenlabs: boolean };
   groups: GroupStatus[];
   stats: Record<string, number>;
   settings: { gatekeeper_model: string; generation_model: string; effort: string; daily_budget_usd: number; token_reduction?: boolean };
