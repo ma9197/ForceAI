@@ -20,6 +20,8 @@ export default function App() {
   const [qr, setQr] = useState<string | null>(null);
   const [feed, setFeed] = useState<FeedItem[]>([]);
   const [tab, setTab] = useState<Tab>('memory');
+  const everNeurons = useRef(false);
+  if (tab === 'neurons') everNeurons.current = true; // lazy-mount on first visit, then keep mounted
   const [influence, setInfluence] = useState('');
   const [memoryVersion, setMemoryVersion] = useState(0);
   const [showPicker, setShowPicker] = useState(false);
@@ -334,7 +336,12 @@ export default function App() {
             ))}
           </div>
 
-          {tab === 'neurons' && <NeuronsPanel version={memoryVersion} onClose={() => setTab('memory')} />}
+          {/* Mounted on first Neurons visit, then KEPT MOUNTED across tab switches (hidden via
+              display:none) so Exit→reopen is the exact same frame — no refetch, no re-simulate.
+              Do NOT revert to `tab === 'neurons' && …`: unmounting destroys positions + the sim. */}
+          {everNeurons.current && (
+            <NeuronsPanel active={tab === 'neurons'} version={memoryVersion} onClose={() => setTab('memory')} />
+          )}
         </>
       )}
     </>

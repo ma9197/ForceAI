@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
 import { api, type NeuronNode, type NeuronsResponse, type NeuronType } from '../api';
 import { buildEdges, NEURON_COLORS, NEURON_TYPE_LABEL, NEURON_TYPE_SINGULAR, type NeuronLink } from './neuronsGraph';
@@ -8,11 +8,14 @@ const MAX_RENDER = 4000; // hard cap; above this we keep the newest N
 
 /** The living neuron-web: every saved item is a node, drifting on a black canvas, interconnected by
  *  a thin web with white pulses travelling along it. Fullscreen overlay. */
-export function NeuronsPanel({ version, onClose }: { version: number; onClose: () => void }) {
+export function NeuronsPanel({ active, version, onClose }: { active: boolean; version: number; onClose: () => void }) {
   const graphRef = useRef<any>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const masterRef = useRef<NeuronNode[]>([]); // stable node objects (force-graph mutates x/y on them)
   const breatheReady = useRef(false);
+  const fetchedRef = useRef(false);          // initial /api/neurons fired exactly once (StrictMode-safe)
+  const [docHidden, setDocHidden] = useState(() => typeof document !== 'undefined' && document.hidden);
+  const shouldRun = active && !docHidden;    // single source of truth: run sim + measure only while visible
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -47,7 +50,14 @@ export function NeuronsPanel({ version, onClose }: { version: number; onClose: (
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { void load(false); }, [load]);
+  // Fetch once, on first reveal — a user who never opens Neurons never pays the /api/neurons fetch
+  // (nor parses the static-demo fixture). fetchedRef survives StrictMode mount→unmount→mount so it
+  // fires exactly once.
+  useEffect(() => {
+    if (!active || fetchedRef.current) return;
+    fetchedRef.current = true;
+    void load(false);
+  }, [active, load]);
   // live: a debounced refetch when the bot learns something new
   useEffect(() => {
     if (version === 0) return;
@@ -55,15 +65,17 @@ export function NeuronsPanel({ version, onClose }: { version: number; onClose: (
     return () => clearTimeout(id);
   }, [version, load]);
 
-  // ---- responsive canvas size (re-run once the canvas actually mounts, i.e. after loading) ----
+  // ---- responsive canvas size + (re)framing. Only runs while visible (display:none reports 0x0). ----
   useEffect(() => {
-    const el = wrapRef.current; if (!el) return; // null while the loading/empty screen is shown
+    if (!shouldRun) return;                       // never measure while hidden — clientW/H read 0
+    const el = wrapRef.current; if (!el) return;  // null while the loading/empty screen is shown
     let fitT: ReturnType<typeof setTimeout>;
     const apply = () => {
+      if (!el.clientWidth || !el.clientHeight) return; // MANDATORY: a 0x0 reflow must never clobber dims
       setDims({ w: el.clientWidth, h: el.clientHeight });
-      // Re-frame shortly after any size change. Crucially this also *recovers* from late reflows
-      // (web-font swaps, the analytics beacon on the hosted demo, devtools, etc.) that can reset the
-      // canvas's zoom transform and leave the whole brain as a tiny dot at center.
+      // Re-frame shortly after any size change. This also handles REVEAL (display:none→shown re-runs
+      // this effect) and *recovers* from late reflows (web-font swaps, the analytics beacon on the
+      // hosted demo, devtools) that can reset the canvas's zoom transform and leave it a tiny dot.
       clearTimeout(fitT);
       fitT = setTimeout(() => { try { graphRef.current?.zoomToFit?.(500, 80); } catch { /* */ } }, 400);
     };
@@ -71,7 +83,7 @@ export function NeuronsPanel({ version, onClose }: { version: number; onClose: (
     ro.observe(el);
     apply();
     return () => { ro.disconnect(); clearTimeout(fitT); };
-  }, [loading, error]);
+  }, [shouldRun, loading, error]);
 
   // ---- full graph, built once per fetch (stable reference → no re-simulation on timeline scrub).
   // The timeline reveals/hides nodes via nodeVisibility/linkVisibility, so positions stay put. ----
@@ -101,8 +113,9 @@ export function NeuronsPanel({ version, onClose }: { version: number; onClose: (
     if (!fg || breatheReady.current || fullGraph.nodes.length === 0) return;
     breatheReady.current = true;
     try {
-      fg.d3Force('charge')?.strength?.(-34);   // open, spread-out web
-      fg.d3Force('link')?.distance?.(30);
+      fg.d3Force('charge')?.strength?.(-30);     // one mesh has many short links; slightly softer keeps it round
+      fg.d3Force('charge')?.distanceMax?.(220);  // bound the never-cooling repulsion → stable blob radius at 2-4k
+      fg.d3Force('link')?.distance?.(28);        // marginally tighter → compact single ball
       let simNodes: NeuronNode[] = [];
       const breathe = () => {
         for (const n of simNodes) {
@@ -120,35 +133,65 @@ export function NeuronsPanel({ version, onClose }: { version: number; onClose: (
     // on a slower load the sim hasn't spread yet, so the fit is a no-op and the graph stays tiny.
     // Fit several times over the first few seconds (the last catches the settled equilibrium on any
     // machine), then pull back slightly so the gentle drift has room to roam without clipping.
-    const fit = () => { try { fg.zoomToFit?.(600, 80); } catch { /* */ } };  // padding leaves drift margin
+    const fit = () => { const el = wrapRef.current; if (el?.clientWidth && el.clientHeight) { try { fg.zoomToFit?.(600, 80); } catch { /* */ } } };
     const timers = [setTimeout(fit, 700), setTimeout(fit, 1700), setTimeout(fit, 3200)];
     return () => timers.forEach(clearTimeout);
   }, [fullGraph.nodes.length]);
 
-  // ---- pause the animation loop while the tab/window is hidden (big CPU saver) ----
+  // ---- track OS tab/window visibility into state so the pause controller re-evaluates on it ----
   useEffect(() => {
-    const onVis = () => { const fg = graphRef.current; if (!fg) return; document.hidden ? fg.pauseAnimation?.() : fg.resumeAnimation?.(); };
+    const onVis = () => setDocHidden(document.hidden);
     document.addEventListener('visibilitychange', onVis);
-    return () => { document.removeEventListener('visibilitychange', onVis); graphRef.current?.pauseAnimation?.(); };
+    return () => document.removeEventListener('visibilitychange', onVis);
   }, []);
 
-  // ---- timeline play ----
+  // ---- SINGLE run/pause controller: run iff (active && !document.hidden). No second resumer can
+  // race it. `rev` is in deps so it (re)applies once graphRef is populated after the first load. ----
   useEffect(() => {
-    if (!playing) return;
+    const fg = graphRef.current;
+    if (!fg) return;
+    if (shouldRun) fg.resumeAnimation?.(); else fg.pauseAnimation?.();
+  }, [shouldRun, rev]);
+
+  // ---- on REVEAL (hidden→shown), refit against REAL post-display dimensions after a double rAF so
+  // we never fit a stale 0x0; recovers the exact framing the user left. Keyed on shouldRun only, so
+  // a live append (rev bump) never yanks the camera while you're inspecting. ----
+  useEffect(() => {
+    if (!shouldRun) return;
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        const fg = graphRef.current, el = wrapRef.current;
+        if (fg && el?.clientWidth && el.clientHeight) {
+          setDims({ w: el.clientWidth, h: el.clientHeight });
+          try { fg.zoomToFit?.(400, 80); } catch { /* */ }
+        }
+      });
+    });
+    return () => { cancelAnimationFrame(raf1); cancelAnimationFrame(raf2); };
+  }, [shouldRun]);
+
+  // ---- timeline play (frozen while hidden so you return to the exact cutoff you left) ----
+  useEffect(() => {
+    if (!playing || !shouldRun) return;
     if (cutoff >= maxT) { setPlaying(false); return; }
     const span = Math.max(1, maxT - minT);
     const id = setInterval(() => setCutoff(c => Math.min(maxT, c + span / 120)), 60);
     return () => clearInterval(id);
-  }, [playing, maxT, minT, cutoff]);
+  }, [playing, maxT, minT, cutoff, shouldRun]);
 
   const zoomBy = (f: number) => { const fg = graphRef.current; if (fg) fg.zoom(fg.zoom() * f, 250); };
 
-  if (loading) return <div className="neurons-overlay"><Center>🧠 Waking up the brain…</Center><Exit onClose={onClose} /></div>;
-  if (error) return <div className="neurons-overlay"><Center>Couldn't load the brain. <button onClick={() => { setLoading(true); void load(false); }}>Retry</button></Center><Exit onClose={onClose} /></div>;
-  if (masterRef.current.length === 0) return <div className="neurons-overlay"><Center>No neurons yet — they appear as ForceAI learns.</Center><Exit onClose={onClose} /></div>;
+  // Lazy-mounted by App on first activation; thereafter stays mounted and hides via display:none
+  // (removes it from layout + hit-testing, so the dashboard underneath stays fully clickable).
+  const style: CSSProperties | undefined = active ? undefined : { display: 'none' };
+
+  if (loading) return <div className="neurons-overlay" style={style}><Center>🧠 Waking up the brain…</Center><Exit onClose={onClose} /></div>;
+  if (error) return <div className="neurons-overlay" style={style}><Center>Couldn't load the brain. <button onClick={() => { setLoading(true); void load(false); }}>Retry</button></Center><Exit onClose={onClose} /></div>;
+  if (masterRef.current.length === 0) return <div className="neurons-overlay" style={style}><Center>No neurons yet — they appear as ForceAI learns.</Center><Exit onClose={onClose} /></div>;
 
   return (
-    <div className="neurons-overlay">
+    <div className="neurons-overlay" style={style}>
       <div className="neurons-canvas" ref={wrapRef}>
         <ForceGraph2D
           ref={graphRef}
