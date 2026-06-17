@@ -1,4 +1,4 @@
-// AUTO-GENERATED demo fixtures for the static Cloudflare build. Captured from a seeded DEMO_MODE run.
+// AUTO-GENERATED demo fixtures for the static Cloudflare build. Captured from a seeded DEMO_MODE run; all key fields scrubbed.
 export const demoData = {
   "status": {
     "connection": "open",
@@ -41,12 +41,12 @@ export const demoData = {
       "cost_today_usd_cents": 0
     },
     "settings": {
-      "anthropic_key_set": true,
-      "anthropic_key_last4": "lAAA",
-      "gemini_key_set": true,
-      "gemini_key_last4": "QTVQ",
-      "elevenlabs_key_set": true,
-      "elevenlabs_key_last4": "ff61",
+      "anthropic_key_set": false,
+      "anthropic_key_last4": null,
+      "gemini_key_set": false,
+      "gemini_key_last4": null,
+      "elevenlabs_key_set": false,
+      "elevenlabs_key_last4": null,
       "dashboard_protected": false,
       "gatekeeper_model": "sonnet",
       "generation_model": "sonnet",

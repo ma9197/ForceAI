@@ -157,7 +157,14 @@ export default function App() {
         <span className={`dot ${conn}`} title={conn} />
         <span className="muted">{conn}</span>
         <div className="grow" />
-        {status?.demo && <span className="demo-badge">🎭 Demo — read-only, no real WhatsApp or keys</span>}
+        {status?.demo && (
+          <span className="demo-badge">
+            🎭 Demo — read-only ·{' '}
+            <a href="https://github.com/ma9197/ForceAI" target="_blank" rel="noreferrer">
+              ⭐ Open source — deploy your own →
+            </a>
+          </span>
+        )}
         {!status?.demo && status && status.online && selected && (
           <>
             <span className="phase-chip">{selected.phase}</span>
