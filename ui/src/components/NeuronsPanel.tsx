@@ -108,12 +108,17 @@ export function NeuronsPanel({ version, onClose }: { version: number; onClose: (
       breathe.initialize = (ns: NeuronNode[]) => { simNodes = ns; };
       fg.d3Force('breathe', breathe);
     } catch { /* lib internals changed — ignore */ }
-    // fit once the spread settles, then pull back to ~80% so the gentle drift has margin to roam
-    const id = setTimeout(() => {
-      fg.zoomToFit?.(700, 60);
-      setTimeout(() => { try { fg.zoom?.(fg.zoom() * 0.8, 500); } catch { /* */ } }, 800);
-    }, 900);
-    return () => clearTimeout(id);
+    // Frame the brain once it has spread to its stable size. A single fixed-delay fit is fragile —
+    // on a slower load the sim hasn't spread yet, so the fit is a no-op and the graph stays tiny.
+    // Fit several times over the first few seconds (the last catches the settled equilibrium on any
+    // machine), then pull back slightly so the gentle drift has room to roam without clipping.
+    const fit = () => { try { fg.zoomToFit?.(600, 70); } catch { /* */ } };
+    const timers = [
+      setTimeout(fit, 700),
+      setTimeout(fit, 1700),
+      setTimeout(() => { fit(); setTimeout(() => { try { fg.zoom?.(fg.zoom() * 0.85, 500); } catch { /* */ } }, 700); }, 2900),
+    ];
+    return () => timers.forEach(clearTimeout);
   }, [fullGraph.nodes.length]);
 
   // ---- pause the animation loop while the tab/window is hidden (big CPU saver) ----
