@@ -36,16 +36,16 @@ export function isFakeAdminAttempt(m: NormalizedMessage): boolean {
 }
 
 /**
- * While ASLEEP, only these wake the bot: the literal word "ForceAI", or a reply to the bot's
- * own message. Deliberately EXCLUDES @mentions — the bot shares the owner's WhatsApp account,
- * so "@mention of the owner-as-person" is the same JID as "@mention of the bot" and must not wake it.
- * (Awake behavior is unchanged — isHardTrigger still includes @mentions.)
+ * While ASLEEP, ONLY the literal bot name ("ForceAI" / "force ai" / "forceai") wakes the bot —
+ * nothing else. Deliberately EXCLUDES @mentions AND replies: the bot shares the owner's WhatsApp
+ * account, so an @mention of — or a reply to — the owner-as-person is indistinguishable from one
+ * aimed at the bot, and those must NOT wake it (replying to any of the owner's/bot's messages used
+ * to wake it, which the owner did not want). Awake behavior is unchanged — isHardTrigger still
+ * treats @mentions and replies-to-bot as triggers.
  */
-export function isWakeTrigger(m: NormalizedMessage, repo: Repo): boolean {
+export function isWakeTrigger(m: NormalizedMessage): boolean {
   if (m.isBot || m.isOwner || m.type === 'reaction') return false;
-  if (BOT_NAME_REGEX.test(m.text)) return true;
-  if (m.quotedId && repo.isBotMessage(m.quotedId)) return true;
-  return false;
+  return BOT_NAME_REGEX.test(m.text);
 }
 
 export function isHardTrigger(m: NormalizedMessage, repo: Repo, jids: JidResolver): boolean {

@@ -72,7 +72,7 @@ export class Arbiter {
     return this.superIdle;
   }
 
-  /** Manually put the bot to sleep now (Sleep button). Wakes on the next "ForceAI"/@mention/reply. */
+  /** Manually put the bot to sleep now (Sleep button). Wakes ONLY on the next "ForceAI" name mention. */
   sleep(): void {
     if (this.superIdle) return;
     this.clearTimer();
@@ -158,10 +158,10 @@ export class Arbiter {
 
     // SUPER IDLE: the bot sleeps (manually, or after a long lull with nobody addressing it).
     // While asleep it keeps reading for context but spends ZERO tokens — the wake check is pure
-    // code (isWakeTrigger: literal "ForceAI" text or reply-to-bot ONLY; NOT @mentions, since the
-    // bot shares the owner's account and an @mention of the owner-as-person looks identical).
+    // code (isWakeTrigger: ONLY the literal "ForceAI" name wakes it; NOT @mentions or replies, since
+    // the bot shares the owner's account so those look identical to addressing the owner-as-person).
     if (this.superIdle) {
-      if (!isWakeTrigger(m, this.repo)) return; // not a wake signal → drop, no token spend
+      if (!isWakeTrigger(m)) return; // not a wake signal → drop, no token spend
       this.decision('T0', 'WAKE', `${m.senderName} woke ForceAI`);
       this.setSuperIdle(false); // tab back to green + persist
     } else {
