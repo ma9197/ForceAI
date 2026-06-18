@@ -215,6 +215,7 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent2); }
 .neurons-zoom { position: absolute; bottom: 74px; right: 16px; display: flex; flex-direction: column; gap: 6px; }
 .neurons-zoom button { width: 34px; height: 34px; font-size: 15px; border-radius: 8px; background: rgba(10,14,22,0.75); color: var(--text); border: 1px solid var(--border); cursor: pointer; }
 .neurons-zoom button:hover { border-color: var(--accent); }
+.neurons-zoom button.on { color: var(--accent); border-color: var(--accent); box-shadow: 0 0 8px rgba(91,140,255,0.45); }
 .neurons-detail { position: absolute; bottom: 74px; left: 16px; width: 320px; max-width: calc(100vw - 32px); background: rgba(10,14,22,0.9); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; color: var(--text); }
 .neurons-detail-head { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .neurons-detail-text { font-size: 13px; line-height: 1.5; margin: 8px 0 6px; word-break: break-word; }

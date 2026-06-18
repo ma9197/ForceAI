@@ -5,6 +5,34 @@ import { buildEdges, NEURON_COLORS, NEURON_TYPE_LABEL, NEURON_TYPE_SINGULAR, typ
 
 const TYPE_ORDER: NeuronType[] = ['fact', 'voice', 'report', 'stat', 'observation', 'lesson', 'principle', 'sticker', 'summary'];
 const MAX_RENDER = 4000; // hard cap; above this we keep the newest N
+const NODE_REL_SIZE = 3;
+
+// --- optional "glow" node style: a translucent bubble — see-through (black) core, bright glowing
+// rim, soft halo — drawn on the canvas instead of the default flat filled circle. ---
+const _rgb: Record<string, [number, number, number]> = {};
+function rgb(hex: string): [number, number, number] {
+  let v = _rgb[hex];
+  if (!v) { const n = parseInt(hex.slice(1), 16); v = [(n >> 16) & 255, (n >> 8) & 255, n & 255]; _rgb[hex] = v; }
+  return v;
+}
+function drawGlowNode(node: any, ctx: CanvasRenderingContext2D) {
+  const [r0, g0, b0] = rgb(NEURON_COLORS[(node as NeuronNode).type] ?? '#99aabb');
+  const a = (al: number) => `rgba(${r0},${g0},${b0},${al})`;
+  const r = NODE_REL_SIZE, R = r * 1.9;                                  // node radius + outer glow radius
+  const grad = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, R);
+  grad.addColorStop(0, a(0.05));     // transparent core → the black background shows through
+  grad.addColorStop(0.42, a(0.09));
+  grad.addColorStop(0.52, a(0.92));  // bright rim at ~the node radius (r/R ≈ 0.53)
+  grad.addColorStop(0.62, a(0.30));
+  grad.addColorStop(1, a(0));        // glow halo fades out
+  ctx.beginPath(); ctx.arc(node.x, node.y, R, 0, 2 * Math.PI); ctx.fillStyle = grad; ctx.fill();
+  ctx.beginPath(); ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);          // crisp glowing outline
+  ctx.lineWidth = Math.max(0.35, r * 0.12); ctx.strokeStyle = a(0.95); ctx.stroke();
+}
+// keep the clickable/draggable hit-area a clean circle regardless of the glow halo
+function paintNodePointerArea(node: any, color: string, ctx: CanvasRenderingContext2D) {
+  ctx.fillStyle = color; ctx.beginPath(); ctx.arc(node.x, node.y, NODE_REL_SIZE, 0, 2 * Math.PI); ctx.fill();
+}
 
 /** The living neuron-web: every saved item is a node, drifting on a black canvas, interconnected by
  *  a thin web with white pulses travelling along it. Fullscreen overlay. */
@@ -26,6 +54,15 @@ export function NeuronsPanel({ active, version, onClose }: { active: boolean; ve
   const [minT, setMinT] = useState(0);
   const [selected, setSelected] = useState<NeuronNode | null>(null);
   const [playing, setPlaying] = useState(false);
+  const [nodeStyle, setNodeStyle] = useState<'solid' | 'glow'>(() => {
+    try { return localStorage.getItem('neurons_node_style') === 'glow' ? 'glow' : 'solid'; } catch { return 'solid'; }
+  });
+  const toggleNodeStyle = () => setNodeStyle(s => {
+    const next = s === 'solid' ? 'glow' : 'solid';
+    try { localStorage.setItem('neurons_node_style', next); } catch { /* */ }
+    return next;
+  });
+  const glow = nodeStyle === 'glow';
 
   // ---- fetch (initial + on live `version` bump) ----
   const load = useCallback(async (merge: boolean) => {
@@ -187,10 +224,13 @@ export function NeuronsPanel({ active, version, onClose }: { active: boolean; ve
           graphData={fullGraph}
           backgroundColor="rgba(0,0,0,0)"
           nodeId="id"
-          nodeRelSize={3}
+          nodeRelSize={NODE_REL_SIZE}
           nodeVisibility={(n: any) => (n.t ?? 0) <= cut}
           linkVisibility={(l: any) => endpointT(l.source) <= cut && endpointT(l.target) <= cut}
           nodeColor={(n: any) => NEURON_COLORS[(n as NeuronNode).type] ?? '#9aa'}
+          nodeCanvasObject={glow ? drawGlowNode : undefined}
+          nodeCanvasObjectMode={glow ? () => 'replace' : undefined}
+          nodePointerAreaPaint={glow ? paintNodePointerArea : undefined}
           nodeLabel={(n: any) => `<div class="neurons-tip">${escapeHtml((n as NeuronNode).label)}</div>`}
           linkColor={() => 'rgba(255,255,255,0.10)'}
           linkWidth={0.5}
@@ -222,8 +262,10 @@ export function NeuronsPanel({ active, version, onClose }: { active: boolean; ve
         ))}
       </div>
 
-      {/* zoom + exit */}
+      {/* zoom + style + exit */}
       <div className="neurons-zoom">
+        <button onClick={toggleNodeStyle} className={glow ? 'on' : undefined}
+          title={`Node style: ${glow ? 'glow' : 'solid'} — click to switch`}>✦</button>
         <button onClick={() => zoomBy(1.4)}>＋</button>
         <button onClick={() => zoomBy(1 / 1.4)}>－</button>
         <button onClick={() => graphRef.current?.zoomToFit?.(600, 50)} title="Fit">⤢</button>
