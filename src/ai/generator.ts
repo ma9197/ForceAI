@@ -17,6 +17,8 @@ export interface GenerateInput {
   gatekeeperReason?: string;
   /** operator instruction from Influence / Continue / Admin: */
   operatorInstruction?: string | null;
+  /** transcript window size override — bigger on the first reply after waking from sleep (catch-up) */
+  transcriptLines?: number;
 }
 
 export class Generator {
@@ -27,7 +29,7 @@ export class Generator {
   ) {}
 
   async generate(input: GenerateInput): Promise<ActionPlan | null> {
-    const rows = this.repo.getRecentMessages(input.chatJid, ARBITER.TRANSCRIPT_LINES);
+    const rows = this.repo.getRecentMessages(input.chatJid, input.transcriptLines ?? ARBITER.TRANSCRIPT_LINES);
     const transcript = this.prompts.formatTranscript(rows, input.consumedUpToTs);
 
     const parts: string[] = [

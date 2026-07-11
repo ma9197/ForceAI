@@ -253,6 +253,7 @@ export interface StatusPayload {
     images_per_day: number;
     images_today: number;
     typing_indicators: boolean;
+    learn_while_asleep: boolean;
     token_reduction: boolean;
     initiative_enabled: boolean;
   };

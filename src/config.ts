@@ -106,6 +106,7 @@ export const ARBITER = {
   WAIT_MAX: 15000,
   VELOCITY_WINDOW: 10000, // msgs counted within this window for adaptive debounce
   TRANSCRIPT_LINES: 40, // lines of context for T2
+  WAKE_TRANSCRIPT_LINES: 200, // bigger context for the FIRST reply after waking from sleep (catch-up)
   GATEKEEPER_LINES: 25, // lines of context for T1
   STALE_MESSAGE_AGE: 120000, // ignore upserts older than this on boot
   MAX_ACTIONS: 4,

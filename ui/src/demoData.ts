@@ -74,6 +74,7 @@ export const demoData = {
       "images_per_day": 15,
       "images_today": 0,
       "typing_indicators": false,
+      "learn_while_asleep": true,
       "token_reduction": false,
       "initiative_enabled": false
     }
@@ -594,6 +595,7 @@ export const demoData = {
     "images_per_day": 15,
     "images_today": 0,
     "typing_indicators": false,
+    "learn_while_asleep": true,
     "token_reduction": false,
     "initiative_enabled": false,
     "persona_presets": [

@@ -401,10 +401,15 @@ export class App {
       const arb = this.arbiters.get(norm.chatJid);
       arb?.onMessage(norm); // arbiter has its own staleness + isBot guards
       if (!norm.isBot && fresh) {
-        // both memory (facts) and voice learning run even while asleep — the owner wants the bot's
-        // understanding of the group to keep growing overnight. Both respect the daily budget.
-        this.extractors.get(norm.chatJid)?.onActivity();
-        this.voiceProfilers.get(norm.chatJid)?.onActivity();
+        // Learning (facts + voice) runs while AWAKE always. While ASLEEP it runs only if the owner
+        // left "learn while asleep" on — busy groups can send thousands of overnight messages, and
+        // each learn call spends tokens, so this lets them cap that cost. (On wake, the bot still
+        // catches up via a bigger last-N-message transcript — see ARBITER.WAKE_TRANSCRIPT_LINES.)
+        const learnWhileAsleep = this.repo.getConfig('learn_while_asleep') !== '0'; // default ON
+        if (!arb?.asleep || learnWhileAsleep) {
+          this.extractors.get(norm.chatJid)?.onActivity();
+          this.voiceProfilers.get(norm.chatJid)?.onActivity();
+        }
       }
       this.bus.publish({ kind: 'stats', stats: this.repo.getStats() });
     }
@@ -607,6 +612,7 @@ export class App {
       images_per_day: Number(this.repo.getConfig('images_per_day') ?? IMAGE_GEN.DEFAULT_PER_DAY),
       images_today: this.repo.imagesToday(),
       typing_indicators: this.repo.getConfig('typing_indicators') === '1',
+      learn_while_asleep: this.repo.getConfig('learn_while_asleep') !== '0', // default ON
       token_reduction: this.repo.getConfig('token_reduction') === '1',
       initiative_enabled: this.repo.getConfig('initiative_enabled') === '1',
     };

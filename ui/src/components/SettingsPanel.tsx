@@ -38,6 +38,7 @@ interface Settings {
   images_per_day: number;
   images_today: number;
   typing_indicators: boolean;
+  learn_while_asleep: boolean;
   token_reduction: boolean;
   initiative_enabled: boolean;
 }
@@ -389,13 +390,31 @@ export function SettingsPanel({ onSaved }: { onSaved: () => void }) {
       <div className="settings-row">
         <div>
           <label>Super Idle after (minutes)</label>
-          <div className="hint">After this long with nobody addressing it, ForceAI sleeps — no gatekeeper calls — until someone says "ForceAI", @mentions, or replies to it. 0 = never sleep.</div>
+          <div className="hint">After this long with nobody addressing it, ForceAI sleeps — no gatekeeper calls — until someone says "ForceAI". 0 = never sleep.</div>
         </div>
         <input
           type="number" min={0} max={1440} step={5}
           defaultValue={settings.super_idle_minutes}
           onBlur={e => update({ super_idle_minutes: Number(e.target.value) })}
           style={{ width: 80 }}
+        />
+      </div>
+
+      <div className="settings-row">
+        <div>
+          <label>Learn while asleep</label>
+          <div className="hint">
+            While ForceAI is asleep, keep learning the group's facts &amp; texting style from new messages.
+            <b style={{ color: 'var(--warn)' }}> Turn OFF to save tokens</b> — busy groups can send thousands of
+            messages overnight and each one costs a little. Either way, when it wakes it still catches up on the
+            last {200} messages for context.
+          </div>
+        </div>
+        <input
+          type="checkbox"
+          checked={settings.learn_while_asleep}
+          onChange={e => update({ learn_while_asleep: e.target.checked })}
+          style={{ width: 18, height: 18 }}
         />
       </div>
 

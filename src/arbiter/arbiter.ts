@@ -37,6 +37,7 @@ export class Arbiter {
   private lastBotActionTs = 0;
   private lastEngagedTs = Date.now(); // last time the bot was addressed or spoke
   private superIdle = false;
+  private justWoke = false; // set on wake → the next reply gets a bigger catch-up transcript, then cleared
   private pendingInfluence: string | null = null;
   private busy = false; // single in-flight lock for T1/T2 cycles
   private rate: RateLimiter;
@@ -164,6 +165,7 @@ export class Arbiter {
       if (!isWakeTrigger(m)) return; // not a wake signal → drop, no token spend
       this.decision('T0', 'WAKE', `${m.senderName} woke ForceAI`);
       this.setSuperIdle(false); // tab back to green + persist
+      this.justWoke = true;     // first reply after waking pulls a bigger transcript to catch up
     } else {
       const idleMs = this.superIdleMs();
       if (idleMs > 0 && !hard && Date.now() - this.lastEngagedTs > idleMs) {
@@ -334,6 +336,8 @@ export class Arbiter {
     // consume the operator instruction up front so a failed generation can't loop on it
     const instruction = this.pendingInfluence;
     this.pendingInfluence = null;
+    const wokeThisCycle = this.justWoke; // just woke from sleep → give this reply a bigger catch-up window
+    this.justWoke = false;
 
     try {
       let attempt = 0;
@@ -347,6 +351,7 @@ export class Arbiter {
           addressIds,
           gatekeeperReason: reason,
           operatorInstruction: instruction,
+          transcriptLines: wokeThisCycle ? ARBITER.WAKE_TRANSCRIPT_LINES : undefined,
         });
 
         if (!plan) {

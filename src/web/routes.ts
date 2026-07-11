@@ -417,7 +417,7 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     intro_message?: string; intro_enabled?: boolean; rate_per_min?: number; rate_per_hour?: number;
     super_idle_minutes?: number;
     image_enabled?: boolean; image_model?: string; image_freq?: string; images_per_day?: number;
-    typing_indicators?: boolean; token_reduction?: boolean; initiative_enabled?: boolean;
+    typing_indicators?: boolean; learn_while_asleep?: boolean; token_reduction?: boolean; initiative_enabled?: boolean;
     anthropic_api_key?: string; gemini_api_key?: string; elevenlabs_api_key?: string;
   } }>(
     '/api/settings',
@@ -502,6 +502,9 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
       }
       if (b.typing_indicators !== undefined) {
         app.repo.setConfig('typing_indicators', b.typing_indicators ? '1' : '0');
+      }
+      if (b.learn_while_asleep !== undefined) {
+        app.repo.setConfig('learn_while_asleep', b.learn_while_asleep ? '1' : '0');
       }
       if (b.token_reduction !== undefined) {
         app.repo.setConfig('token_reduction', b.token_reduction ? '1' : '0');
