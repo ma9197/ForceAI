@@ -35,7 +35,7 @@ A WhatsApp group-chat AI that acts like one of the friends (banter, roasts, foot
 - `node ui/src/components/neuronsGraph.selfcheck.mjs`
 - `npx tsx scripts/test-fresh-start.ts` (fresh start + backup on a temp DB, safe to run)
 - `npx tsx scripts/test-voice.ts` (voice notes with a fake Gemini API; needs ffmpeg) and `npx tsx scripts/test-models.ts`
-- `npx tsx scripts/test-brain-v2.ts`, `npx tsx scripts/test-arbiter-v2.ts` and `npx tsx scripts/test-brain-v2-e2e.ts` (brain v2 with fakes, temp DB)
+- `npx tsx scripts/test-brain-v2.ts`, `npx tsx scripts/test-arbiter-v2.ts` and `npx tsx scripts/test-brain-v2-e2e.ts` (brain v2 with fakes, temp DB), `npx tsx scripts/fuzz-brain-v2.ts` (random messages through every v2 signal, lint and policy function: crashes, slow regexes, broken rules)
 - Try the app with fake data, no WhatsApp: build the UI, then `DEMO_MODE=1 PORT=3008 npx tsx src/index.ts`.
 - Root `npm run build:ui`, `ui:dev`, `build` are broken (vite lives only in `ui/`). Use the commands above.
 - Never run `scripts/test-initiative.ts` on a real database (it changes real data).
