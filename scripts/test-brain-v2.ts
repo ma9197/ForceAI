@@ -12,7 +12,7 @@ import { CHATTINESS_SHIFT, decide, roomShift, threshold } from '../src/ai/v2/pol
 import { actualAfter, pickReplayCuts } from '../src/ai/v2/replay.js';
 import { TasteLearner, readTasteRules } from '../src/ai/v2/taste.js';
 import {
-  botTargets, botTics, callbackKeywords, closingText, dynamics, formatDecisionFeedback, formatTeasing, formatTics, teaseReception, formatClockLine, formatLinesThatWorked, formatRoomNow, type Reception,
+  botTargets, botTics, callbackKeywords, closingText, dynamics, rhetoricalText, formatDecisionFeedback, formatTeasing, formatTics, teaseReception, formatClockLine, formatLinesThatWorked, formatRoomNow, type Reception,
   formatBits, formatReactionHabit, formatTakes, groupLaughs, ironyCues, parseDecisionLine, roomMap, ignoredStreak, laughCounts, landedLines, ownTakes, participation, reception, runningBits, seriousHit,
   styleStats, type MsgRow,
 } from '../src/ai/v2/signals.js';
@@ -269,6 +269,14 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
   assert.equal(dynamics(q, 'ForceAI', now).hangingQuestion?.shortId, q[1].short_id);
   assert.equal(dynamics([...q, r('Murad', 'barca', 170)], 'ForceAI', now).hangingQuestion, null, 'answered');
   assert.equal(dynamics([r('Said', 'who is playing tonight?', 160, { is_owner: 1 })], 'ForceAI', now).hangingQuestion, null, "owner's questions are never a cue");
+  // round 19: a rhetorical question is not an open question (no lower bar, and the room is told)
+  const rq = [r('Murad', 'yo', 150), r('Kanan', 'who even watches the conference league?', 160)];
+  const rd = dynamics(rq, 'ForceAI', now);
+  assert.ok(rd.hangingQuestion === null && rd.rhetorical?.shortId === rq[1].short_id, JSON.stringify(rd));
+  assert.ok(!roomShift({ dyn: rd }).notes.some(x => x.startsWith('open question')));
+  assert.ok(formatRoomNow({ dyn: rd, map: roomMap(rq, [], 'ForceAI', now), cues: [] }, 'gate')!.includes(`- rhetorical: #${rq[1].short_id} (Kanan) is venting or being sarcastic`));
+  for (const t of ['what is wrong with him?', 'кто вообще так играет?', 'ты серьёзно?', 'ne alaka?', 'ciddi misin?', 'bu nədi belə?', 'he missed AGAIN???', 'NE ALAKA?']) assert.ok(rhetoricalText(t), t);
+  for (const t of ['who is playing tonight?', 'what time is the match?', 'кто играет сегодня?', 'saat kaçta?', 'nə vaxt gəlirsən?', 'what was the score?', 'how is your mom?']) assert.equal(rhetoricalText(t), false, t);
 
   // the chat winding down: goodbyes in each language; "пока" / "hələlik" only as a whole message, never a question
   const bye = [r('Murad', 'ok that was a good game', 100), r('Kanan', 'gn guys', 150), r('Murad', 'спокойной', 160)];

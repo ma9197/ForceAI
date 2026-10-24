@@ -411,6 +411,8 @@ export interface Dynamics {
   storyteller: string | null;
   /** a question to the group that nobody has answered yet */
   hangingQuestion: { shortId: string; who: string } | null;
+  /** the newest question is rhetorical ("who even watches that?", "кто вообще так играет?!"): not one to answer */
+  rhetorical: { shortId: string; who: string } | null;
   /** a message that looks like real bad news, who sent it, and the word that flagged it */
   serious: { shortId: string; word: string; who: string } | null;
   /** people saying bye or goodnight: the chat is winding down (the newest goodbye's short id) */
@@ -457,11 +459,16 @@ export function dynamics(rows: MsgRow[], botName: string, now = Date.now()): Dyn
 
   // a question to the group: ends in "?", not a reply, not from the owner, nobody else spoke since
   let hangingQuestion: Dynamics['hangingQuestion'] = null;
+  let rhetorical: Dynamics['rhetorical'] = null;
   const recent = humans.filter(r => now - r.ts < 10 * 60_000);
   for (let i = recent.length - 1; i >= Math.max(0, recent.length - 3); i--) {
     const q = recent[i];
     if (q.type !== 'text' || q.is_owner || q.quoted_id || mentionsBot(q)) continue;
     if (!QUESTION_END.test(q.text ?? '')) continue;
+    if (rhetoricalText(q.text ?? '')) {
+      if (q.short_id && now - q.ts < 5 * 60_000) rhetorical = { shortId: q.short_id, who: q.sender_name ?? '?' };
+      break;
+    }
     const answered = recent.slice(i + 1).some(r => r.sender_jid !== q.sender_jid) || rows.some(r => r.is_bot && r.ts > q.ts);
     if (!answered && q.short_id) hangingQuestion = { shortId: q.short_id, who: q.sender_name ?? '?' };
     break;
@@ -489,7 +496,26 @@ export function dynamics(rows: MsgRow[], botName: string, now = Date.now()): Dyn
     windingDown = { who: goneWho.length ? goneWho : [lastBye.sender_name ?? '?'], shortId: lastBye.short_id };
   }
 
-  return { privatePair, storyteller, hangingQuestion, serious, windingDown };
+  return { privatePair, storyteller, hangingQuestion, serious, windingDown, rhetorical };
+}
+
+/**
+ * Questions nobody expects an answer to: venting, disbelief, sarcasm ("who even...", "what is wrong with
+ * him", "кто вообще", "ты серьёзно", "ne alaka", "ciddi misin", "bu nədi"), or a question shouted with "?!"
+ * or "???". Answering one literally is a classic bot move; a take or a reaction fits.
+ */
+const RHETORICAL = new RegExp('(?<!\\p{L})(?:' + [
+  'who even', 'who tf', 'who the hell', 'why would (?:anyone|anybody|you|he|she|they)', "what['’]?s wrong with", 'what is wrong with',
+  'how is (?:that|this|he|she|it) (?:even )?(?:allowed|legal|possible|real)', 'are you (?:serious|kidding)', 'is this a joke', 'you serious',
+  'why is (?:he|she|this|it) like this', 'how do you miss', 'what was that', 'bro what', 'what the hell', 'wtf',
+  'кто вообще', 'что за (?:бред|дичь|херня|фигня)', 'зачем вообще', 'нафига', 'ты серь[её]зно', 'как так', 'что это было', 'kto voobshe', 'ty seryozno',
+  ...['ne alaka', 'ciddi misin', 'şaka mı', 'bu ne ya', 'ne biçim', 'olur mu böyle'].map(loose),
+  ...['nə əlaqəsi', 'ciddisən', 'bu nədi belə', 'bu nə idi', 'olar belə', 'bu nə biabırçılıqdı'].map(loose),
+].join('|') + ')(?!\\p{L})', 'iu');
+
+export function rhetoricalText(text: string): boolean {
+  const t = text.trim();
+  return RHETORICAL.test(t) || RHETORICAL.test(t.toLocaleLowerCase('tr')) || /(?:\?!|!\?|\?{3,})[\s\p{Extended_Pictographic}\u{1F3FB}-\u{1F3FF}\u200d\ufe0f]*$/u.test(t);
 }
 
 /**
@@ -919,6 +945,7 @@ export function formatRoomNow(r: RoomNow, stage: 'gate' | 'writer'): string | nu
   const storyQuestion = !!(q && r.dyn.storyteller && r.dyn.storyteller === q.who);
   if (q && storyQuestion) lines.push(`- ${q.who}: several messages in a row, the last one a question (#${q.shortId}, may be part of the story)`);
   else if (q) lines.push(`- open question: #${q.shortId} (${q.who}) asked the group, nobody answered yet`);
+  if (r.dyn.rhetorical) lines.push(`- rhetorical: #${r.dyn.rhetorical.shortId} (${r.dyn.rhetorical.who}) is venting or being sarcastic, not asking: a take or a reaction fits, not an answer`);
   if (r.dyn.privatePair) lines.push(`- ${r.dyn.privatePair[0]} and ${r.dyn.privatePair[1]} are going back and forth with each other`);
   if (r.dyn.windingDown) lines.push(`- winding down: ${r.dyn.windingDown.who.join(', ')} said bye or goodnight (#${r.dyn.windingDown.shortId})`);
   if (stage === 'gate' && r.dyn.storyteller && !storyQuestion) lines.push(`- ${r.dyn.storyteller} is sending several messages in a row (probably not finished)`);
