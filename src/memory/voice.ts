@@ -46,6 +46,16 @@ export class VoiceProfiler {
     this.lastProcessedTs = Number(repo.getConfig(`voice_ts_${chatJid}`) ?? Date.now());
   }
 
+  /** True while an analysis call is in flight (fresh start waits for it). */
+  get working(): boolean {
+    return this.running;
+  }
+
+  /** Drop a pending idle-triggered run (fresh start: nothing new may start). */
+  cancelPending(): void {
+    if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
+  }
+
   /** Call on every stored human group message. Triggers analysis on volume, or after an idle lull. */
   onActivity(): void {
     const unprocessed = this.repo.countMessagesSince(this.chatJid, this.lastProcessedTs);

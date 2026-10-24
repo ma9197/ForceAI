@@ -29,6 +29,16 @@ export class FactExtractor {
     this.lastProcessedTs = Number(repo.getConfig(`extract_ts_${chatJid}`) ?? Date.now());
   }
 
+  /** True while an extraction call is in flight (fresh start waits for it). */
+  get working(): boolean {
+    return this.running;
+  }
+
+  /** Drop a pending idle-triggered run (fresh start: nothing new may start). */
+  cancelPending(): void {
+    if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
+  }
+
   /** Call on every stored group message. */
   onActivity(): void {
     const unprocessed = this.repo.countMessagesSince(this.chatJid, this.lastProcessedTs);

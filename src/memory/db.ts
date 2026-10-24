@@ -2,14 +2,15 @@ import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import { DATA_DIR, DB_PATH, DEMO_MODE, STICKER_DIR, AUTH_DIR, IMAGE_DIR } from '../config.js';
 
-export function openDb(): Database.Database {
+/** `file` is only overridden by test scripts (a throwaway copy); the app always uses DB_PATH. */
+export function openDb(file: string = DB_PATH): Database.Database {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.mkdirSync(STICKER_DIR, { recursive: true });
   fs.mkdirSync(AUTH_DIR, { recursive: true });
   fs.mkdirSync(IMAGE_DIR, { recursive: true });
 
   // Public demo: an ephemeral in-memory DB so seeded fake data never touches a real install.
-  const db = new Database(DEMO_MODE ? ':memory:' : DB_PATH);
+  const db = new Database(DEMO_MODE ? ':memory:' : file);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
 

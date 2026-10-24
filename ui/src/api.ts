@@ -109,6 +109,7 @@ function staticDemoResponse(path: string, options?: RequestInit): unknown {
     '/api/people/ignored': d.peopleIgnored, '/api/members': d.members, '/api/voice': d.voice,
     '/api/clock': d.clock, '/api/stickers': d.stickers, '/api/settings': d.settings,
     '/api/initiative': d.initiative, '/api/groups': d.groups, '/api/neurons': d.neurons,
+    '/api/admin/fresh-start': d.freshStart,
   };
   if (url in exact) return exact[url];
   if (url.includes('/stat/') && url.endsWith('/history')) return []; // per-member stat timeline

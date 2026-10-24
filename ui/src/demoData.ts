@@ -631,6 +631,40 @@ export const demoData = {
     "enabled": false
   },
   "groups": [],
+  "freshStart": {
+    "demo": true,
+    "running": false,
+    "blocked": null,
+    "counts": {
+      "facts": 4,
+      "group_summary": 1,
+      "member_reports": 2,
+      "member_stat_history": 6,
+      "member_stat_locks": 0,
+      "member_observations": 0,
+      "member_ignored": 0,
+      "members": 3,
+      "influence_lessons": 1,
+      "initiative_principles": 2,
+      "messages": 12,
+      "bot_messages": 0,
+      "decisions": 0,
+      "poll_votes": 0,
+      "stickers": 0,
+      "stats": 17,
+      "lid_pn_map": 0,
+      "config": 3,
+      "voice_kept": 2,
+      "voice_old_versions": 0,
+      "voice_member_style": 1,
+      "voice_linked_to_person": 1,
+      "voice_overviews": 0
+    },
+    "images": 0,
+    "rewrite_cost_usd": 0.0027,
+    "last_fresh_start": null,
+    "confirm_phrase": "FRESH START"
+  },
   "neurons": {
     "nodes": [
       {

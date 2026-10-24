@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { downloadMediaMessage, type WAMessage } from 'baileys';
-import { INTRO_MESSAGE, DEFAULT_DAILY_BUDGET_USD, DEFAULT_MSG_PREFIX, DEFAULT_MSG_SUFFIX, DEMO_MODE, ELEVENLABS, IMAGE_DIR, IMAGE_GEN, INITIATIVE, applyMentions } from './config.js';
+import { INTRO_MESSAGE, DATA_DIR, DEFAULT_DAILY_BUDGET_USD, DEFAULT_MSG_PREFIX, DEFAULT_MSG_SUFFIX, DEMO_MODE, ELEVENLABS, IMAGE_DIR, IMAGE_GEN, INITIATIVE, applyMentions } from './config.js';
 import { logger, waLogger } from './logger.js';
 import { openDb } from './memory/db.js';
 import { Repo } from './memory/repo.js';
@@ -9,6 +9,10 @@ import { FactExtractor } from './memory/extractor.js';
 import { VoiceProfiler, type VoiceLearnResult } from './memory/voice.js';
 import { MemberReporter, type ReportResult } from './memory/reporter.js';
 import { InitiativeDistiller, type DistillResult } from './memory/initiative.js';
+import {
+  CONFIRM_PHRASE, anonymizeVoiceItems, backupDb, clearImages, countImages, countRows, dbBytes, estimateRewriteCostUsd,
+  freeBytes, getKeptVoiceItems, getKnownNames, wipeMemory, type RowCounts, type WipeResult,
+} from './memory/freshStart.js';
 import { JidResolver } from './wa/jid.js';
 import { WaConnection } from './wa/connection.js';
 import { Normalizer } from './wa/inbound.js';
@@ -53,6 +57,8 @@ export class App {
   private voiceProfilers = new Map<string, VoiceProfiler>();
   private memberReporter: MemberReporter;
   private initiativeDistiller: InitiativeDistiller;
+  /** true while a fresh start runs: learners don't start and AI actions are refused. */
+  memoryLocked = false;
 
   getArbiter(jid: string): Arbiter | null {
     return this.arbiters.get(jid) ?? null;
@@ -327,6 +333,111 @@ export class App {
     this.prompts.memoryVersion += 1;
   }
 
+  // ---- fresh start: forget people, attitude and old chats; keep the group's voice + settings ----
+
+  freshStartPreview(): FreshStartPreview {
+    const items = getKeptVoiceItems(this.repo.db);
+    return {
+      demo: DEMO_MODE,
+      running: this.memoryLocked,
+      counts: countRows(this.repo.db),
+      images: DEMO_MODE ? 0 : countImages(IMAGE_DIR),
+      rewrite_cost_usd: estimateRewriteCostUsd(items),
+      last_fresh_start: Number(this.repo.getConfig('fresh_start_at')) || null,
+      confirm_phrase: CONFIRM_PHRASE,
+    };
+  }
+
+  /** Any AI cycle or learner in flight? Its result would land after the wipe, so we wait for it. */
+  private memoryBusy(): boolean {
+    const all = [...this.arbiters.values(), ...this.extractors.values(), ...this.voiceProfilers.values()];
+    return all.some(x => x.working) || this.memberReporter.working || this.initiativeDistiller.working;
+  }
+
+  /** Waits until no AI call is in flight. false = still busy at the deadline. */
+  private async waitForMemoryIdle(deadline: number): Promise<boolean> {
+    while (this.memoryBusy()) {
+      if (Date.now() > deadline) return false;
+      await new Promise(r => setTimeout(r, 500));
+    }
+    return true;
+  }
+
+  /**
+   * Order: lock (no new learning, replies paused) -> wait for in-flight AI calls -> AI removes names
+   * from kept voice items -> then, all synchronous so nothing can run in between: safety copy of the
+   * DB, wipe in one transaction, delete chat images -> restart so every in-memory cache starts clean.
+   * Any failure before the wipe changes nothing and unlocks.
+   */
+  async freshStart(): Promise<FreshStartResult> {
+    if (this.memoryLocked) return { status: 'busy', message: 'A fresh start is already running.' };
+    this.memoryLocked = true;
+    this.memberReporter.stop();
+    for (const l of [...this.extractors.values(), ...this.voiceProfilers.values()]) l.cancelPending();
+    for (const a of this.arbiters.values()) a.suspend();
+    let done = false;
+    const busy: FreshStartResult = { status: 'busy', message: 'ForceAI is busy learning. Try again in a minute. Nothing was changed.' };
+    try {
+      if (!(await this.waitForMemoryIdle(Date.now() + 90_000))) return busy;
+
+      const items = getKeptVoiceItems(this.repo.db);
+      let rewrites: Awaited<ReturnType<typeof anonymizeVoiceItems>> = [];
+      if (items.length > 0) {
+        if (!this.ai.hasAnthropicKey()) return { status: 'error', message: 'Add your Anthropic key first: the AI removes names from the kept items. Nothing was changed.' };
+        if (this.ai.isOverBudget()) return { status: 'error', message: "Today's AI budget is used up. Raise it in Settings, then try again. Nothing was changed." };
+        try {
+          rewrites = await anonymizeVoiceItems(this.ai, items, getKnownNames(this.repo.db));
+        } catch (err) {
+          logger.error({ err }, 'fresh start: name removal failed');
+          return { status: 'error', message: `The AI name check failed (${String((err as Error)?.message ?? err)}). Nothing was changed. Try again.` };
+        }
+      }
+
+      // defensive: nothing should have started during the AI pass, but never wipe under a live call
+      if (!(await this.waitForMemoryIdle(Date.now() + 90_000))) return busy;
+
+      // ---- from here on everything is synchronous: no message or learner can run in between ----
+      const db = this.repo.db;
+      const need = dbBytes(db) * 1.1 + 20 * 1024 * 1024;
+      const free = freeBytes(DATA_DIR);
+      if (free !== null && free < need) {
+        const mb = (b: number) => Math.ceil(b / 1024 / 1024);
+        return { status: 'error', message: `Not enough disk space for the safety copy (needs ${mb(need)} MB, ${mb(free)} MB free). Nothing was changed.` };
+      }
+      const now = Date.now();
+      let backup: string;
+      try {
+        backup = backupDb(db, DATA_DIR, now);
+      } catch (err) {
+        logger.error({ err }, 'fresh start: safety copy failed');
+        return { status: 'error', message: `The safety copy failed (${String((err as Error)?.message ?? err)}). Nothing was changed.` };
+      }
+      let wipe: WipeResult;
+      try {
+        wipe = wipeMemory(db, { now, rewrites, groups: [...this.linkedGroups] });
+      } catch (err) {
+        logger.error({ err }, 'fresh start: wipe failed (rolled back)');
+        return { status: 'error', message: `The wipe failed and was rolled back (${String((err as Error)?.message ?? err)}). Nothing was changed.` };
+      }
+      done = true;
+
+      let images = 0;
+      try { images = clearImages(IMAGE_DIR); } catch (err) { logger.warn({ err }, 'fresh start: image folder not cleared'); }
+      try { db.exec('VACUUM'); } catch (err) { logger.warn({ err }, 'fresh start: VACUUM skipped'); }
+      this.prompts.memoryVersion += 1;
+      logger.info({ before: wipe.before, after: wipe.after, rewritten: wipe.rewritten, merged: wipe.merged, images, backup }, 'fresh start done, restarting');
+
+      setTimeout(() => process.exit(1), 1500); // Railway restarts it (restart policy: on failure)
+      return { status: 'ok', before: wipe.before, after: wipe.after, rewritten: wipe.rewritten, images, backup: path.basename(backup), restarting: true };
+    } finally {
+      if (!done) {
+        this.memoryLocked = false;
+        if (this.online) for (const a of this.arbiters.values()) a.resume();
+        if (!this.needsSetup && !DEMO_MODE) this.memberReporter.start();
+      }
+    }
+  }
+
   /** Full shutdown: disconnect WhatsApp entirely (linked device goes offline), keep dashboard up.
    *  NOT a reset — all memory and per-group states are preserved; Power On resumes everything. */
   async shutdown(): Promise<void> {
@@ -406,7 +517,7 @@ export class App {
         // each learn call spends tokens, so this lets them cap that cost. (On wake, the bot still
         // catches up via a bigger last-N-message transcript — see ARBITER.WAKE_TRANSCRIPT_LINES.)
         const learnWhileAsleep = this.repo.getConfig('learn_while_asleep') !== '0'; // default ON
-        if (!arb?.asleep || learnWhileAsleep) {
+        if (!this.memoryLocked && (!arb?.asleep || learnWhileAsleep)) {
           this.extractors.get(norm.chatJid)?.onActivity();
           this.voiceProfilers.get(norm.chatJid)?.onActivity();
         }
@@ -663,6 +774,27 @@ export class App {
       settings: this.getSettings(),
     };
   }
+}
+
+export interface FreshStartPreview {
+  demo: boolean;
+  running: boolean;
+  counts: RowCounts;
+  images: number;
+  rewrite_cost_usd: number;
+  last_fresh_start: number | null;
+  confirm_phrase: string;
+}
+
+export interface FreshStartResult {
+  status: 'ok' | 'busy' | 'error';
+  message?: string;
+  before?: RowCounts;
+  after?: RowCounts;
+  rewritten?: number;
+  images?: number;
+  backup?: string;
+  restarting?: boolean;
 }
 
 function toFeed(m: NormalizedMessage, mentions?: Record<string, string>): FeedMessage {

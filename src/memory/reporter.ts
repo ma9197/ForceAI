@@ -32,6 +32,11 @@ export class MemberReporter {
     private events: ReporterEvents,
   ) {}
 
+  /** True while the report job is running (fresh start waits for it). */
+  get working(): boolean {
+    return this.running;
+  }
+
   start(): void {
     if (this.timer) return;
     this.timer = setInterval(() => this.tick(), 30 * 60_000);
