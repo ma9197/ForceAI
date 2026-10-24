@@ -584,6 +584,7 @@ export const demoData = {
     "voice_provider": "gemini",
     "v2_chattiness": "balanced",
     "v2_second_opinion": true,
+    "v2_shadow_lines": true,
     "gemini_voice": "Puck",
     "voice_style": "like a cheeky, laid-back young guy sending a quick voice note to his friends, natural and casual",
     "persona_mode": "default",

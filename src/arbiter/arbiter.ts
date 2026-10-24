@@ -6,6 +6,7 @@ import type { Gatekeeper } from '../ai/gatekeeper.js';
 import type { Generator } from '../ai/generator.js';
 import type { BrainV2 } from '../ai/v2/brain.js';
 import { seriousHit } from '../ai/v2/signals.js';
+import { describeAction } from '../ai/v2/describe.js';
 import type { Outbound } from '../wa/outbound.js';
 import type { JidResolver } from '../wa/jid.js';
 import type { ArbiterPhase, BotAction, NormalizedMessage } from '../types.js';
@@ -83,13 +84,23 @@ export class Arbiter {
   private shadowV2(forceDecide: boolean, consumedUpToTs: number): void {
     if (!this.brainV2 || this.suspended || this.repo.getBrainMode(this.chatJid) !== 'shadow' || this.ai.isOverBudget()) return;
     this.shadowInFlight += 1;
-    void this.brainV2.gate(this.chatJid, consumedUpToTs, forceDecide, { dryRun: true, shadow: true }).then(res => {
+    void this.brainV2.gate(this.chatJid, consumedUpToTs, forceDecide, { dryRun: true, shadow: true }).then(async res => {
       if (!res || this.suspended) return; // shut down meanwhile (e.g. a fresh start): log nothing
       const { out, policy } = res;
       const room = policy.room?.length ? ` (${policy.room.join(', ')})` : '';
       const thought = out.thought ? ` | thought: ${out.thought.text.slice(0, 90)}` : '';
       const react = policy.decision === 'REACT' && out.react ? ` ${out.react.emoji}` : '';
       this.decision('S1v2', policy.decision, `${out.reason}${react} | ${policy.why} | urge ${policy.motivation} vs bar ${policy.threshold}${room}${thought}`);
+      // it would speak: also write the line it would send (dry run, never sent), so the owner can read
+      // v2's real messages next to v1's all day (Settings toggle, on by default; one reply call each)
+      if (policy.decision !== 'RESPOND' || this.repo.getConfig('v2_shadow_lines') === '0' || this.ai.isOverBudget()) return;
+      const gen = await this.brainV2!.generate({
+        chatJid: this.chatJid, consumedUpToTs, addressIds: out.address_message_ids, gatekeeperReason: out.reason,
+        thought: out.thought?.text ?? null, thoughtWhen: 'now', unprompted: !out.addressed, dryRun: true, shadow: true,
+      });
+      if (!gen || this.suspended) return;
+      const lines = gen.plan.actions.filter(a => a.type !== 'nothing').map(describeAction);
+      this.decision('S2v2', lines.length ? 'WOULD_SAY' : 'WOULD_SKIP', lines.length ? `${lines.join(' / ')} | ${gen.plan.note}` : gen.plan.note || 'nothing');
     }).catch(err => logger.warn({ err }, 'brain v2 shadow call failed'))
       .finally(() => { this.shadowInFlight -= 1; });
   }

@@ -582,7 +582,7 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
   fastify.post<{ Body: {
     gatekeeper_model?: string; generation_model?: string; effort?: string; daily_budget_usd?: number;
     msg_prefix?: string; msg_suffix?: string; voice_enabled?: boolean; voice_id?: string;
-    voice_provider?: string; gemini_voice?: string; voice_style?: string; v2_chattiness?: string; v2_second_opinion?: boolean;
+    voice_provider?: string; gemini_voice?: string; voice_style?: string; v2_chattiness?: string; v2_second_opinion?: boolean; v2_shadow_lines?: boolean;
     persona_mode?: string; persona_custom?: string;
     sticker_freq?: string; voice_freq?: string; emoji_freq?: string;
     intro_message?: string; intro_enabled?: boolean; rate_per_min?: number; rate_per_hour?: number;
@@ -630,6 +630,7 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
       if (b.gemini_voice && b.gemini_voice in GEMINI_TTS.VOICES) app.repo.setConfig('gemini_voice', b.gemini_voice);
       if (b.v2_chattiness && ['quiet', 'balanced', 'chatty'].includes(b.v2_chattiness)) app.repo.setConfig('v2_chattiness', b.v2_chattiness);
       if (b.v2_second_opinion !== undefined) app.repo.setConfig('v2_second_opinion', b.v2_second_opinion ? '1' : '0');
+      if (b.v2_shadow_lines !== undefined) app.repo.setConfig('v2_shadow_lines', b.v2_shadow_lines ? '1' : '0');
       if (b.voice_style !== undefined) app.repo.setConfig('voice_style', b.voice_style.trim().slice(0, 300));
       if (b.persona_mode !== undefined) {
         app.repo.setConfig('persona_mode', b.persona_mode);

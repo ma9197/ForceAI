@@ -147,6 +147,35 @@ const pausePlan = calls.find(c => c.kind === 'plan')!;
 assert.ok(pausePlan.text.includes('A THOUGHT YOU HAD A MOMENT AGO') && pausePlan.text.includes('murad finally paid someone back'));
 assert.deepEqual(sent.map(a => a.text), ['first time murad paid anyone back, frame it']);
 
+// 5. shadow mode: v1 answers; the real v2 brain thinks along, and writes the line it would have sent
+reset();
+const SG = 'e2e-shadow@g.us';
+repo.setBrainVersion(SG, 'shadow');
+const v1Sent: any[] = [];
+const arb3 = new Arbiter(
+  SG, repo, ai,
+  { decide: async () => ({ decision: 'RESPOND', reason: 'v1 thinks so', address_message_ids: [], heat: 'low' }) } as any,
+  { generate: async () => ({ actions: [{ type: 'message', text: 'v1 line' }], note: 'v1' }) } as any,
+  { abortCurrentPlan: false, executePlan: async (_jid: string, actions: any[], onSent: any) => { for (const a of actions) { v1Sent.push(a); onSent?.({ action: a }); } } } as any,
+  { isOwnJid: () => false } as any,
+  { onDecision: (tier: string, d: string, reason: string) => decisions.push(`${tier}:${d}:${reason}`), onAction: () => undefined, onPhase: () => undefined },
+  brain,
+);
+gateOut = { scene: scene(), addressed: false, thought: { text: 'kanan said the same about barca', why: 'callback' }, scores: scores(8),
+  decision: 'RESPOND', react: null, reason: 'callback', address_message_ids: [], wait_ms: null };
+planOut = plan([{ type: 'message', text: 'kanan said this about barca too' }]);
+criticOut = { reason: 'lands', verdict: 'send' };
+n += 1;
+const sm = { id: `id${n}`, shortId: `m${n}`, chatJid: SG, senderJid: 'b@s', senderName: 'Kanan', fromMe: false, isBot: false, isOwner: false,
+  type: 'text', text: 'madrid are winning it all', quotedId: null, mentionedJids: [], ts: Date.now(), raw: {} } as any;
+repo.insertMessage(sm);
+arb3.onMessage(sm);
+await sleep(900);
+assert.deepEqual(v1Sent.map(a => a.text), ['v1 line'], 'v1 answered and only v1 sent');
+assert.ok(has('S1v2', 'RESPOND') && has('S2v2', 'WOULD_SAY'), decisions.join('\n'));
+assert.ok(decisions.some(d => d.startsWith('S2v2:WOULD_SAY:kanan said this about barca too')), 'the line v2 would have sent is in the feed');
+assert.ok(calls.some(c => c.kind === 'critic'), 'with the same second opinion real v2 uses');
+
 fs.rmSync(dir, { recursive: true, force: true });
 console.log('brain v2 end to end: all checks passed');
 process.exit(0);

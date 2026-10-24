@@ -11,7 +11,7 @@ type Preview =
 interface Ab { v1: number; v2: number; tie: number }
 interface Stats {
   spoke: number; unprompted: number; pauses: number; reacted: number; quiet: number; vetoed: number; rewrites: number; chattiness?: string;
-  shadow?: { spoke: number; reacted: number; quiet: number; waited: number }; v1Spoke?: number; ab?: Ab;
+  shadow?: { spoke: number; reacted: number; quiet: number; waited: number; wrote?: number }; v1Spoke?: number; ab?: Ab;
 }
 interface Taste { rules: string[]; at: number | null; newRatings: number; every: number }
 /** Blind test: the two answers shown as A and B; `flip` = A is v2. Revealed after the owner picks. */
@@ -119,7 +119,7 @@ export function BrainPreview({ jid, onClose }: { jid: string; onClose: () => voi
       </label>
       {stats?.shadow && (stats.shadow.spoke + stats.shadow.reacted + stats.shadow.quiet + stats.shadow.waited) > 0 && (
         <div className="hint">
-          v2 shadow, last 24 hours: would have spoken {stats.shadow.spoke} times, reacted {stats.shadow.reacted}, stayed quiet {stats.shadow.quiet}.
+          v2 shadow, last 24 hours: would have spoken {stats.shadow.spoke} times{stats.shadow.wrote ? ` (its lines are in the feed: ${stats.shadow.wrote})` : ''}, reacted {stats.shadow.reacted}, stayed quiet {stats.shadow.quiet}.
           In the same moments v1 chose to speak {stats.v1Spoke ?? 0} times.
         </div>
       )}

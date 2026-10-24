@@ -31,6 +31,8 @@ export interface GenerateV2Input extends GenerateInput {
   unprompted?: boolean;
   /** preview: no observations saved, nothing recorded besides token usage */
   dryRun?: boolean;
+  /** shadow mode: read the shadow's own scene (the live v2 scene does not exist in a v1 group) */
+  shadow?: boolean;
 }
 
 export interface GenerateV2Result {
@@ -200,7 +202,7 @@ export class BrainV2 {
   }
 
   /** The measured context block for the generator: scene, style numbers, own tics, share, callbacks. */
-  private signalsBlock(chatJid: string, rows: MsgRow[], consumedUpToTs: number | null, asked: boolean): { text: string; medianLen: number; lowercaseShare: number; botTexts: string[]; humanTexts: string[]; dyn: Dynamics; style: StyleStats | null; disliked: string[] } {
+  private signalsBlock(chatJid: string, rows: MsgRow[], consumedUpToTs: number | null, asked: boolean, shadow = false): { text: string; medianLen: number; lowercaseShare: number; botTexts: string[]; humanTexts: string[]; dyn: Dynamics; style: StyleStats | null; disliked: string[] } {
     const marker = this.marker();
     const strip = (t: string) => stripMarker(t, marker.prefix, marker.suffix);
     const names = this.memberNames(chatJid);
@@ -213,7 +215,7 @@ export class BrainV2 {
     const style = styleStats(history);
     const tics = botTics(botTexts.slice(-BRAIN_V2.TICS_WINDOW), names);
     const part = participation(history);
-    const scene = this.scenes.get(chatJid);
+    const scene = shadow ? this.shadowScenes.get(chatJid) : this.scenes.get(chatJid);
     const dyn = dynamics(rows, BOT_NAME);
 
     const newRows = consumedUpToTs === null ? rows.slice(-6) : rows.filter(r => r.ts > consumedUpToTs);
@@ -256,7 +258,7 @@ export class BrainV2 {
     const transcript = this.prompts.formatTranscript(rows, input.consumedUpToTs);
     // someone talked to it (a mention, a reply, an owner instruction): it answers, no second opinion
     const asked = !input.unprompted || !!input.operatorInstruction;
-    const signals = this.signalsBlock(input.chatJid, rows, input.consumedUpToTs, asked);
+    const signals = this.signalsBlock(input.chatJid, rows, input.consumedUpToTs, asked, !!input.shadow);
 
     const parts: string[] = [`Current group chat transcript:`, transcript || '(chat is empty so far)', signals.text];
     if (input.addressIds?.length) {
