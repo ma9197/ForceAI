@@ -83,6 +83,14 @@ export interface LintContext {
   textOf?: (shortId: string) => string | null;
   /** the last few human texts, newest last (the language the room is in right now) */
   lastHumanTexts?: string[];
+  /** share of human messages sent as quote-replies; under 0.15 a quote of the newest message is dropped */
+  replyShare?: number;
+  /** short id of the newest message in the chat */
+  newestShortId?: string | null;
+  /** average run of messages one person sends in a row; 1.5+ means this group texts in bursts */
+  burstiness?: number;
+  /** 80% of human messages are shorter than this */
+  p80Len?: number;
 }
 
 /**
@@ -123,6 +131,8 @@ export interface LintResult {
   actions: BotAction[];
   issues: { index: number; problem: string }[];
   dropped: string[];
+  /** one text was split into two short ones */
+  split?: boolean;
 }
 
 export function lintPlan(actions: BotAction[], ctx: LintContext): LintResult {
@@ -169,7 +179,41 @@ export function lintPlan(actions: BotAction[], ctx: LintContext): LintResult {
     return false;
   });
   const remap = new Map(out.map((a, i) => [i, kept.indexOf(a)]));
-  const keptIssues = issues.map(i => ({ ...i, index: remap.get(i.index) ?? -1 })).filter(i => i.index >= 0);
+  let keptIssues = issues.map(i => ({ ...i, index: remap.get(i.index) ?? -1 })).filter(i => i.index >= 0);
 
-  return { actions: kept, issues: keptIssues, dropped };
+  // nobody in this group quotes the message right above: a quote-reply to the newest one reads like a bot
+  let final = kept.map(a => (a.type === 'reply' && ctx.replyShare !== undefined && ctx.replyShare < 0.15 && ctx.newestShortId && a.target_message_id === ctx.newestShortId
+    ? { type: 'message' as const, text: a.text } : a));
+
+  // a group that texts in bursts: one longer clean text becomes two short ones, like people send them
+  const textIdx = final.flatMap((a, i) => (a.type === 'message' || a.type === 'reply' ? [i] : []));
+  let split = false;
+  if (textIdx.length === 1 && !keptIssues.some(i => i.index === textIdx[0]) && (ctx.burstiness ?? 1) >= 1.5) {
+    const i = textIdx[0];
+    const parts = splitInTwo((final[i] as { text: string }).text, Math.max(50, ctx.p80Len ?? 0));
+    if (parts) {
+      const tidy = (t: string) => ((ctx.lowercaseShare ?? 0) > 0.7 ? phoneStyle(t) : t);
+      final = [...final.slice(0, i), withText(final[i], tidy(parts[0])), { type: 'message', text: tidy(parts[1]) }, ...final.slice(i + 1)];
+      keptIssues = keptIssues.map(x => (x.index > i ? { ...x, index: x.index + 1 } : x));
+      split = true;
+    }
+  }
+
+  return { actions: final, issues: keptIssues, dropped, split };
+}
+
+/**
+ * Two sentences, together longer than people here usually write: split at the sentence break nearest
+ * the middle. Null when it should stay one message (one sentence, too short, too long, a tiny half).
+ */
+export function splitInTwo(text: string, minLen: number): [string, string] | null {
+  const t = text.trim();
+  if (t.length <= minLen || t.length > 280 || t.includes('\n')) return null;
+  const breaks = [...t.matchAll(/[.!?…]+(?=\s+\S)/g)].map(m => m.index! + m[0].length);
+  if (breaks.length === 0 || breaks.length > 2) return null;
+  const at = breaks.sort((a, b) => Math.abs(a - t.length / 2) - Math.abs(b - t.length / 2))[0];
+  const first = t.slice(0, at).trim();
+  const second = t.slice(at).trim();
+  if (first.length < 8 || second.length < 8) return null;
+  return [first, second];
 }

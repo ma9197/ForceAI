@@ -233,6 +233,14 @@ export class Repo {
     ).all(chatJid, untilTs, limit).reverse();
   }
 
+  /** Brain v2 running bits and own takes: text messages since `sinceTs`, oldest first (capped). */
+  getTextMessagesSince(chatJid: string, sinceTs: number, limit: number, bot: boolean): any[] {
+    return this.db.prepare(
+      `SELECT id, short_id, sender_jid, sender_name, text, type, is_bot, is_owner, ts FROM messages
+       WHERE chat_jid = ? AND ts >= ? AND type = 'text' AND is_bot = ? ORDER BY ts DESC LIMIT ?`
+    ).all(chatJid, sinceTs, bot ? 1 : 0, limit).reverse();
+  }
+
   getMessageById(id: string): any | undefined {
     return this.db.prepare('SELECT * FROM messages WHERE id = ?').get(id);
   }

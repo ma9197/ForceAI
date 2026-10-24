@@ -54,6 +54,7 @@ export interface StyleStats {
   avgEmojis: number;
   burstiness: number; // average run of consecutive messages by one sender
   languages: string;
+  replyShare: number;  // share of human messages sent as a quote-reply
 }
 
 /** How the HUMANS in this chat text right now, from their recent text messages. */
@@ -99,6 +100,7 @@ export function styleStats(rows: MsgRow[]): StyleStats | null {
     avgEmojis: withEmoji.length ? withEmoji.reduce((a, b) => a + b, 0) / withEmoji.length : 0,
     burstiness: runs.length ? runs.reduce((a, b) => a + b, 0) / runs.length : 1,
     languages: parts.join(', '),
+    replyShare: human.filter(r => !!r.quoted_id).length / n,
   };
 }
 
@@ -516,4 +518,101 @@ export function formatDynamics(d: Dynamics, rec: Reception[]): string | null {
   if (streak >= 2) lines.push(`- your last ${streak} unprompted lines got no reaction at all: you are misreading this room right now, hold back.`);
   else if (rec.filter(r => r === 'laughed').length >= 2) lines.push('- your recent unprompted lines got laughs: the room is with you.');
   return lines.length ? `ROOM CHECK (measured):\n${lines.join('\n')}` : null;
+}
+
+/** Everyday words that never make a phrase a "bit" on their own. */
+const COMMON = new Set([
+  ...STOP, 'is', 'a', 'i', 'it', 'to', 'of', 'in', 'on', 'my', 'me', 'so', 'do', 'be', 'we', 'he', 'at', 'if', 'or', 'no', 'yes',
+  'ok', 'okay', 'an', 'am', 'im', "i'm", 'dont', "don't", 'know', 'think', 'going', 'gonna', 'want', 'need', 'will', 'would',
+  'should', 'could', 'one', 'did', 'does', 'has', 'had', 'been', 'see', 'say', 'said', 'make', 'good', 'time', 'today',
+  'tomorrow', 'yesterday', 'tonight', 'yeah', 'yea', 'ya', 'u', 'ur', 'up', 'go', 'come', 'let', 'lets', "let's", 'some',
+  'any', 'more', 'much', 'many', 'well', 'after', 'before', 'also', 'only', 'over', 'into', 'our', 'us',
+  'mi', 'sen', 'men', 'bu', 'şu', 've', 'da', 'də', 'ki', 'və', 'ama', 'çok', 'cox', 'çox', 'yaxşı', 'iyi',
+  'что', 'как', 'это', 'там', 'тут', 'уже', 'еще', 'ещё', 'так', 'вот', 'ну', 'да', 'нет',
+]);
+
+/** Words a phrase never starts or ends with (a bit is "bro is cooked", not "the goat" or "cooked and"). */
+const FILLER = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'to', 'of', 'in', 'on', 'at', 'for', 'with', 'from', 'is', 'are', 'was',
+  'it', 'its', 'that', 'this', 'then', 'than', 'и', 'в', 'на', 'а', 'но', 'что', 'və', 've', 'da', 'də', 'ki']);
+
+export interface Bit {
+  phrase: string;
+  people: string[];
+  uses: number;
+  days: number;
+  lastTs: number;
+}
+
+/**
+ * The group's own running phrases: 2-4 word phrases that at least two different people used, on at
+ * least two different days. Exact words matter here: plain word matching keeps the in-group language
+ * that summarizing memories wash out (GroupMemBench, arXiv 2605.14498).
+ */
+export function runningBits(rows: MsgRow[], botName: string, max = 6): Bit[] {
+  const bot = botName.toLowerCase();
+  const stats = new Map<string, { people: Map<string, string>; days: Set<string>; uses: number; lastTs: number }>();
+  for (const r of rows) {
+    if (r.is_bot || r.type !== 'text' || !r.text) continue;
+    const w = words(r.text);
+    const day = new Date(r.ts).toISOString().slice(0, 10);
+    const seen = new Set<string>();
+    for (let n = 2; n <= 4; n++) {
+      for (let i = 0; i + n <= w.length; i++) {
+        const gram = w.slice(i, i + n);
+        if (!gram.some(g => g.length >= 3 && !COMMON.has(g) && !/^\d+$/.test(g))) continue;
+        if (FILLER.has(gram[0]) || FILLER.has(gram[n - 1])) continue;
+        const phrase = gram.join(' ');
+        if (phrase.includes(bot) || seen.has(phrase)) continue;
+        seen.add(phrase);
+        const s = stats.get(phrase) ?? { people: new Map(), days: new Set(), uses: 0, lastTs: 0 };
+        s.people.set(r.sender_jid ?? '?', r.sender_name ?? '?');
+        s.days.add(day);
+        s.uses += 1;
+        s.lastTs = Math.max(s.lastTs, r.ts);
+        stats.set(phrase, s);
+      }
+    }
+  }
+  const bits = [...stats.entries()]
+    .filter(([, s]) => s.people.size >= 2 && s.days.size >= 2 && s.uses >= 3)
+    .map(([phrase, s]) => ({ phrase, people: [...s.people.values()], uses: s.uses, days: s.days.size, lastTs: s.lastTs }));
+  // a shorter phrase inside a longer one that is used about as often is the same bit
+  const kept = bits.filter(b => !bits.some(o => o !== b && o.phrase.length > b.phrase.length && ` ${o.phrase} `.includes(` ${b.phrase} `) && o.uses >= b.uses * 0.8));
+  return kept.sort((a, b) => b.people.length * b.days * Math.log1p(b.uses) - a.people.length * a.days * Math.log1p(a.uses) || b.lastTs - a.lastTs).slice(0, max);
+}
+
+export function formatBits(bits: Bit[], now = Date.now()): string | null {
+  if (bits.length === 0) return null;
+  const ago = (ts: number) => {
+    const d = Math.floor((now - ts) / 86_400_000);
+    return d <= 0 ? 'today' : d === 1 ? 'yesterday' : `${d} days ago`;
+  };
+  const lines = bits.map(b => `- "${b.phrase}": ${b.people.slice(0, 4).join(', ')}${b.people.length > 4 ? ' and more' : ''}, ${b.uses} times over ${b.days} days, last ${ago(b.lastTs)}${now - b.lastTs > 5 * 86_400_000 ? ' (cooling off: only bring it back if it really fits)' : ''}`);
+  return `THIS GROUP'S OWN PHRASES AND BITS (said by several of them on different days; use their exact words when a callback fits, never force one):\n${lines.join('\n')}`;
+}
+
+/** Words that mark a take: a prediction, a verdict, a bet. */
+const TAKE = /\b(will|won'?t|gonna|going to|by \d|mark my words|trust me|calling it|i predict|i bet|no way|wins?|loses?|best|worst|overrated|underrated|goat|washed|finished|done for)\b|\b\d+\s*[-:]\s*\d+\b|будет|выиграет|проиграет|лучший|худший|qalib|uduzacaq|udacaq|kazanacak|kaybedecek|ən yaxşı|en iyi/iu;
+
+/**
+ * The bot's own takes from the last days (predictions, verdicts), so it stays consistent instead of
+ * contradicting itself by accident, and can say "told you" or own a miss (persona drift: arXiv
+ * 2511.00222; BeliefShift, arXiv 2603.23848). Lines from the last 30 minutes are skipped: they are
+ * in the transcript anyway.
+ */
+export function ownTakes(botRows: MsgRow[], strip: (t: string) => string, now = Date.now(), max = 4): { text: string; ts: number }[] {
+  return botRows
+    .filter(r => r.is_bot && r.type === 'text' && now - r.ts > 30 * 60_000 && now - r.ts < 7 * 86_400_000)
+    .map(r => ({ text: strip(r.text ?? ''), ts: r.ts }))
+    .filter(x => x.text.length >= 8 && TAKE.test(x.text))
+    .slice(-max);
+}
+
+export function formatTakes(takes: { text: string; ts: number }[], now = Date.now()): string | null {
+  if (takes.length === 0) return null;
+  const ago = (ts: number) => {
+    const h = Math.round((now - ts) / 3_600_000);
+    return h < 24 ? `${h}h ago` : `${Math.round(h / 24)} days ago`;
+  };
+  return `YOUR OWN TAKES FROM THE LAST DAYS (stay consistent: double down, own a miss with style, or say you called it. never contradict one by accident):\n${takes.map(t => `- ${ago(t.ts)}: "${t.text.slice(0, 140)}"`).join('\n')}`;
 }
