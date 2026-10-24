@@ -176,6 +176,26 @@ assert.ok(has('S1v2', 'RESPOND') && has('S2v2', 'WOULD_SAY'), decisions.join('\n
 assert.ok(decisions.some(d => d.startsWith('S2v2:WOULD_SAY:kanan said this about barca too')), 'the line v2 would have sent is in the feed');
 assert.ok(calls.some(c => c.kind === 'critic'), 'with the same second opinion real v2 uses');
 
+// 6. dashboard replay: v2's call at a few moments, and the real line for at most 2 moments it would speak
+reset();
+const RG = 'e2e-replay@g.us';
+for (let i = 0; i < 12; i++) {
+  n += 1;
+  repo.insertMessage({ id: `id${n}`, shortId: `m${n}`, chatJid: RG, senderJid: i % 2 ? 'a@s' : 'b@s', senderName: i % 2 ? 'Murad' : 'Kanan', fromMe: false,
+    isBot: false, isOwner: false, type: 'text', text: `line ${i} about the match`, quotedId: null, mentionedJids: [], ts: Date.now() - (12 - i) * 60_000, raw: {} } as any);
+}
+gateOut = { scene: scene(), addressed: false, thought: { text: 'a sharp line', why: '' }, scores: scores(8), decision: 'RESPOND', react: null, reason: 'good moment', address_message_ids: [], wait_ms: null };
+planOut = plan([{ type: 'message', text: 'the replay line' }]);
+criticOut = { reason: 'lands', verdict: 'send' };
+const { App } = await import('../src/app.js');
+const rep: any = await (App.prototype as any).replayV2.call({ repo, brainV2: brain, ai }, RG);
+assert.ok(rep.points?.length >= 3, JSON.stringify(rep));
+assert.ok(rep.points.every((p: any) => p.decision === 'RESPOND'));
+assert.equal(rep.points.filter((p: any) => p.lines).length, 2, 'real lines for at most 2 moments (cost cap)');
+assert.deepEqual(rep.points.find((p: any) => p.lines).lines, ['the replay line']);
+assert.equal(calls.filter(c => c.kind === 'plan').length, 2);
+assert.equal(sent.length, 0, 'a replay never sends');
+
 fs.rmSync(dir, { recursive: true, force: true });
 console.log('brain v2 end to end: all checks passed');
 process.exit(0);

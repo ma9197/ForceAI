@@ -822,12 +822,23 @@ export class App {
     const cuts = pickReplayCuts(rows, BRAIN_V2.REPLAY_POINTS) as any[];
     if (cuts.length < 3) return { error: `Not enough chat in the last ${BRAIN_V2.REPLAY_HOURS} hours to replay.` };
 
+    let written = 0; // the real lines cost a reply call each: only for the first few moments v2 would speak
     const at = async (cut: any, i: number): Promise<ReplayPoint> => {
       const prev = i > 0 ? cuts[i - 1].ts : cut.ts - 5 * 60_000;
       const res = await this.brainV2.gate(jid, prev, false, { dryRun: true, untilTs: cut.ts });
       const actual = actualAfter(rows, cut.ts, i + 1 < cuts.length ? cuts[i + 1].ts : now);
-      const base = { ts: cut.ts, upTo: cut.short_id, who: cut.sender_name ?? '?', text: String(cut.text ?? '').slice(0, 140), actual };
+      const base = { ts: cut.ts, upTo: cut.short_id, who: cut.sender_name ?? '?', text: String(cut.text ?? '').slice(0, 140), actual, lines: null };
       if (!res) return { ...base, decision: 'FAILED', why: 'thinking stage failed', urge: 0, bar: 0, thought: null, react: null };
+      let lines: string[] | null = null;
+      if (res.policy.decision === 'RESPOND' && written < BRAIN_V2.REPLAY_LINES && !this.ai.isOverBudget()) {
+        written += 1;
+        const gen = await this.brainV2.generate({
+          chatJid: jid, consumedUpToTs: prev, addressIds: res.out.address_message_ids, gatekeeperReason: res.out.reason,
+          thought: res.out.thought?.text ?? null, thoughtWhen: 'now', unprompted: !res.out.addressed, dryRun: true, untilTs: cut.ts, scene: res.out.scene,
+        });
+        const acts = gen?.plan.actions.filter(a => a.type !== 'nothing') ?? [];
+        lines = gen ? (acts.length ? acts.map(describeAction) : [gen.vetoed ? `(would end up quiet: second opinion said skip)` : '(would end up quiet)']) : ['(the reply writer failed)'];
+      }
       return {
         ...base,
         decision: res.policy.decision,
@@ -836,6 +847,7 @@ export class App {
         bar: res.policy.threshold,
         thought: res.out.thought?.text ?? null,
         react: res.policy.decision === 'REACT' && res.out.react ? res.out.react.emoji : null,
+        lines,
       };
     };
     const points: ReplayPoint[] = [];
@@ -1019,6 +1031,8 @@ export interface ReplayPoint {
   react: string | null;
   /** what the live bot really did right after that moment */
   actual: string;
+  /** for the first moments v2 would speak: the actual line(s) it would have sent */
+  lines: string[] | null;
 }
 
 export type ReplayResult = { error: string } | { points: ReplayPoint[]; hours: number };

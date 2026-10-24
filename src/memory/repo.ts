@@ -90,8 +90,8 @@ export class Repo {
 
   /** The owner's latest rated lines across all groups (their taste is the same everywhere). */
   /** The owner's latest liked / disliked lines in ONE group (groups never share memory: lines can name people). */
-  getFeedbackLines(chatJid: string, rating: 1 | -1, limit: number): string[] {
-    return (this.db.prepare('SELECT text FROM bot_feedback WHERE chat_jid = ? AND rating = ? ORDER BY ts DESC LIMIT ?').all(chatJid, rating, limit) as { text: string }[]).map(r => r.text);
+  getFeedbackLines(chatJid: string, rating: 1 | -1, limit: number, untilTs = Number.MAX_SAFE_INTEGER): string[] {
+    return (this.db.prepare('SELECT text FROM bot_feedback WHERE chat_jid = ? AND rating = ? AND ts <= ? ORDER BY ts DESC LIMIT ?').all(chatJid, rating, untilTs, limit) as { text: string }[]).map(r => r.text);
   }
 
   // ---- API keys (entered in the dashboard, stored in config; env is the fallback) ----
