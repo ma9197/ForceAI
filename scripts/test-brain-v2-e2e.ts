@@ -87,8 +87,9 @@ planOut = plan([{ type: 'reply', text: 'Kanan said that last season too — as a
 await sleep(800);
 assert.ok(has('T1v2', 'RESPOND') && has('T2v2', 'SEND'), decisions.join('\n'));
 assert.deepEqual(calls.map(c => c.kind), ['gate', 'plan', 'rewrite', 'critic']);
-assert.ok(calls[0].text.includes('WHO IS DOING WHAT') && calls[1].text.includes('WHO IS DOING WHAT'), 'the room map reaches both stages');
-assert.ok(calls[0].text.includes('POSSIBLE IRONY') && calls[1].text.includes('POSSIBLE IRONY'), 'irony cues reach both stages');
+assert.ok(calls[0].text.includes('ROOM NOW (facts counted in code):') && calls[1].text.includes('ROOM NOW (facts counted in code):'), 'one room block reaches both stages');
+assert.ok(calls[0].text.includes('- possible irony:') && calls[1].text.includes('- possible irony:'), 'irony cues inside it, in both stages');
+assert.ok(!calls[0].text.includes('WHO IS DOING WHAT') && !calls[0].text.includes('ROOM CHECK'), 'the old overlapping blocks are gone');
 assert.ok(calls[1].text.includes('YOUR INNER THOUGHT WHILE READING') && calls[1].text.includes('kanan says this every season'), 'thought reaches the writer');
 assert.ok(!calls[1].text.includes('Someone talked to you'), 'a jump-in is not told it was asked');
 assert.equal(sent.length, 1);
@@ -113,7 +114,7 @@ gateOut = { scene: scene('banter'), addressed: false, thought: null, scores: sco
 say('a@s', 'guys my grandma is in the hospital');
 await sleep(800);
 assert.ok(has('T1v2', 'IGNORE'), decisions.join('\n'));
-assert.ok(calls[0].text.includes('may be real bad news'), 'the room check flags it to the gate');
+assert.ok(calls[0].text.includes('- bad news: #') && calls[0].text.includes('may be real'), 'ROOM NOW flags it to the gate');
 assert.equal(sent.length, 0);
 
 // 4. a good line at a bad moment is saved, and offered when the chat pauses

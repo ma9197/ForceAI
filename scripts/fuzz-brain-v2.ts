@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { autoFix, lintPlan, phoneStyle, scriptOf, splitInTwo } from '../src/ai/v2/lint.js';
 import { decide, roomShift } from '../src/ai/v2/policy.js';
 import {
-  botTargets, botTics, callbackKeywords, dynamics, formatBits, formatDynamics, formatTics, groupLaughs, laughCounts, landedLines,
-  formatIronyCues, formatRoomMap, ironyCues, ownTakes, parseDecisionLine, participation, reception, roomMap, runningBits, seriousHit, styleStats, type MsgRow,
+  botTargets, botTics, callbackKeywords, dynamics, formatBits, formatLinesThatWorked, formatRoomNow, formatTics, groupLaughs, laughCounts, landedLines,
+  ironyCues, ownTakes, parseDecisionLine, participation, reception, roomMap, runningBits, seriousHit, styleStats, type MsgRow,
 } from '../src/ai/v2/signals.js';
 
 // Brain v2 fuzz: random multilingual, emoji-heavy, very long and malformed messages through every pure
@@ -65,10 +65,10 @@ for (let round = 0; round < ROUNDS; round++) {
   timed('groupLaughs', () => groupLaughs(rows));
   const dyn = timed('dynamics', () => dynamics(rows, 'ForceAI', now));
   const rec = timed('reception', () => reception(rows, 'ForceAI', now));
-  timed('formatDynamics', () => formatDynamics(dyn, rec));
+  timed('formatRoomNow', () => formatRoomNow({ dyn, rec, part, map: roomMap(rows, ['Kanan Aliyev', 'Murad', 'x'], 'ForceAI', now), cues: ironyCues(rows, now) }, 'gate'));
+  timed('formatLinesThatWorked', () => formatLinesThatWorked(botTexts.slice(0, 3), landedLines(rows, strip), groupLaughs(rows), { emojis: ['💀'], names: ['Kanan'] }));
   timed('runningBits', () => formatBits(runningBits(rows, 'ForceAI'), now));
-  timed('roomMap', () => formatRoomMap(roomMap(rows, ['Kanan Aliyev', 'Murad', 'x'], 'ForceAI', now)));
-  timed('ironyCues', () => formatIronyCues(ironyCues(rows, now)));
+
   timed('ownTakes', () => ownTakes(rows, strip, now));
   timed('callbackKeywords', () => callbackKeywords(rows));
   timed('botTargets', () => botTargets(rows.filter(r => r.is_bot), ['Kanan', 'Murad', '(weird) name.*'], () => pick(['Kanan', null])));

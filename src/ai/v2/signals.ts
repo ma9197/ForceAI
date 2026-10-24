@@ -5,6 +5,8 @@
  * could make a callback joke.
  */
 
+import { DEFAULT_CLOCK_CITIES, cityNow, type ClockCity } from '../../config.js';
+
 /** A message row as stored in the `messages` table (only the fields used here). */
 export interface MsgRow {
   id?: string;
@@ -227,17 +229,6 @@ export function participation(rows: MsgRow[], now = Date.now()): Participation {
   };
 }
 
-export function formatParticipation(p: Participation, asked = false): string {
-  const share = Math.round(p.botShare * 100);
-  const tone = asked
-    ? (share >= 20 ? 'you have talked a lot: answer, and keep it short' : 'answer naturally')
-    : share >= 35
-      ? 'that is a LOT: you are dominating, so say less and only if it is really good'
-      : share >= 20
-        ? 'that is plenty: keep it tight'
-        : 'you have room to talk';
-  return `YOUR SHARE OF THE CHAT: ${share}% of the last ${p.window} messages are yours (${tone}). ${p.humansSinceBot} human messages since you last spoke.`;
-}
 
 /** Content words from the new messages, to look for older moments worth a callback. */
 export function callbackKeywords(newRows: MsgRow[], max = 6): string[] {
@@ -330,26 +321,9 @@ export function groupLaughs(rows: MsgRow[], max = 4): { who: string; text: strin
     .slice(0, max);
 }
 
-export function formatGroupLaughs(lines: { who: string; text: string; laughs: number }[]): string | null {
-  if (lines.length === 0) return null;
-  return `WHAT MAKES THIS GROUP LAUGH (their own lines that got the most laughs lately: this is the humor that works here. learn the kind, never copy the line):\n${lines.map(l => `- ${l.who}: "${l.text.slice(0, 140)}" (${l.laughs} laughing)`).join('\n')}`;
-}
 
-export function formatLanded(lines: { text: string; laughs: number }[]): string | null {
-  if (lines.length === 0) return null;
-  return `WHAT LANDED WITH THIS GROUP LATELY (your lines that got laughs; learn the kind of humor, never repeat the line):\n${lines.map(l => `- "${l.text.slice(0, 140)}" (${l.laughs} laugh${l.laughs > 1 ? 's' : ''})`).join('\n')}`;
-}
 
 /** The owner's thumbs up / down from the dashboard: their taste, shown as examples. */
-/**
- * The owner's liked lines, as examples to aim for. Disliked lines are NOT shown (showing them can plant
- * them): the code keeps them out of "what landed" and "own takes", and the linter blocks close copies.
- */
-export function formatTaste(liked: string[]): string | null {
-  const l = liked.filter(Boolean).map(t => `- "${t.slice(0, 140)}"`);
-  if (l.length === 0) return null;
-  return `YOUR OWNER'S TASTE (lines of yours they liked: aim for that spirit, in new words, never repeat them):\n${l.join('\n')}`;
-}
 
 /**
  * Who the bot keeps aiming at: names in its recent lines plus the senders it replied to. Picking on
@@ -503,6 +477,8 @@ export function dynamics(rows: MsgRow[], botName: string, now = Date.now()): Dyn
     if (word && r.short_id) serious = { shortId: r.short_id, word };
   }
 
+  // a question ends a run: the last message cannot be both "not finished yet" and "asked the group"
+  if (storyteller && hangingQuestion && lastHuman?.short_id === hangingQuestion.shortId) storyteller = null;
   return { privatePair, storyteller, hangingQuestion, serious };
 }
 
@@ -543,17 +519,6 @@ export function ignoredStreak(rec: Reception[]): number {
   return n;
 }
 
-export function formatDynamics(d: Dynamics, rec: Reception[]): string | null {
-  const lines: string[] = [];
-  if (d.serious) lines.push(`- #${d.serious.shortId} may be real bad news ("${d.serious.word}"). Read it carefully: if it is sincere, no jokes and no laughing reactions.`);
-  if (d.privatePair) lines.push(`- ${d.privatePair[0]} and ${d.privatePair[1]} are in a back-and-forth with each other. Jumping in needs a really good reason.`);
-  if (d.storyteller) lines.push(`- ${d.storyteller} is sending several messages in a row: probably not finished yet.`);
-  if (d.hangingQuestion) lines.push(`- #${d.hangingQuestion.shortId} (${d.hangingQuestion.who}) asked the group something nobody has answered yet.`);
-  const streak = ignoredStreak(rec);
-  if (streak >= 2) lines.push(`- your last ${streak} unprompted lines got no reaction at all: you are misreading this room right now, hold back.`);
-  else if (rec.filter(r => r === 'laughed').length >= 2) lines.push('- your recent unprompted lines got laughs: the room is with you.');
-  return lines.length ? `ROOM CHECK (measured):\n${lines.join('\n')}` : null;
-}
 
 /** Everyday words that never make a phrase a "bit" on their own. */
 const COMMON = new Set([
@@ -647,7 +612,8 @@ export function formatTakes(takes: { text: string; ts: number }[], now = Date.no
   if (takes.length === 0) return null;
   const ago = (ts: number) => {
     const h = Math.round((now - ts) / 3_600_000);
-    return h < 24 ? `${h}h ago` : `${Math.round(h / 24)} days ago`;
+    const d = Math.round(h / 24);
+    return h < 24 ? `${h}h ago` : d === 1 ? '1 day ago' : `${d} days ago`;
   };
   return `YOUR OWN TAKES FROM THE LAST DAYS (stay consistent: double down, own a miss with style, or say you called it. never contradict one by accident):\n${takes.map(t => `- ${ago(t.ts)}: "${t.text.slice(0, 140)}"`).join('\n')}`;
 }
@@ -693,7 +659,9 @@ const CONDOLENCE = /condolen|rest in peace|başsağlığı|başın sağ|собо
  * disentanglement), so the chains come from the quote links and from a name a message opens with.
  * The owner is labelled like the transcript does and never gets cues that invite a reply.
  */
-export function roomMap(rows: MsgRow[], names: string[], botName: string, now = Date.now(), windowMs = 15 * 60_000): { people: PersonNow[]; chains: { ids: string[]; people: string[] }[] } {
+export interface RoomMapResult { people: PersonNow[]; chains: { ids: string[]; people: string[]; fresh: boolean }[] }
+
+export function roomMap(rows: MsgRow[], names: string[], botName: string, now = Date.now(), windowMs = 15 * 60_000): RoomMapResult {
   const recent = rows.filter(r => now - r.ts <= windowMs && !r.is_bot);
   const label = (r: MsgRow) => (r.is_owner ? 'Said (owner)' : r.sender_name ?? '?');
   const byId = new Map(rows.filter(r => r.id).map(r => [r.id!, r]));
@@ -768,7 +736,7 @@ export function roomMap(rows: MsgRow[], names: string[], botName: string, now = 
     .filter(g => g.length >= 2 && new Set(g.map(label)).size >= 2)
     .sort((a, b) => b[b.length - 1].ts - a[a.length - 1].ts)
     .slice(0, 3)
-    .map(g => ({ ids: g.map(r => r.short_id ?? '?').slice(-5), people: [...new Set(g.map(label))] }));
+    .map(g => ({ ids: g.map(r => r.short_id ?? '?').slice(-5), people: [...new Set(g.map(label))], fresh: now - g[g.length - 1].ts <= 3 * 60_000 }));
 
   // people who need care or have a question always make the list; then the most recently active
   const all = [...people.values()].filter(p => p.msgs > 0 || p.laughing);
@@ -777,20 +745,6 @@ export function roomMap(rows: MsgRow[], names: string[], botName: string, now = 
   return { people: list, chains };
 }
 
-export function formatRoomMap(map: { people: PersonNow[]; chains: { ids: string[]; people: string[] }[] }): string | null {
-  if (map.people.length === 0) return null;
-  const lines = map.people.map(p => {
-    const bits = [p.msgs ? `${p.msgs} message${p.msgs > 1 ? 's' : ''}` : 'only reacting'];
-    if (p.serious) bits.push('may be going through something real');
-    else if (p.loud) bits.push('loud (shouting, arguing or hyped)');
-    if (p.laughing) bits.push('laughing');
-    if (p.openQuestion) bits.push(`asked the group #${p.openQuestion}, no answer yet`);
-    if (p.talkingTo.length) bits.push(`talking to ${p.talkingTo.join(', ')}`);
-    return `- ${p.name}: ${bits.join(', ')}`;
-  });
-  const chains = map.chains.map(c => `- ${c.ids.map(i => `#${i}`).join(' > ')} (${c.people.join(', ')})`);
-  return [`WHO IS DOING WHAT (recent messages, measured):`, ...lines, ...(chains.length ? ['REPLY CHAINS RUNNING:', ...chains] : [])].join('\n');
-}
 
 /**
  * Turkish / Azerbaijani letters typed either way ("canım" / "canim", "çox" / "cox"), so the markers
@@ -874,7 +828,84 @@ function scriptOfText(text: string): 'cyrillic' | 'latin' | null {
   return cyr >= 0.6 ? 'cyrillic' : cyr <= 0.05 ? 'latin' : null;
 }
 
-export function formatIronyCues(cues: IronyCue[]): string | null {
-  if (cues.length === 0) return null;
-  return `POSSIBLE IRONY (measured hints, often still sincere: decide from the context what they really mean before you answer):\n${cues.map(c => `- #${c.shortId} ${c.who}: ${c.cue}`).join('\n')}`;
+
+/**
+ * Everything measured about the room right now, in ONE block of facts (no orders: what each fact means
+ * is explained once in the cached system prompts). Replaces three overlapping blocks that said the same
+ * thing twice and sometimes pulled in opposite directions. The gate also gets the timing facts (mid-story,
+ * your share, how your last lines landed); the reply writer only the content facts.
+ */
+export interface RoomNow {
+  dyn: Dynamics;
+  map: RoomMapResult;
+  cues: IronyCue[];
+  rec?: Reception[];
+  part?: Participation;
+  asked?: boolean;
+}
+
+export function formatRoomNow(r: RoomNow, stage: 'gate' | 'writer'): string | null {
+  const lines: string[] = [];
+  const sadPeople = r.map.people.filter(p => p.serious).map(p => p.name);
+  if (r.dyn.serious) lines.push(`- bad news: #${r.dyn.serious.shortId} may be real ("${r.dyn.serious.word}")${sadPeople.length ? `, from ${sadPeople.join(', ')}` : ''}`);
+  else if (sadPeople.length) lines.push(`- bad news: ${sadPeople.join(', ')} may be going through something real`);
+  const q = r.dyn.hangingQuestion;
+  if (q) lines.push(`- open question: #${q.shortId} (${q.who}) asked the group, nobody answered yet`);
+  if (r.dyn.privatePair) lines.push(`- ${r.dyn.privatePair[0]} and ${r.dyn.privatePair[1]} are going back and forth with each other`);
+  if (stage === 'gate' && r.dyn.storyteller) lines.push(`- ${r.dyn.storyteller} is sending several messages in a row (probably not finished)`);
+  for (const c of r.cues) lines.push(`- possible irony: #${c.shortId} ${c.who}, ${c.cue}`);
+  const moods = r.map.people.filter(p => !p.serious && (p.loud || p.laughing || p.talkingTo.length))
+    .map(p => [p.name, p.loud ? 'loud' : '', p.laughing ? 'laughing' : '', p.talkingTo.length ? `talking to ${p.talkingTo.join(', ')}` : ''].filter(Boolean).join(' '));
+  if (moods.length) lines.push(`- people: ${moods.join('; ')}`);
+  const chain = r.map.chains.find(c => c.fresh);
+  if (chain) lines.push(`- reply chain: ${chain.ids.map(i => `#${i}`).join(' > ')} (${chain.people.join(', ')})`);
+  if (stage === 'gate' && r.rec) {
+    const streak = ignoredStreak(r.rec);
+    if (streak >= 2) lines.push(`- your last ${streak} unprompted lines got no reaction`);
+    else if (r.rec.filter(x => x === 'laughed').length >= 2) lines.push('- your recent unprompted lines got laughs');
+  }
+  if (r.part) {
+    const share = Math.round(r.part.botShare * 100);
+    if (stage === 'gate') {
+      const ago = r.part.secondsSinceBot !== null && r.part.secondsSinceBot < 120 ? ` (${r.part.secondsSinceBot}s ago)` : '';
+      lines.push(`- you: ${share}% of the last ${r.part.window} messages, ${r.part.humansSinceBot} human messages since you last spoke${ago}`);
+    } else {
+      lines.push(`- you: ${share}% of the last ${r.part.window} messages${r.asked && share >= 20 ? ' (answer, and keep it short)' : ''}`);
+    }
+  }
+  return lines.length ? `ROOM NOW (facts counted in code):\n${lines.join('\n')}` : null;
+}
+
+/**
+ * Lines that worked here, in one list: the owner's liked lines, the bot's lines that got laughs, and the
+ * friends' own lines that made people laugh. Deduped and capped. Lines that carry the bot's current
+ * emoji tics or aim at someone it was told to go easy on are left out (unless nothing else is left), so
+ * the examples never pull against the other signals.
+ */
+export function formatLinesThatWorked(
+  liked: string[], landed: { text: string; laughs: number }[], group: { who: string; text: string; laughs: number }[],
+  avoid: { emojis?: string[]; names?: string[] } = {}, max = 4,
+): string | null {
+  const all: { key: string; line: string; text: string }[] = [];
+  const seen = new Set<string>();
+  const add = (text: string, line: string) => {
+    const key = text.toLowerCase().replace(EMOJI, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    all.push({ key, line, text });
+  };
+  for (const t of liked.filter(Boolean)) add(t, `- "${t.slice(0, 140)}" (your owner liked it)`);
+  for (const l of landed) add(l.text, `- "${l.text.slice(0, 140)}" (${l.laughs} laugh${l.laughs > 1 ? 's' : ''})`);
+  for (const g of group) add(g.text, `- ${g.who}: "${g.text.slice(0, 140)}" (${g.laughs} laughing)`);
+  const firstNames = (avoid.names ?? []).map(n => n.trim().split(/\s+/)[0].toLowerCase()).filter(n => n.length >= 3);
+  const clean = all.filter(x => !(avoid.emojis ?? []).some(e => x.text.includes(e)) && !firstNames.some(n => x.key.split(' ').includes(n)));
+  const pick = (clean.length ? clean : all.slice(0, 2)).slice(0, max);
+  if (pick.length === 0) return null;
+  return `LINES THAT WORKED HERE (learn the kind of humor and use new words; never repeat them):\n${pick.map(x => x.line).join('\n')}`;
+}
+
+/** The time in each clock city, on one line (the model reads it off; no math, no time zones). */
+export function formatClockLine(cities: ClockCity[], now = new Date()): string {
+  const list = cities?.length ? cities : DEFAULT_CLOCK_CITIES;
+  return `Time now (read off, never calculate): ${list.map(c => `${c.label} ${cityNow(c, now)}`).join('; ')}`;
 }
