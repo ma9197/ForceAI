@@ -274,6 +274,7 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
   const rd = dynamics(rq, 'ForceAI', now);
   assert.ok(rd.hangingQuestion === null && rd.rhetorical?.shortId === rq[1].short_id, JSON.stringify(rd));
   assert.ok(!roomShift({ dyn: rd }).notes.some(x => x.startsWith('open question')));
+  assert.deepEqual(roomShift({ dyn: rd }), { delta: 0, notes: ['rhetorical question'] }, 'shown in the feed, no bar change');
   assert.ok(formatRoomNow({ dyn: rd, map: roomMap(rq, [], 'ForceAI', now), cues: [] }, 'gate')!.includes(`- rhetorical (likely): #${rq[1].short_id} (Kanan) sounds like venting or sarcasm`));
   for (const t of ['what is wrong with him?', 'кто вообще так играет?', 'ты серьёзно?', 'ne alaka?', 'ciddi misin?', 'bu nədi belə?', 'NE ALAKA?', 'how is that not a penalty?', 'is the ref blind?',
     'что он творит?', 'ты издеваешься?', 'olacak iş mi?', 'kim izliyor ki?', 'nə danışırsan?', 'bro what?', 'he did WHAT!?']) assert.ok(rhetoricalText(t), t);
@@ -308,6 +309,7 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
   const pairShout = [r('Murad', 'GOOOOL', 189), r('Kanan', 'YESSSS!!', 190), r('Murad', 'MESSI!!', 191), r('Kanan', 'THE GOAT!!', 192), r('Murad', 'LETS GOOO', 193), r('Kanan', 'WHAT A GOAL!!', 194)];
   const ps = dynamics(pairShout, 'ForceAI', now);
   assert.ok(ps.hype && ps.privatePair === null, JSON.stringify(ps));
+  assert.deepEqual(roomShift({ dyn: ps }), { delta: 0, notes: ['hype'] });
   const hypeRoom = formatRoomNow({ dyn: ps, map: roomMap(pairShout, [], 'ForceAI', now), cues: [] }, 'gate')!;
   assert.ok(!/- people: [^\n]*loud/.test(hypeRoom), `the hype line already says who is shouting: ${hypeRoom}`);
   assert.ok(formatRoomNow({ dyn: dynamics(goal, 'ForceAI', now), map: roomMap(goal, [], 'ForceAI', now), cues: [] }, 'writer')!.includes('- hype: Murad, Kanan shouting'));
