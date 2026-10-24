@@ -291,14 +291,15 @@ export class Repo {
    * Brain v2 callbacks: older text messages in this chat (before `beforeTs`) that mention any of the
    * keywords, best matches first. LIKE is case-insensitive for ASCII only, which is fine for slang.
    */
-  searchOlderMessages(chatJid: string, beforeTs: number, keywords: string[], limit: number): any[] {
+  searchOlderMessages(chatJid: string, beforeTs: number, keywords: string[], limit: number, sinceTs = 0): any[] {
     if (keywords.length === 0) return [];
     const where = keywords.map(() => 'text LIKE ?').join(' OR ');
+    // sinceTs bounds the scan: with rare words, LIKE would otherwise read the whole chat on every reply
     const rows = this.db.prepare(
       `SELECT id, short_id, sender_name, sender_jid, text, type, is_bot, is_owner, ts FROM messages
-       WHERE chat_jid = ? AND ts < ? AND type = 'text' AND is_owner = 0 AND (${where})
+       WHERE chat_jid = ? AND ts < ? AND ts >= ? AND type = 'text' AND is_owner = 0 AND (${where})
        ORDER BY ts DESC LIMIT 300`,
-    ).all(chatJid, beforeTs, ...keywords.map(k => `%${k}%`)) as any[];
+    ).all(chatJid, beforeTs, sinceTs, ...keywords.map(k => `%${k}%`)) as any[];
     const scored = rows.map(r => {
       const t = String(r.text ?? '').toLowerCase();
       return { r, hits: keywords.filter(k => t.includes(k.toLowerCase())).length };

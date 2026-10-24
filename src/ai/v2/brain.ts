@@ -262,7 +262,7 @@ export class BrainV2 {
     // callbacks come from before the transcript and at least an hour back (not the last few minutes)
     const before = Math.min(rows.length ? rows[0].ts : now, now - 3_600_000);
     // three times the candidates, so the moments that got laughs back then can rise to the top
-    const cands = this.repo.searchOlderMessages(chatJid, before, callbackKeywords(newRows), BRAIN_V2.CALLBACKS * 3) as (MsgRow & { hits: number })[];
+    const cands = this.repo.searchOlderMessages(chatJid, before, callbackKeywords(newRows), BRAIN_V2.CALLBACKS * 3, now - BRAIN_V2.CALLBACK_DAYS * 86_400_000) as (MsgRow & { hits: number })[];
     const replies = this.repo.getRepliesTo(chatJid, cands.flatMap(c => (c.id ? [c.id] : [])), now) as MsgRow[]; // a replay never sees later laughs
     const shownCallbacks = rankCallbacks(cands, replies, BRAIN_V2.CALLBACKS)
       .map(r => (r.is_bot ? { ...r, text: strip(r.text ?? '') } : r))
