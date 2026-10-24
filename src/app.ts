@@ -10,7 +10,7 @@ import { VoiceProfiler, type VoiceLearnResult } from './memory/voice.js';
 import { MemberReporter, type ReportResult } from './memory/reporter.js';
 import { InitiativeDistiller, type DistillResult } from './memory/initiative.js';
 import {
-  AUTO_FRESH_START, BACKUP_MAX_AGE_MS, CONFIRM_PHRASE, anonymizeVoiceItems, backupDb, clearImages, countImages, countRows, dbBytes,
+  AUTO_FRESH_START, BACKUP_MAX_AGE_MS, CONFIRM_PHRASE, VOICE_WIPE_PHRASE, wipeVoice, anonymizeVoiceItems, backupDb, clearImages, countImages, countRows, dbBytes,
   estimateRewriteCostUsd, freeBytes, getKeptVoiceItems, getKnownNames, swapKnownNames, wipeMemory,
   type RowCounts, type VoiceRewrite, type WipeResult,
 } from './memory/freshStart.js';
@@ -358,6 +358,7 @@ export class App {
       backup_downloaded_at: this.backupDownloadedAt(),
       backup_fresh: this.hasFreshBackup(),
       confirm_phrase: CONFIRM_PHRASE,
+      voice_wipe_phrase: VOICE_WIPE_PHRASE,
     };
   }
 
@@ -384,6 +385,40 @@ export class App {
       await new Promise(r => setTimeout(r, 500));
     }
     return true;
+  }
+
+  /**
+   * Wipe every learned voice item and overview, in all groups. Pauses the voice profilers, waits for a
+   * running one (its result would land after the wipe), saves a safety copy of the DB, then wipes in
+   * one transaction. Fast, so no background job and no restart.
+   */
+  async wipeAllVoice(): Promise<{ status: 'ok' | 'busy' | 'error'; message?: string; items?: number; backup?: string }> {
+    if (this.memoryLocked) return { status: 'busy', message: 'A fresh start or wipe is already running.' };
+    this.memoryLocked = true;
+    try {
+      for (const v of this.voiceProfilers.values()) v.cancelPending();
+      const deadline = Date.now() + 90_000;
+      while ([...this.voiceProfilers.values()].some(v => v.working)) {
+        if (Date.now() > deadline) return { status: 'busy', message: 'ForceAI is busy learning the voice. Try again in a minute. Nothing was changed.' };
+        await new Promise(r => setTimeout(r, 500));
+      }
+      const now = Date.now();
+      let backup: string;
+      try {
+        backup = backupDb(this.repo.db, DATA_DIR, now, 'voice-wipe');
+      } catch (err) {
+        logger.error({ err }, 'voice wipe: safety copy failed');
+        return { status: 'error', message: `The safety copy failed (${String((err as Error)?.message ?? err)}). Nothing was changed.` };
+      }
+      const res = wipeVoice(this.repo.db, now);
+      for (const v of this.voiceProfilers.values()) v.resetCheckpoint(now);
+      this.prompts.memoryVersion += 1;
+      logger.info({ ...res, backup }, 'voice wipe done');
+      this.bus.publish({ kind: 'status', status: this.statusPayload() });
+      return { status: 'ok', items: res.items, backup: path.basename(backup) };
+    } finally {
+      this.memoryLocked = false;
+    }
   }
 
   /** Button path: quick checks, then the job runs in the background (the AI name pass can take
@@ -870,6 +905,7 @@ export interface FreshStartPreview {
   /** a backup was downloaded in the last 24 h: fresh start is allowed */
   backup_fresh: boolean;
   confirm_phrase: string;
+  voice_wipe_phrase: string;
 }
 
 export interface FreshStartResult {

@@ -813,14 +813,16 @@ export const demoData = {
       "voice_old_versions": 0,
       "voice_member_style": 1,
       "voice_linked_to_person": 1,
-      "voice_overviews": 0
+      "voice_overviews": 0,
+      "voice_all": 3
     },
     "images": 0,
     "rewrite_cost_usd": 0.0027,
     "last_fresh_start": null,
     "backup_downloaded_at": null,
     "backup_fresh": false,
-    "confirm_phrase": "FRESH START"
+    "confirm_phrase": "FRESH START",
+    "voice_wipe_phrase": "WIPE VOICE"
   },
   "neurons": {
     "nodes": [

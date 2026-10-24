@@ -29,6 +29,7 @@ const WIPE_TABLES = [
 const KEEP_TABLES = ['stickers', 'stats', 'lid_pn_map', 'config'] as const;
 
 export const CONFIRM_PHRASE = 'FRESH START';
+export const VOICE_WIPE_PHRASE = 'WIPE VOICE';
 /** Fresh start needs a backup downloaded this recently (owner rule: never wipe without a backup). */
 export const BACKUP_MAX_AGE_MS = 24 * 3_600_000;
 
@@ -43,6 +44,7 @@ export function countRows(db: Database.Database): RowCounts {
   out.voice_member_style = n("SELECT COUNT(*) AS n FROM voice_items WHERE category = 'member_style' AND superseded_by IS NULL");
   out.voice_linked_to_person = n('SELECT COUNT(*) AS n FROM voice_items WHERE member_jid IS NOT NULL');
   out.voice_overviews = n("SELECT COUNT(*) AS n FROM config WHERE key GLOB 'voice_overview:*'");
+  out.voice_all = n('SELECT COUNT(*) AS n FROM voice_items');
   return out;
 }
 
@@ -194,12 +196,25 @@ export function freeBytes(dir: string): number | null {
 }
 
 /** Consistent copy of the live DB (WAL included) next to it. Returns the new file's path. */
-export function backupDb(db: Database.Database, dir: string, now: number): string {
+export function backupDb(db: Database.Database, dir: string, now: number, label = 'fresh-start'): string {
   const stamp = new Date(now).toISOString().slice(0, 19).replace(/[:T]/g, '-');
-  let file = path.join(dir, `forceai.db.pre-fresh-start-${stamp}`);
-  for (let n = 2; fs.existsSync(file); n++) file = path.join(dir, `forceai.db.pre-fresh-start-${stamp}-${n}`); // VACUUM INTO won't overwrite
+  let file = path.join(dir, `forceai.db.pre-${label}-${stamp}`);
+  for (let n = 2; fs.existsSync(file); n++) file = path.join(dir, `forceai.db.pre-${label}-${stamp}-${n}`); // VACUUM INTO won't overwrite
   db.prepare('VACUUM INTO ?').run(file);
   return file;
+}
+
+/** Voice wipe: every voice item in every group (all categories, old versions too) and every group
+ *  voice overview. Learner checkpoints move to now so nothing is relearned from older messages. */
+export function wipeVoice(db: Database.Database, now: number): { items: number; overviews: number } {
+  let items = 0;
+  let overviews = 0;
+  db.transaction(() => {
+    items = db.prepare('DELETE FROM voice_items').run().changes;
+    overviews = db.prepare("DELETE FROM config WHERE key GLOB 'voice_overview:*'").run().changes;
+    db.prepare("UPDATE config SET value = ? WHERE key GLOB 'voice_ts_*'").run(String(now));
+  })();
+  return { items, overviews };
 }
 
 export interface WipeResult { before: RowCounts; after: RowCounts; rewritten: number; merged: number }
