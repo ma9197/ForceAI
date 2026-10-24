@@ -198,6 +198,13 @@ export function openDb(file: string = DB_PATH): Database.Database {
       rating     INTEGER NOT NULL,   -- 1 = more like this, -1 = not like this
       ts         INTEGER
     );
+    -- blind A/B tests in the Compare panel: which brain the owner picked without knowing which was which
+    CREATE TABLE IF NOT EXISTS brain_ab (
+      id       INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_jid TEXT,
+      winner   TEXT NOT NULL,   -- 'v1' | 'v2' | 'tie'
+      ts       INTEGER
+    );
     -- owner's call on brain v2 turn-taking decisions (spoke / stayed quiet): examples for the v2 gatekeeper
     CREATE TABLE IF NOT EXISTS decision_feedback (
       decision_id INTEGER PRIMARY KEY,

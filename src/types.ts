@@ -203,6 +203,8 @@ export interface GroupStatus {
   phase: ArbiterPhase;
   /** which brain answers in this group: v1 (default) or v2 (opt-in beta) */
   brain: 'v1' | 'v2';
+  /** v1, v1 with brain v2 thinking along in shadow (logs only), or v2 */
+  brain_mode?: 'v1' | 'shadow' | 'v2';
   /** brain v2 kept failing: until this time (ms) the group runs on v1 (null = not falling back) */
   brain_fallback_until?: number | null;
   stats: {

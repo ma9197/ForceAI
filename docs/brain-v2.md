@@ -2,7 +2,9 @@
 
 READ:
 - Every group still runs **brain v1** by default. Nothing changes until you switch a group.
+- Safest first step: top bar, choose **v1 + v2 shadow (watch only)**. v1 keeps answering; v2 only thinks along, and the feed shows what it would have done (grey "v2 shadow would ..." rows). Costs one cheap extra call per decision.
 - To try v2 in a group: open the group, top bar, choose **Brain v2 (beta)**. Switch back the same way.
+- Fair verdict: **Blind test** in the Compare panel shows both brains' lines as A and B. You pick, then it tells you which was which. The panel keeps the tally.
 - To compare before switching: **Compare v1 / v2** under the chat. It shows what each brain would send right now. Nothing is sent.
 - v2's goal: talk less but better, get irony, sound like a friend, jump in only when it has something good.
 - Teach it your taste: tap 👍 or 👎 on the bot's lines in the live feed. v2 reads your latest likes and dislikes in that group.
@@ -47,6 +49,8 @@ READ:
 | Always answers when asked | When someone talks to it, the reply writer is told so: it answers (a reaction is enough if they only laughed). Silence is only an option for lines nobody asked for. | Prompt review, round 5 |
 | Calibrated scores | The thinking stage gets 4 short worked examples (mid-story: wait, strong callback: speak, private logistics: ignore, a friend's great roast: react) so its 0-10 scores mean the same thing every time. Humor and novelty are judged harshly, the rest plainly. | Few-shot calibration |
 | Your dials win | Your emoji dial, character adjustment and boundaries win over v2's own style rules. | Prompt review, round 5 |
+| Shadow mode | v1 acts, v2 thinks along on the same messages (dry run, never sends) and logs what it would have done. You can rate those rows too. A whole day of comparison with zero risk. | Off-policy evaluation, the usual way to test a new policy safely |
+| Blind A/B test | Both brains answer the same moment; you see A and B without labels and pick. The tally removes "I know which one is new" bias. | Pairwise preference judging (arXiv 2603.12520) |
 | Anti-cringe linter (code) | Fixes or flags AI tells before sending: assistant phrases, "not just X but Y", semicolons, hashtags, long dashes, essays, repeats, parroting, 3+ texts in a row. One cheap rewrite only when needed. In serious moments it holds back stickers, voice notes and polls. When the group types lowercase, so does it. | Antislop (ICLR 2026), Wikipedia's signs of AI writing, LLMafia |
 
 What stays the same in v2: the persona, the training examples, all memory (facts, voice profile, member reads, stickers), boundaries, owner commands, "Admin:" protection, sleep, rate limits, budget, dials.
@@ -95,7 +99,8 @@ Note: the research agent could only open GitHub and Anthropic pages directly; mo
 - `src/ai/v2/replay.ts`: which moments the replay looks at.
 - `src/ai/v2/lint.ts`: anti-cringe checks and fixes.
 - `src/ai/v2/prompts.ts`, `src/ai/v2/schemas.ts`: v2 prompt text and JSON shapes.
-- Switch: `Repo.getBrainVersion` (config `brain_v2_<group>`), `POST /api/brain`, top-bar selector.
+- Switch: `Repo.getBrainVersion` / `getBrainMode` (config `brain_v2_<group>`: `0`, `shadow`, `1`), `POST /api/brain`, top-bar selector.
+- Shadow: `Arbiter.shadowV2` (tier `S1v2`). Blind test: `POST /api/brain/ab`, table `brain_ab`.
 - Preview: `App.previewBrains`, `POST /api/brain/preview`, `ui/src/components/BrainPreview.tsx`.
 - Scoreboard: `Repo.brainV2Stats`, `GET /api/brain/stats`.
 - Replay: `App.replayV2`, `POST /api/brain/replay`. Per-group chattiness: `Repo.getV2Chattiness`, `POST /api/brain/chattiness`.
@@ -105,10 +110,11 @@ Note: the research agent could only open GitHub and Anthropic pages directly; mo
 
 ## Testing plan for the owner
 
-1. Pick one active group. Open **Compare v1 / v2**, click **Replay last hours with v2**. Read where it would speak and what it would say. Then **Run comparison** a few times during a live chat.
-2. If v2 looks better, switch that group to **Brain v2 (beta)**. Leave the others on v1.
-3. Watch the live feed: `T1v2` lines show why it spoke or stayed quiet (urge vs bar). Tap 👍 or 👎 on them and on its lines. If it talks too much or too little, change chattiness.
-4. After a day, compare: did the friends react more to v2's lines? Did anyone call it cringe?
+1. Pick one active group. Open **Compare v1 / v2**, click **Replay last hours with v2**. Read where it would speak and what it would say.
+2. Put that group on **v1 + v2 shadow** for a day. Read the grey shadow rows, rate a few. Do a **Blind test** now and then.
+3. If v2 looks better (and wins the blind tests), switch that group to **Brain v2 (beta)**. Leave the others on v1.
+4. Watch the live feed: `T1v2` lines show why it spoke or stayed quiet (urge vs bar). Tap 👍 or 👎 on them and on its lines. If it talks too much or too little, change chattiness.
+5. After a day, compare: did the friends react more to v2's lines? Did anyone call it cringe?
 
 ## Ideas not built yet
 

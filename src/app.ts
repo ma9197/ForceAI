@@ -834,11 +834,13 @@ export class App {
   }
 
   /** Switch a group between brain v1 (default) and v2. Takes effect on the next decision. */
-  setBrainVersion(jid: string, version: 'v1' | 'v2'): void {
+  setBrainVersion(jid: string, version: 'v1' | 'v2' | 'shadow'): void {
     this.repo.setBrainVersion(jid, version);
     this.arbiters.get(jid)?.resetBrainFallback();
-    this.repo.insertDecision(jid, 'T0', 'BRAIN', `switched to brain ${version}`);
-    this.bus.publish({ kind: 'decision', chatJid: jid, ts: Date.now(), tier: 'T0', decision: 'BRAIN', reason: `switched to brain ${version}` });
+    this.brainV2.forget(jid);
+    const label = version === 'shadow' ? 'v1, with brain v2 thinking along in shadow' : `brain ${version}`;
+    const id = this.repo.insertDecision(jid, 'T0', 'BRAIN', `switched to ${label}`);
+    this.bus.publish({ kind: 'decision', chatJid: jid, ts: Date.now(), tier: 'T0', decision: 'BRAIN', reason: `switched to ${label}`, id });
     this.bus.publish({ kind: 'status', status: this.statusPayload() });
   }
 
@@ -937,6 +939,7 @@ export class App {
       asleep: arbiter?.asleep ?? false,
       phase: arbiter?.phase ?? 'IDLE',
       brain: this.repo.getBrainVersion(jid),
+      brain_mode: this.repo.getBrainMode(jid),
       brain_fallback_until: arbiter?.v2FallbackUntilTs ?? null,
       stats: {
         messages_read: allStats[`messages_read:${jid}`] ?? 0,

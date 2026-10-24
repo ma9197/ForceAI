@@ -521,6 +521,37 @@ assert.ok(!dislikedText.includes('madrid wins 2-1 sunday, trust me'), 'a dislike
 assert.deepEqual(disliked!.plan.actions, []);
 assert.equal(disliked!.lint.dropped.length, 1, 'blocked (here as its own recent line; the 👎 path is unit-tested above)');
 
+// shadow decisions can be rated and are counted; blind A/B tally
+const GS = 'shadow@g.us';
+repo.insertDecision(GS, 'T1', 'RESPOND', 'v1 spoke before shadow was on');
+await new Promise(r => setTimeout(r, 5));
+const sd = repo.insertDecision(GS, 'S1v2', 'RESPOND', 'banter | strong thought | urge 7 vs bar 6.5 | thought: x');
+repo.insertDecision(GS, 'T1', 'RESPOND', 'v1 spoke');
+repo.insertDecision(GS, 'S1v2', 'IGNORE', 'r | nothing worth adding | urge 3 vs bar 6.5');
+repo.insertDecision(GS, 'T1', 'IGNORE', 'v1 quiet');
+assert.equal(repo.setDecisionFeedback(sd, 'good'), true, 'shadow calls teach the gatekeeper too');
+const sst = repo.brainV2Stats(GS, 0);
+assert.deepEqual([sst.shadow.spoke, sst.shadow.quiet, sst.v1Spoke], [1, 1, 1], 'v1 counted only in the moments the shadow saw');
+repo.addBrainAb(G, 'v2'); repo.addBrainAb(G, 'v2'); repo.addBrainAb(G, 'tie');
+assert.deepEqual(repo.getBrainAb(G), { v1: 0, v2: 2, tie: 1 });
+assert.deepEqual(repo.getBrainAb('other@g.us'), { v1: 0, v2: 0, tie: 0 });
+
+// shadow mode keeps its own scene (like real v2 carries one), and never touches v2's live state
+brain.forget(G);
+gateAnswer = () => gate({ decision: 'IGNORE', s: { timing: 3 } });
+calls.length = 0;
+await brain.gate(G, Date.now() - 60_000, false, { dryRun: true, shadow: true });
+assert.ok(!calls[0].messages[0].content.includes('Your previous read of the scene'));
+await brain.gate(G, Date.now() - 60_000, false, { dryRun: true, shadow: true });
+assert.ok(calls[1].messages[0].content.includes('Your previous read of the scene: football'), 'the shadow carries its own scene');
+assert.equal(brain.lastScene(G), null, "the live v2 scene stays untouched");
+assert.equal(brain.hasThought(G), false, 'and no thought is saved');
+brain.forget(G);
+calls.length = 0;
+await brain.gate(G, Date.now() - 60_000, false, { dryRun: true, shadow: true });
+assert.ok(!calls[0].messages[0].content.includes('Your previous read of the scene'), 'switching brains forgets it');
+saveOne();
+
 // per-group chattiness beats the global setting; "default" follows it
 repo.setConfig('v2_chattiness', 'chatty');
 assert.equal(repo.getV2Chattiness(G), 'chatty');

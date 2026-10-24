@@ -57,12 +57,21 @@ export class BrainV2 {
   private scenes = new Map<string, GateV2Out['scene']>();
   private thoughts = new Map<string, SavedThought>();
   private contextCache = new Map<string, { text: string; version: number; at: number }>();
+  /** shadow mode keeps its own scene from call to call, like real v2 does, without touching v2's state */
+  private shadowScenes = new Map<string, GateV2Out['scene']>();
   private bitsCache = new Map<string, { bits: Bit[]; at: number }>();
 
   constructor(private ai: AiClient, private repo: Repo, private prompts: PromptBuilder) {}
 
   lastScene(chatJid: string): GateV2Out['scene'] | null {
     return this.scenes.get(chatJid) ?? null;
+  }
+
+  /** The owner switched brains: drop this group's scenes and saved thought (no read from another mode). */
+  forget(chatJid: string): void {
+    this.scenes.delete(chatJid);
+    this.shadowScenes.delete(chatJid);
+    this.thoughts.delete(chatJid);
   }
 
   /** A saved thought that is still fresh, taken (so it is offered once). */
@@ -118,7 +127,7 @@ export class BrainV2 {
    * T1: read the chat, form a thought, score it; the policy turns that into a decision.
    * `untilTs` (replay) reads the chat as it was at that moment; it implies a dry run.
    */
-  async gate(chatJid: string, consumedUpToTs: number, forceDecide: boolean, opts: { dryRun?: boolean; untilTs?: number } = {}): Promise<GateV2Result | null> {
+  async gate(chatJid: string, consumedUpToTs: number, forceDecide: boolean, opts: { dryRun?: boolean; untilTs?: number; shadow?: boolean } = {}): Promise<GateV2Result | null> {
     const replay = opts.untilTs !== undefined;
     const now = opts.untilTs ?? Date.now();
     const recent = (n: number) => (replay ? this.repo.getRecentMessagesBefore(chatJid, now, n) : this.repo.getRecentMessages(chatJid, n)) as MsgRow[];
@@ -128,7 +137,7 @@ export class BrainV2 {
     const part = participation(rows, now);
     const dyn = dynamics(rows, BOT_NAME, now);
     const rec = reception(history, BOT_NAME, now);
-    const lastScene = replay ? undefined : this.scenes.get(chatJid);
+    const lastScene = replay ? undefined : opts.shadow ? this.shadowScenes.get(chatJid) : this.scenes.get(chatJid);
     const content = [
       transcript || '(chat is empty so far)',
       replay ? '' : formatCityTimes(this.repo.getClockCities()),
@@ -152,13 +161,14 @@ export class BrainV2 {
         messages: [{ role: 'user', content }],
         output_config: { format: zodOutputFormat(GateV2Schema), ...(effort ? { effort } : {}) },
       });
-      this.ai.recordUsage(this.ai.gatekeeperModel, response.usage, 't1', chatJid);
+      this.ai.recordUsage(this.ai.gatekeeperModel, response.usage, opts.shadow ? 'shadow' : 't1', chatJid);
       const out = response.parsed_output;
       if (!out) {
         logger.warn({ stop: response.stop_reason }, 'brain v2 gatekeeper returned unparseable output');
         return null;
       }
       const policy = decide(out, part, forceDecide, CHATTINESS_SHIFT[this.repo.getV2Chattiness(chatJid)] ?? 0, { dyn, rec });
+      if (opts.shadow) this.shadowScenes.set(chatJid, out.scene);
       if (!opts.dryRun && !replay) {
         this.scenes.set(chatJid, out.scene);
         // a saved thought belongs to the moment it came from: a new read replaces it or lets it go

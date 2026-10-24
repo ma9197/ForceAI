@@ -592,6 +592,8 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent2); }
 .brain-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .brain-title { font-weight: 700; }
 .brain-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+.decision-row.shadow { opacity: 0.75; font-style: italic; }
+.brain-ab-pick { display: flex; gap: 8px; flex-wrap: wrap; }
 .brain-replay { display: flex; flex-direction: column; gap: 6px; }
 .brain-msg { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
 /* owner's thumbs up / down on the bot's lines */

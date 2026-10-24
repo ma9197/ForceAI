@@ -35,8 +35,8 @@ let genFail = false;
 function harness(chatJid: string) {
   const sent: any[] = [];
   const fakeBrain: any = {
-    gate: async () => {
-      log.push(`v2gate:${chatJid}`);
+    gate: async (_jid: string, _upTo: number, _force: boolean, opts: any = {}) => {
+      log.push(`v2gate:${chatJid}${opts.dryRun ? ':dry' : ''}`);
       if (gateDelay) await sleep(gateDelay);
       if (gateFail) return null;
       const out = { scene: { topic: 't', threads: '', vibe: 'banter', running_bit: null, bit_played_out: false }, addressed: false,
@@ -250,6 +250,32 @@ gateDelay = 0;
 genFail = false;
 assert.ok(log.includes('T1v2:RESPOND') && log.includes('unprompted:true:now') && log.includes(`v1gen:${V9}`), log.join(' '));
 assert.deepEqual(nine.sent.map(a => a.text), ['v1 says hi']);
+
+// 15. shadow mode: v1 answers as always; v2 only thinks along (dry run) and logs what it would do
+log.length = 0;
+const VS = 'vs@g.us';
+repo.setBrainVersion(VS, 'shadow');
+assert.equal(repo.getBrainVersion(VS), 'v1', 'shadow groups run on v1');
+assert.equal(repo.getBrainMode(VS), 'shadow');
+const shadow = harness(VS);
+v2Gate.decision = 'RESPOND';
+gateDelay = 600; // a slow shadow call must not hold up v1
+shadow.arb.onMessage(msg(VS, 'a', 'who is watching tonight'));
+await sleep(450);
+assert.ok(log.includes(`v1gate:${VS}`) && log.includes(`v1gen:${VS}`), 'v1 answered without waiting for the shadow');
+assert.deepEqual(shadow.sent.map(a => a.text), ['v1 says hi']);
+assert.equal(shadow.arb.working, true, 'a shadow call still in flight counts as working (fresh start waits)');
+await sleep(600);
+assert.equal(shadow.arb.working, false);
+gateDelay = 0;
+assert.ok(log.includes(`v2gate:${VS}:dry`), 'v2 thinks as a dry run');
+assert.ok(log.includes('S1v2:RESPOND'), log.join(' '));
+assert.ok(!log.some(l => l.startsWith(`v2gen:${VS}`)), 'the shadow never writes or sends');
+repo.setBrainVersion(VS, 'v1');
+log.length = 0;
+shadow.arb.onMessage(msg(VS, 'a', 'back to plain v1'));
+await sleep(600);
+assert.ok(!log.some(l => l.startsWith(`v2gate:${VS}`)), 'plain v1: no shadow calls');
 
 fs.rmSync(dir, { recursive: true, force: true });
 console.log('arbiter routing: all checks passed');

@@ -7,6 +7,7 @@ export interface GroupStatus {
   asleep: boolean;
   phase: string;
   brain?: 'v1' | 'v2';
+  brain_mode?: 'v1' | 'shadow' | 'v2';
   brain_fallback_until?: number | null;
   stats: {
     messages_read: number;
@@ -116,7 +117,10 @@ function staticDemoResponse(path: string, options?: RequestInit): unknown {
   };
   if (url in exact) return exact[url];
   if (url.includes('/stat/') && url.endsWith('/history')) return []; // per-member stat timeline
-  if (url === '/api/brain/stats') return { spoke: 0, unprompted: 0, pauses: 0, reacted: 0, quiet: 0, vetoed: 0, rewrites: 0, chattiness: 'default' };
+  if (url === '/api/brain/stats') return {
+    spoke: 0, unprompted: 0, pauses: 0, reacted: 0, quiet: 0, vetoed: 0, rewrites: 0, chattiness: 'default',
+    shadow: { spoke: 0, reacted: 0, quiet: 0, waited: 0 }, v1Spoke: 0, ab: { v1: 0, v2: 0, tie: 0 },
+  };
   if (url.startsWith('/api/people/')) {
     const jid = decodeURIComponent(url.slice('/api/people/'.length));
     return (d.profiles as Record<string, unknown>)[jid] ?? null;
