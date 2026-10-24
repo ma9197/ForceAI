@@ -305,7 +305,16 @@ export class Repo {
     });
     const best = scored.filter(s => s.hits >= 2);
     const pick = (best.length >= limit ? best : scored).sort((a, b) => b.hits - a.hits || b.r.ts - a.r.ts);
-    return pick.slice(0, limit).map(s => s.r).sort((a, b) => a.ts - b.ts);
+    return pick.slice(0, limit).map(s => ({ ...s.r, hits: s.hits })).sort((a, b) => a.ts - b.ts);
+  }
+
+  /** Messages and reactions that quote any of these messages (how older lines were received), up to a time. */
+  getRepliesTo(chatJid: string, ids: string[], untilTs = Number.MAX_SAFE_INTEGER): any[] {
+    if (ids.length === 0) return [];
+    return this.db.prepare(
+      `SELECT id, short_id, sender_jid, sender_name, text, type, is_bot, is_owner, quoted_id, ts FROM messages
+       WHERE chat_jid = ? AND ts <= ? AND quoted_id IN (${ids.map(() => '?').join(',')})`,
+    ).all(chatJid, untilTs, ...ids) as any[];
   }
 
   getMessagesBetween(chatJid: string, fromTs: number, toTs: number): any[] {

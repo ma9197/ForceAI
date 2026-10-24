@@ -13,7 +13,7 @@ import { CRITIC_SYSTEM, GATEKEEPER_V2_SYSTEM, REWRITE_SYSTEM } from './prompts.j
 import { formatTasteRules, readTasteRules } from './taste.js';
 import { CriticSchema, GateV2Schema, PlanV2Schema, RewriteSchema, type GateV2Out, type PlanV2Out } from './schemas.js';
 import {
-  botTargets, botTics, callbackKeywords, dynamics, formatBits, formatCallbacks, formatClockLine, formatDecisionFeedback, formatLinesThatWorked,
+  botTargets, botTics, callbackKeywords, dynamics, formatBits, formatCallbacks, rankCallbacks, formatClockLine, formatDecisionFeedback, formatLinesThatWorked,
   formatReactionHabit, formatRoomNow, formatStyleStats, formatTakes, formatTeasing, formatTics, groupLaughs, ironyCues, landedLines, ownTakes,
   participation, reception, roomMap, runningBits, stripMarker, styleStats, teaseReception, type Bit, type Dynamics, type MsgRow, type StyleStats,
 } from './signals.js';
@@ -261,7 +261,10 @@ export class BrainV2 {
     const newRows = consumedUpToTs === null ? rows.slice(-6) : rows.filter(r => r.ts > consumedUpToTs);
     // callbacks come from before the transcript and at least an hour back (not the last few minutes)
     const before = Math.min(rows.length ? rows[0].ts : now, now - 3_600_000);
-    const callbacks = formatCallbacks((this.repo.searchOlderMessages(chatJid, before, callbackKeywords(newRows), BRAIN_V2.CALLBACKS) as MsgRow[])
+    // three times the candidates, so the moments that got laughs back then can rise to the top
+    const cands = this.repo.searchOlderMessages(chatJid, before, callbackKeywords(newRows), BRAIN_V2.CALLBACKS * 3) as (MsgRow & { hits: number })[];
+    const replies = this.repo.getRepliesTo(chatJid, cands.flatMap(c => (c.id ? [c.id] : [])), now) as MsgRow[]; // a replay never sees later laughs
+    const callbacks = formatCallbacks(rankCallbacks(cands, replies, BRAIN_V2.CALLBACKS)
       .map(r => (r.is_bot ? { ...r, text: strip(r.text ?? '') } : r))
       .filter(r => !r.is_bot || notDisliked(r.text ?? '')));
 

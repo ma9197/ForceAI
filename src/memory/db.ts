@@ -60,6 +60,7 @@ export function openDb(file: string = DB_PATH): Database.Database {
       media_path  TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_msg_chat_ts ON messages(chat_jid, ts);
+    CREATE INDEX IF NOT EXISTS idx_msg_quoted ON messages(quoted_id);
 
     CREATE TABLE IF NOT EXISTS bot_messages (
       message_id TEXT PRIMARY KEY,

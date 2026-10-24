@@ -252,13 +252,13 @@ export function callbackKeywords(newRows: MsgRow[], max = 6): string[] {
   return [...counts.entries()].sort((a, b) => b[1] - a[1] || b[0].length - a[0].length).slice(0, max).map(([w]) => w);
 }
 
-export function formatCallbacks(rows: MsgRow[]): string | null {
+export function formatCallbacks(rows: (MsgRow & { laughs?: number })[]): string | null {
   if (rows.length === 0) return null;
   const lines = rows.map(r => {
     const d = new Date(r.ts);
     const when = `${d.toISOString().slice(0, 10)}`;
     const who = r.is_bot ? 'you' : (r.sender_name ?? '?');
-    return `- [${when}] ${who}: ${cut(r.text ?? '', 160)}`;
+    return `- [${when}] ${who}: ${cut(r.text ?? '', 160)}${r.laughs ? ` (got laughs from ${r.laughs})` : ''}`;
   });
   return `OLDER MOMENTS FROM THIS CHAT (matched on today's topic; a callback to one of these can be the funniest move, but only if it genuinely connects. never force it):\n${lines.join('\n')}`;
 }
@@ -278,6 +278,18 @@ function pureLaugh(text: string): boolean {
  * and short unquoted laughs ("hahaha") by someone else right after it (within the next 3 messages and
  * 90 seconds), which is how most people laugh in a group chat. One laugh per person per message.
  */
+/**
+ * Callbacks, best first: matched on more of today's words, then the moments that made people laugh back
+ * then (a callback to a line that landed is the one that lands again), then the most recent. Returns
+ * `limit` in chat order, each with how many people laughed.
+ */
+export function rankCallbacks(cands: (MsgRow & { hits?: number })[], replies: MsgRow[], limit: number): (MsgRow & { laughs: number })[] {
+  const laughs = laughCounts([...cands, ...replies].sort((a, b) => a.ts - b.ts));
+  return cands.map(c => ({ ...c, laughs: c.id ? laughs.get(c.id) ?? 0 : 0 }))
+    .sort((a, b) => Math.min(b.hits ?? 1, 2) - Math.min(a.hits ?? 1, 2) || Number(b.laughs > 0) - Number(a.laughs > 0) || (b.hits ?? 1) - (a.hits ?? 1) || b.ts - a.ts)
+    .slice(0, limit).sort((a, b) => a.ts - b.ts);
+}
+
 export function laughCounts(rows: MsgRow[]): Map<string, number> {
   const who = new Map<string, Set<string>>();
   const add = (id: string, by: string) => {
