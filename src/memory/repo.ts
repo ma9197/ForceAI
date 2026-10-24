@@ -834,13 +834,17 @@ export class Repo {
   /** Brain v2 scoreboard for one group since `sinceTs`: how often it spoke, unprompted, reacted, kept quiet. */
   brainV2Stats(chatJid: string, sinceTs: number): {
     spoke: number; unprompted: number; pauses: number; reacted: number; quiet: number; vetoed: number; rewrites: number;
-    shadow: { spoke: number; reacted: number; quiet: number; waited: number }; v1Spoke: number;
+    shadow: { spoke: number; reacted: number; quiet: number; waited: number; wrote: number }; v1Spoke: number;
   } {
-    const rows = this.db.prepare("SELECT tier, decision, reason, ts FROM decisions WHERE chat_jid = ? AND ts >= ? AND tier IN ('T1v2', 'T2v2', 'S1v2', 'T1') ORDER BY ts").all(chatJid, sinceTs) as { tier: string; decision: string; reason: string; ts: number }[];
-    const s = { spoke: 0, unprompted: 0, pauses: 0, reacted: 0, quiet: 0, vetoed: 0, rewrites: 0, shadow: { spoke: 0, reacted: 0, quiet: 0, waited: 0 }, v1Spoke: 0 };
+    const rows = this.db.prepare("SELECT tier, decision, reason, ts FROM decisions WHERE chat_jid = ? AND ts >= ? AND tier IN ('T1v2', 'T2v2', 'S1v2', 'S2v2', 'T1') ORDER BY ts").all(chatJid, sinceTs) as { tier: string; decision: string; reason: string; ts: number }[];
+    const s = { spoke: 0, unprompted: 0, pauses: 0, reacted: 0, quiet: 0, vetoed: 0, rewrites: 0, shadow: { spoke: 0, reacted: 0, quiet: 0, waited: 0, wrote: 0 }, v1Spoke: 0 };
     // v1's own "speak" calls in the same moments the shadow saw (each shadow row pairs with one v1 T1 row)
     const shadowFrom = rows.find(r => r.tier === 'S1v2')?.ts ?? Infinity;
     for (const r of rows) {
+      if (r.tier === 'S2v2') {
+        if (r.decision === 'WOULD_SAY') s.shadow.wrote += 1;
+        continue;
+      }
       if (r.tier === 'S1v2') {
         if (r.decision === 'RESPOND') s.shadow.spoke += 1;
         else if (r.decision === 'REACT') s.shadow.reacted += 1;

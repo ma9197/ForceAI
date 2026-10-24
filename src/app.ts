@@ -28,6 +28,7 @@ import { Gatekeeper } from './ai/gatekeeper.js';
 import { Generator } from './ai/generator.js';
 import { actualAfter, pickReplayCuts } from './ai/v2/replay.js';
 import { BrainV2 } from './ai/v2/brain.js';
+import { describeAction } from './ai/v2/describe.js';
 import { TasteLearner } from './ai/v2/taste.js';
 import { Arbiter } from './arbiter/arbiter.js';
 import { StickerLearning } from './stickers/learning.js';
@@ -914,6 +915,7 @@ export class App {
       voice_provider: voiceProvider(this.repo),
       v2_chattiness: this.repo.getConfig('v2_chattiness') ?? 'balanced',
       v2_second_opinion: this.repo.getConfig('v2_second_opinion') !== '0', // default ON
+      v2_shadow_lines: this.repo.getConfig('v2_shadow_lines') !== '0', // default ON
       gemini_voice: this.repo.getConfig('gemini_voice') || GEMINI_TTS.DEFAULT_VOICE,
       voice_style: this.repo.getConfig('voice_style') ?? GEMINI_TTS.DEFAULT_STYLE,
       persona_mode: this.repo.getConfig('persona_mode') ?? 'default',
@@ -1021,20 +1023,6 @@ export interface ReplayPoint {
 
 export type ReplayResult = { error: string } | { points: ReplayPoint[]; hours: number };
 
-/** One action as a readable line for the dashboard preview. */
-function describeAction(a: BotAction): string {
-  switch (a.type) {
-    case 'message': return a.text;
-    case 'reply': return `↩ #${a.target_message_id}: ${a.text}`;
-    case 'reaction': return `reacts ${a.emoji} on #${a.target_message_id}`;
-    case 'sticker': return `[sticker ${a.sticker_id}]`;
-    case 'poll': return `[poll] ${a.question} (${a.options.join(' / ')})`;
-    case 'voice': return `🎤 ${a.text}`;
-    case 'image': return `🖼 ${a.prompt}${a.caption ? ` / caption: ${a.caption}` : ''}`;
-    case 'sleep': return '(goes to sleep)';
-    default: return '(stays silent)';
-  }
-}
 
 export interface FreshStartJob {
   state: 'idle' | 'running' | 'done' | 'error';

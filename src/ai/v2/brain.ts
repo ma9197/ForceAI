@@ -31,6 +31,8 @@ export interface GenerateV2Input extends GenerateInput {
   unprompted?: boolean;
   /** preview: no observations saved, nothing recorded besides token usage */
   dryRun?: boolean;
+  /** shadow mode: read the shadow's own scene (the live v2 scene does not exist in a v1 group) */
+  shadow?: boolean;
 }
 
 export interface GenerateV2Result {
@@ -200,7 +202,7 @@ export class BrainV2 {
   }
 
   /** The measured context block for the generator: scene, style numbers, own tics, share, callbacks. */
-  private signalsBlock(chatJid: string, rows: MsgRow[], consumedUpToTs: number | null, asked: boolean): { text: string; medianLen: number; lowercaseShare: number; botTexts: string[]; humanTexts: string[]; dyn: Dynamics; style: StyleStats | null; disliked: string[] } {
+  private signalsBlock(chatJid: string, rows: MsgRow[], consumedUpToTs: number | null, asked: boolean, shadow = false): { text: string; medianLen: number; lowercaseShare: number; botTexts: string[]; humanTexts: string[]; dyn: Dynamics; style: StyleStats | null; disliked: string[] } {
     const marker = this.marker();
     const strip = (t: string) => stripMarker(t, marker.prefix, marker.suffix);
     const names = this.memberNames(chatJid);
@@ -213,7 +215,7 @@ export class BrainV2 {
     const style = styleStats(history);
     const tics = botTics(botTexts.slice(-BRAIN_V2.TICS_WINDOW), names);
     const part = participation(history);
-    const scene = this.scenes.get(chatJid);
+    const scene = shadow ? this.shadowScenes.get(chatJid) : this.scenes.get(chatJid);
     const dyn = dynamics(rows, BOT_NAME);
 
     const newRows = consumedUpToTs === null ? rows.slice(-6) : rows.filter(r => r.ts > consumedUpToTs);
@@ -256,7 +258,8 @@ export class BrainV2 {
     const transcript = this.prompts.formatTranscript(rows, input.consumedUpToTs);
     // someone talked to it (a mention, a reply, an owner instruction): it answers, no second opinion
     const asked = !input.unprompted || !!input.operatorInstruction;
-    const signals = this.signalsBlock(input.chatJid, rows, input.consumedUpToTs, asked);
+    const tier = input.shadow ? 'shadow' as const : 't2' as const; // shadow lines are never sent: counted apart from real replies
+    const signals = this.signalsBlock(input.chatJid, rows, input.consumedUpToTs, asked, !!input.shadow);
 
     const parts: string[] = [`Current group chat transcript:`, transcript || '(chat is empty so far)', signals.text];
     if (input.addressIds?.length) {
@@ -298,7 +301,7 @@ export class BrainV2 {
         messages: [{ role: 'user', content: userContent }],
         output_config: { format: zodOutputFormat(PlanV2Schema), ...(effort ? { effort } : {}) },
       });
-      this.ai.recordUsage(this.ai.generationModel, response.usage, 't2', input.chatJid);
+      this.ai.recordUsage(this.ai.generationModel, response.usage, tier, input.chatJid);
       const out = response.parsed_output;
       if (!out) {
         logger.warn({ stop: response.stop_reason }, 'brain v2 generator returned unparseable output, staying silent');
@@ -331,7 +334,7 @@ export class BrainV2 {
       let lint = lintPlan(actions, { ...lintCtx, recentBotTexts: signals.botTexts.slice(-30), recentHumanTexts: signals.humanTexts.slice(-40) });
       let rewritten = 0;
       if (lint.issues.length > 0) {
-        const fixed = await this.rewrite(input.chatJid, lint);
+        const fixed = await this.rewrite(input.chatJid, lint, tier);
         if (fixed) {
           rewritten = fixed.count;
           lint = { ...lintPlan(fixed.actions, { ...lintCtx, recentBotTexts: [], recentHumanTexts: [] }), dropped: lint.dropped };
@@ -342,7 +345,7 @@ export class BrainV2 {
       // second opinion: an unprompted text has to convince a sharp friend, or the bot stays quiet
       let vetoed: string | undefined;
       if (!asked && this.repo.getConfig('v2_second_opinion') !== '0' && actions.some(a => a.type === 'message' || a.type === 'reply' || a.type === 'voice')) {
-        const verdict = await this.critic(input.chatJid, rows, actions);
+        const verdict = await this.critic(input.chatJid, rows, actions, tier);
         if (verdict && verdict.verdict === 'skip') {
           vetoed = verdict.reason;
           actions = [];
@@ -367,7 +370,7 @@ export class BrainV2 {
   }
 
   /** "Would a sharp friend send this right now?" One small call; null (= send) if it fails. */
-  private async critic(chatJid: string, rows: MsgRow[], actions: BotAction[]): Promise<{ verdict: 'send' | 'skip'; reason: string } | null> {
+  private async critic(chatJid: string, rows: MsgRow[], actions: BotAction[], tier: 't2' | 'shadow' = 't2'): Promise<{ verdict: 'send' | 'skip'; reason: string } | null> {
     // the critic plays a member of the group, so the bot's lines are labelled by name, not "(you)"
     const transcript = this.prompts.formatTranscript(rows.slice(-BRAIN_V2.CRITIC_LINES), null).split(`${BOT_NAME} (you)`).join(BOT_NAME);
     const draft = actions.map(a => ('text' in a ? `${a.type}: ${a.text}` : a.type)).join('\n');
@@ -381,7 +384,7 @@ export class BrainV2 {
         messages: [{ role: 'user', content: `LAST MESSAGES:\n${transcript}\n\nWHAT IT WANTS TO SEND:\n${draft}` }],
         output_config: { format: zodOutputFormat(CriticSchema), ...(effort ? { effort } : {}) },
       });
-      this.ai.recordUsage(model, response.usage, 't2', chatJid);
+      this.ai.recordUsage(model, response.usage, tier, chatJid);
       return response.parsed_output ?? null;
     } catch (err) {
       logger.warn({ err }, 'brain v2 second opinion failed, sending as planned');
@@ -390,7 +393,7 @@ export class BrainV2 {
   }
 
   /** One cheap pass that fixes only the flagged messages. Returns null if it fails (plan kept as is). */
-  private async rewrite(chatJid: string, lint: LintResult): Promise<{ actions: BotAction[]; count: number } | null> {
+  private async rewrite(chatJid: string, lint: LintResult, tier: 't2' | 'shadow' = 't2'): Promise<{ actions: BotAction[]; count: number } | null> {
     const byIndex = new Map<number, string[]>();
     for (const i of lint.issues) byIndex.set(i.index, [...(byIndex.get(i.index) ?? []), i.problem]);
     const items = [...byIndex.entries()].map(([index, problems]) => {
@@ -407,7 +410,7 @@ export class BrainV2 {
         messages: [{ role: 'user', content: `MESSAGES TO FIX:\n${items}` }],
         output_config: { format: zodOutputFormat(RewriteSchema), ...(effort ? { effort } : {}) },
       });
-      this.ai.recordUsage(model, response.usage, 't2', chatJid);
+      this.ai.recordUsage(model, response.usage, tier, chatJid);
       const parsed = response.parsed_output;
       if (!parsed) return null;
       let count = 0;

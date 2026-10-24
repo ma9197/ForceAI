@@ -247,6 +247,7 @@ export interface StatusPayload {
     voice_provider: 'gemini' | 'elevenlabs';
     v2_chattiness: string;
     v2_second_opinion: boolean;
+    v2_shadow_lines: boolean;
     gemini_voice: string;
     voice_style: string;
     persona_mode: string;
