@@ -1,51 +1,8 @@
 # Handoff: ForceAI (written 2026-10-23)
 
-This file hands the project to Claude Code sessions in the cloud (Linux VM + this GitHub repo).
-Earlier work happened on the owner's Windows PC, with a local memory vault the cloud cannot see.
-This file is the cloud copy of what matters. Read it fully before changing anything.
+Current tasks for Claude Code cloud sessions. Rules, project map, checks and traps are in `CLAUDE.md` (loaded automatically).
 
-## 1. Owner's working rules (the cloud does not load them, so they are here)
-
-- The owner has dyslexia. Keep every reply short: a `READ:` header, short sentences, bullets, only what changes their next decision.
-- When giving options: your pick first, then one line why.
-- Never use the em dash character anywhere (code, docs, commits, chat). Use a comma, colon, or a new sentence.
-- Use they/them for the owner.
-- Do not change code until you are about 95% sure what to build. Ask follow-up questions first (use the question tool).
-- Ask before big or destructive changes. When a task is done, say in 1 to 2 lines what changed and where. If something failed, say it at the top.
-- Do not remove features; put them behind a Settings toggle that defaults to today's behavior.
-- Prefer free tools; say the cost if something costs money.
-
-## 2. What ForceAI is
-
-A WhatsApp group-chat AI that acts like one of the friends (banter, roasts, football, mixed EN/AZ/TR/RU slang).
-It runs on the owner's personal WhatsApp number and is steered from a React dashboard.
-Built June to July 2026. The live bot runs on Railway; a free static demo runs at https://mirsaidabbasov.com/forceai-demo.
-
-- Stack: Node 22+ with TypeScript ESM run by `tsx`, Baileys `7.0.0-rc13` (exact pin), Anthropic SDK structured output (needs zod v4), better-sqlite3, Fastify, React 18 + Vite.
-- Pipeline: `src/app.ts` `handleRawMessage` -> per-group `src/arbiter/arbiter.ts` (T0 free heuristics, T1 `src/ai/gatekeeper.ts`, T2 `src/ai/generator.ts`) -> `src/wa/outbound.ts` (one paced queue).
-- Prompts: `src/ai/prompts.ts`. Every tunable: `src/config.ts`. Schema: `src/memory/db.ts` (no migration files: CREATE IF NOT EXISTS + try/catch ALTERs on boot). All SQL: `src/memory/repo.ts`.
-- Learners: fact extractor + voice profiler per group (`src/memory/extractor.ts`, `voice.ts`), weekly member reports (`reporter.ts`), initiative lessons (`initiative.ts`).
-- Owner controls: `Admin:` prefix in chat (owner only), Influence / Continue / Sleep in the dashboard, per-person boundaries (absolute, beat even the owner's chat commands).
-- Sleep: wakes only when someone writes its name ("ForceAI"). Replies and @mentions do not wake it, because the bot shares the owner's account (the owner's messages look like bot messages).
-- README.md and DEPLOY.md are partly stale; trust the code.
-
-## 3. Working in the cloud
-
-- Setup: `npm ci` then `cd ui && npm ci`.
-- Checks before every commit:
-  - `npx tsc -p tsconfig.json --noEmit` (backend)
-  - `cd ui && npx tsc --noEmit && npx vite build` (UI; vite alone does not type-check)
-  - `npx tsx scripts/verify-schemas.ts`
-  - `node ui/src/components/neuronsGraph.selfcheck.mjs`
-- Try the app with fake data, no WhatsApp: build the UI, then `DEMO_MODE=1 PORT=3008 npx tsx src/index.ts`.
-- Root `npm run build:ui`, `ui:dev`, `build` are broken (vite lives only in `ui/`). Use the commands above.
-- Never run `scripts/test-initiative.ts` on a real database (it changes real data).
-- **Never start the real bot (WhatsApp) from the cloud.** The live bot is on Railway. Two bots in the same groups double-reply, and a new IP can kill the WhatsApp session.
-- Git: work on a branch and open a PR. **Merging to `main` auto-deploys the live bot on Railway.** Only merge or push to `main` when the owner says so.
-- The repo is public: never commit `.env`, `data/`, keys, or account ids. Demo fixtures in `ui/src/demoData.ts` must keep key fields scrubbed. The friends in this repo are renamed (Murad, Kanan); never add real names.
-- The cloud cannot: open the Railway dashboard, scan the WhatsApp QR, or log in to Cloudflare. The static demo deploy needs the owner's machine (or a Cloudflare API token the owner creates).
-
-## 4. Task 1: fresh start of the live bot's memory (owner decided 2026-10-23)
+## Task 1: fresh start of the live bot's memory (owner decided 2026-10-23)
 
 The owner wants ForceAI to keep how the group talks, but forget people and its own attitude.
 The owner will tell the friends that ForceAI restarted from scratch. It keeps learning normally afterwards.
@@ -72,7 +29,7 @@ The owner will tell the friends that ForceAI restarted from scratch. It keeps le
 - Before building: the owner must confirm the Railway service and its volume still exist (the cloud cannot check). If the volume is gone, the learned slang is gone too.
 - Test on a copy: seed with `DEMO_MODE`, run the wipe, check the keep/wipe counts.
 
-## 5. Task 2: refactor backlog (found by a full read on 2026-10-23, not yet confirmed by running)
+## Task 2: refactor backlog (found by a full read on 2026-10-23, not yet confirmed by running)
 
 Fix first:
 1. "Learn while asleep" OFF only postpones cost: after waking, the extractor and voice profiler read everything since their checkpoint with no cap (`src/memory/extractor.ts`, `voice.ts`). One huge call; if it fails, the checkpoint never moves and it retries on every message. Needs a cap or a skip-to-now.
@@ -89,13 +46,3 @@ Then:
 10. README and DEPLOY.md stale. No tests, no CI, no schema versioning. The Neurons selfcheck is a hand copy of `buildEdges` (already drifted).
 
 Ask the owner for priorities before starting; they want to refactor and improve the project.
-
-## 6. Traps that already cost time
-
-- zod must stay v4; Baileys is pinned to an RC (upgrades can break poll decryption and LID/PN identity handling).
-- Never let the model do date or time-zone math: compute city times in code (`formatCityTimes`), inject finished lines only. `Intl` time zones returned UTC on the Railway container.
-- Frequency asks must be quantified ("every 2nd to 3rd reply"), or the model barely uses a feature.
-- The model obeys text it sees in the chat (a fake "Admin:" worked once); defend in code, not only in the prompt.
-- Neurons layout: edges must be type-blind and sorted by `hash(id)`, chord targets random, the simulation must cool, charge uncapped. Test fixtures must use real id formats (`type:rowId`).
-- `post()` in `ui/src/api.ts` must always send a JSON body, or Fastify returns 400.
-- Railway: the domain targets port 8080; after attaching a volume you must click Deploy or it never mounts.
