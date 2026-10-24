@@ -835,9 +835,10 @@ export class Repo {
   brainV2Stats(chatJid: string, sinceTs: number): {
     spoke: number; unprompted: number; pauses: number; reacted: number; quiet: number; vetoed: number; rewrites: number;
     shadow: { spoke: number; reacted: number; quiet: number; waited: number; wrote: number }; v1Spoke: number;
+    failed: number; fallbacks: number;
   } {
-    const rows = this.db.prepare("SELECT tier, decision, reason, ts FROM decisions WHERE chat_jid = ? AND ts >= ? AND tier IN ('T1v2', 'T2v2', 'S1v2', 'S2v2', 'T1') ORDER BY ts, id").all(chatJid, sinceTs) as { tier: string; decision: string; reason: string; ts: number }[];
-    const s = { spoke: 0, unprompted: 0, pauses: 0, reacted: 0, quiet: 0, vetoed: 0, rewrites: 0, shadow: { spoke: 0, reacted: 0, quiet: 0, waited: 0, wrote: 0 }, v1Spoke: 0 };
+    const rows = this.db.prepare("SELECT tier, decision, reason, ts FROM decisions WHERE chat_jid = ? AND ts >= ? AND (tier IN ('T1v2', 'T2v2', 'S1v2', 'S2v2', 'T1') OR (tier = 'T0' AND decision = 'BRAIN_FALLBACK')) ORDER BY ts, id").all(chatJid, sinceTs) as { tier: string; decision: string; reason: string; ts: number }[];
+    const s = { spoke: 0, unprompted: 0, pauses: 0, reacted: 0, quiet: 0, vetoed: 0, rewrites: 0, shadow: { spoke: 0, reacted: 0, quiet: 0, waited: 0, wrote: 0 }, v1Spoke: 0, failed: 0, fallbacks: 0 };
     // v1's own "speak" calls in the same moments the shadow saw: each shadow row is paired with the v1 row
     // of its moment (both calls run at once, so either can be logged first: nearest in time, then in order)
     const used = new Set<number>();
@@ -857,6 +858,9 @@ export class Repo {
     // what started the writer: a T2v2 row is the result of the T1v2 row before it (one cycle at a time)
     let started: 'asked' | 'unprompted' | 'pause' | null = null;
     for (const r of rows) {
+      // v2 calls that failed (API error or unparseable output), live or in shadow, and safety-net fallbacks to v1
+      if (r.tier === 'T0') { s.fallbacks += 1; continue; }
+      if (r.decision === 'FAILED' || (r.tier === 'T2v2' && r.decision === 'SILENT') || (r.tier === 'S2v2' && r.reason === 'the reply writer failed')) s.failed += 1;
       if (r.tier === 'S2v2') {
         if (r.decision === 'WOULD_SAY') s.shadow.wrote += 1;
       } else if (r.tier === 'S1v2') {

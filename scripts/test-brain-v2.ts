@@ -866,8 +866,14 @@ assert.ok(sb.rewrites >= 1 || sb.vetoed >= 0);
   repo.insertDecision(GY, 'T1v2', 'RESPOND', 'r | strong thought | urge 7 vs bar 6.5');
   repo.insertDecision(GY, 'T2v2', 'SILENT', 'generation failed or unparseable');
   repo.insertDecision(GY, 'T2v2', 'SEND', 'answered a mention');
+  repo.insertDecision(GY, 'T0', 'BRAIN_FALLBACK', 'brain v2 (reply writer) failed 3 times in a row: using v1 here for 30 minutes');
+  repo.insertDecision(GY, 'S2v2', 'WOULD_SKIP', 'the reply writer failed');
+  repo.insertDecision(GY, 'T0', 'HARD_TRIGGER', 'direct trigger on m4');
   const sy = repo.brainV2Stats(GY, 0);
   assert.deepEqual([sy.spoke, sy.unprompted], [2, 0], JSON.stringify(sy));
+  // round 24: failures and fallbacks are counted, so a v2 that breaks against the real API shows up
+  assert.deepEqual([sy.failed, sy.fallbacks], [2, 1], 'writer SILENT + shadow writer failure, one fallback (other T0 rows ignored)');
+  assert.equal(st.failed, 1, 'a failed gate');
 }
 assert.equal(repo.setDecisionFeedback(d1, null), true);
 assert.equal(repo.getDecisionFeedback(G, 8).length, 1);
