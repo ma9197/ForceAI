@@ -37,6 +37,11 @@ READ:
 | What makes the group laugh | The friends' own lines that made 2+ people laugh lately ("hahaha" right after, 😂 reactions), as examples of the humor that works there. | Research brief #5: the group's real messages as examples |
 | Bad news safety net | Words like "passed away", "hospital", "funeral" (also in Russian, Azerbaijani, Turkish) make it careful even if the model misread the mood: higher bar, no 😂 reactions, no stickers or voice notes. Slang like "I'm dead" or "öldüm" does not count. | Humor hurts in serious moments (2024) |
 | Same language as the person | A reply in another alphabet than the message it answers (Russian vs Latin letters) is sent back for one quick fix. | Mixed-language studies (2026) |
+| The group's own bits | Phrases at least two friends used on at least two different days (like "bro is cooked"), with who said them and when. Old ones are marked "cooling off". Exact words, no summary. | GroupMemBench (2026): plain word matching beats summarized memory in group chats |
+| Its own takes | Its predictions and verdicts from the last 7 days ("madrid wins 2-1, trust me"), so it stays consistent, says "told you", or owns a miss. | Persona drift (arXiv 2511.00222), BeliefShift (2026) |
+| Quotes like the group does | If people here almost never quote-reply (under 15%), it does not quote the message right above either. | Measured style, like the style card |
+| Two short texts | In a group that texts in bursts, one longer two-sentence text is sent as two short messages. | X-Turing, Stephanie2 (2025): bursts read as human |
+| Takes a roast | When someone roasts it, it hits back lighter or owns it, in one line. | Persona craft |
 | Anti-cringe linter (code) | Fixes or flags AI tells before sending: assistant phrases, "not just X but Y", semicolons, hashtags, long dashes, essays, repeats, parroting, 3+ texts in a row. One cheap rewrite only when needed. In serious moments it holds back stickers, voice notes and polls. When the group types lowercase, so does it. | Antislop (ICLR 2026), Wikipedia's signs of AI writing, LLMafia |
 
 What stays the same in v2: the persona, the training examples, all memory (facts, voice profile, member reads, stickers), boundaries, owner commands, "Admin:" protection, sleep, rate limits, budget, dials.
@@ -81,7 +86,7 @@ Note: the research agent could only open GitHub and Anthropic pages directly; mo
 
 - `src/ai/v2/brain.ts`: the v2 gatekeeper and generator, context assembly, lint and rewrite.
 - `src/ai/v2/policy.ts`: turn-taking in code (urge, bar, share cap).
-- `src/ai/v2/signals.ts`: measured style card, tics, talk share, laughs, callbacks, room check, reception, bad news words.
+- `src/ai/v2/signals.ts`: measured style card, tics, talk share, laughs, callbacks, room check, reception, bad news words, running bits, own takes.
 - `src/ai/v2/replay.ts`: which moments the replay looks at.
 - `src/ai/v2/lint.ts`: anti-cringe checks and fixes.
 - `src/ai/v2/prompts.ts`, `src/ai/v2/schemas.ts`: v2 prompt text and JSON shapes.

@@ -6,12 +6,13 @@ import { openDb } from '../src/memory/db.js';
 import { Repo } from '../src/memory/repo.js';
 import { PromptBuilder } from '../src/ai/prompts.js';
 import { BrainV2 } from '../src/ai/v2/brain.js';
-import { lintPlan, phoneStyle, autoFix, scriptOf } from '../src/ai/v2/lint.js';
+import { lintPlan, phoneStyle, autoFix, scriptOf, splitInTwo } from '../src/ai/v2/lint.js';
 import { CHATTINESS_SHIFT, decide, roomShift, threshold } from '../src/ai/v2/policy.js';
 import { actualAfter, pickReplayCuts } from '../src/ai/v2/replay.js';
 import {
   botTargets, botTics, callbackKeywords, dynamics, formatDecisionFeedback, formatDynamics, formatGroupLaughs, formatTargets, formatTaste, formatTics,
-  groupLaughs, ignoredStreak, laughCounts, landedLines, participation, reception, seriousHit, styleStats, type MsgRow,
+  formatBits, formatTakes, groupLaughs, ignoredStreak, laughCounts, landedLines, ownTakes, participation, reception, runningBits, seriousHit,
+  styleStats, type MsgRow,
 } from '../src/ai/v2/signals.js';
 import type { GateV2Out } from '../src/ai/v2/schemas.js';
 
@@ -231,6 +232,61 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
   assert.equal(actualAfter([r('bot', '😂', 10, { is_bot: 1, type: 'reaction' })], T, Infinity), 'reacted 😂');
 }
 
+// ---- round 3: running bits, own takes, natural quoting, burst split ----
+{
+  const DAY = 86_400_000;
+  const T = 1_800_000_000_000;
+  const m = (who: string, text: string, day: number, extra: Partial<MsgRow> = {}): MsgRow =>
+    ({ sender_jid: who, sender_name: who, text, type: 'text', is_bot: 0, is_owner: 0, ts: T + day * DAY, ...extra });
+  const hist = [
+    m('Murad', 'bro is cooked fr', 0), m('Kanan', 'kanan is cooked lol', 0), m('Aysel', 'madrid bro is cooked', 1),
+    m('Kanan', 'ok bro is cooked', 2),
+    m('Murad', 'the goat again', 1), m('Kanan', 'the goat again', 2), m('Aysel', 'messi the goat again', 3),
+    m('Murad', 'pizza tonight', 0), m('Murad', 'pizza tonight', 1), m('Murad', 'pizza tonight', 2), // one person only: not a group bit
+    m('Kanan', 'forceai is cooked', 1), m('Aysel', 'forceai is cooked', 2), m('Murad', 'forceai is cooked', 3), // about the bot: skipped
+    m('bot', 'bro is cooked', 2, { is_bot: 1 }),
+  ];
+  const bits = runningBits(hist, 'ForceAI');
+  const phrases = bits.map(b => b.phrase);
+  assert.deepEqual(phrases.sort(), ['bro is cooked', 'goat again'], phrases.join(' / '));
+  assert.ok(!phrases.includes('pizza tonight'), 'one person repeating is not a group bit');
+  assert.ok(!phrases.some(p => p.includes('forceai')), 'bits about the bot are skipped');
+  const cooked = bits.find(b => b.phrase === 'bro is cooked')!;
+  assert.deepEqual([cooked.people.length, cooked.days, cooked.uses], [3, 3, 3]);
+  assert.ok(formatBits(bits, T + 3 * DAY)!.includes("THIS GROUP'S OWN PHRASES"));
+  assert.ok(formatBits([{ phrase: 'old bit', people: ['a', 'b'], uses: 4, days: 2, lastTs: T }], T + 9 * DAY)!.includes('cooling off'));
+  assert.equal(formatBits([]), null);
+
+  const strip = (t: string) => t.replace(/^🤖 /, '');
+  const now = T + 3 * DAY;
+  const takes = ownTakes([
+    m('bot', '🤖 madrid wins 2-1 tonight, trust me', 1, { is_bot: 1 }), m('bot', '🤖 lol', 2, { is_bot: 1 }),
+    m('bot', '🤖 haaland is overrated', 2, { is_bot: 1 }), m('bot', '🤖 calling it: kanan will be late', 3, { is_bot: 1, ts: now - 5 * 60_000 }),
+    m('bot', '🤖 barca will win the league', -10, { is_bot: 1 }),
+  ], strip, now);
+  assert.deepEqual(takes.map(x => x.text), ['madrid wins 2-1 tonight, trust me', 'haaland is overrated'], 'takes only, not the last 30 min, not older than a week');
+  assert.ok(formatTakes(takes, now)!.includes('2 days ago: "madrid wins 2-1'));
+
+  // quote-replies: dropped only when the group rarely quotes and it is the newest message
+  const qctx = { recentBotTexts: [], recentHumanTexts: [], medianLen: 20, marker, newestShortId: 'm9' };
+  assert.equal(lintPlan([{ type: 'reply', text: 'nah he is done', target_message_id: 'm9' }], { ...qctx, replyShare: 0.05 }).actions[0].type, 'message');
+  assert.equal(lintPlan([{ type: 'reply', text: 'nah he is done', target_message_id: 'm9' }], { ...qctx, replyShare: 0.4 }).actions[0].type, 'reply', 'this group quotes a lot');
+  assert.equal(lintPlan([{ type: 'reply', text: 'nah he is done', target_message_id: 'm4' }], { ...qctx, replyShare: 0.05 }).actions[0].type, 'reply', 'an older message still needs the quote');
+  assert.ok(styleStats([...chat, row('a', 'x', { quoted_id: 'q' })])!.replyShare > 0);
+
+  // bursts: one longer two-sentence text becomes two short ones
+  assert.deepEqual(splitInTwo('nah he was offside by a mile. the ref needs glasses honestly', 50), ['nah he was offside by a mile.', 'the ref needs glasses honestly']);
+  assert.equal(splitInTwo('one short line', 50), null);
+  assert.equal(splitInTwo('one long sentence without any break that goes on and on and on', 50), null);
+  assert.equal(splitInTwo('ok. this one is long enough to split but the first half is tiny', 50), null);
+  const bctx = { recentBotTexts: [], recentHumanTexts: [], medianLen: 20, marker, burstiness: 1.8, p80Len: 30, lowercaseShare: 0.9 };
+  const burst = lintPlan([{ type: 'reply', text: 'Nah he was offside by a mile. The ref needs glasses honestly', target_message_id: 'm4' }], bctx);
+  assert.deepEqual(burst.actions, [{ type: 'reply', text: 'nah he was offside by a mile', target_message_id: 'm4' }, { type: 'message', text: 'the ref needs glasses honestly' }]);
+  assert.ok(burst.split);
+  assert.equal(lintPlan([{ type: 'message', text: 'Nah he was offside by a mile. The ref needs glasses honestly' }], { ...bctx, burstiness: 1.1 }).actions.length, 1, 'one-message group: stays one');
+  assert.equal(lintPlan([{ type: 'message', text: 'nah he was offside by a mile. the ref needs glasses honestly' }, { type: 'message', text: 'lol' }], bctx).actions.length, 2, 'already two texts: no split');
+}
+
 // ---- brain on a throwaway DB with a fake client ----
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forceai-v2-'));
 const db = openDb(path.join(dir, 'forceai.db'));
@@ -269,6 +325,11 @@ const fakeAi: any = {
 const prompts = new PromptBuilder(repo);
 const brain = new BrainV2(fakeAi, repo, prompts);
 
+// older days: a phrase two people keep using, and one of the bot's own takes
+const old = (id: string, who: string, name: string, text: string, daysAgo: number, isBot = false) => repo.insertMessage({ id, shortId: id, chatJid: G, senderJid: who,
+  senderName: name, fromMe: isBot, isBot, isOwner: false, type: 'text', text, mentionedJids: [], ts: Date.now() - daysAgo * 86_400_000, raw: {} } as any);
+old('o1', 'a@s', 'Murad', 'kanan tax again', 3); old('o2', 'b@s', 'Kanan', 'no kanan tax today', 2); old('o3', 'a@s', 'Murad', 'pay the kanan tax', 1);
+old('o4', 'x@s', 'ForceAI', '🤖 madrid wins 2-1 sunday, trust me', 2, true);
 const g = await brain.gate(G, Date.now() - 60_000, false);
 assert.ok(g && g.policy.decision === 'IGNORE' && g.policy.saveThought);
 assert.ok(brain.hasThought(G), 'good idea at a bad moment is kept for the pause');
@@ -299,11 +360,14 @@ const userText = typeof genReq.messages[0].content === 'string' ? genReq.message
 assert.ok(userText.includes('SCENE RIGHT NOW: football'), 'scene from the gatekeeper reaches the generator');
 assert.ok(userText.includes('HOW THIS CHAT TEXTS RIGHT NOW'), 'style numbers');
 assert.ok(userText.includes('OLDER MOMENTS'), 'callback candidates found');
+assert.ok(!userText.includes('you: 🤖'), 'callbacks show the bot lines without its marker');
 assert.ok(userText.includes('A THOUGHT YOU HAD A MOMENT AGO'), 'saved thought offered');
+assert.ok(userText.includes('"kanan tax": Murad, Kanan, 3 times over 3 days'), 'running bits reach the generator');
+assert.ok(userText.includes('2 days ago: "madrid wins 2-1 sunday, trust me"'), 'own takes reach the generator, marker stripped');
 assert.ok(userText.includes("YOUR OWNER'S TASTE") && userText.includes('- "madrid fans in shambles 💀"'), 'owner taste reaches the generator, marker stripped');
 assert.ok(genReq.system[0].text.includes('HOW A REAL FRIEND TEXTS'), 'v2 craft block in the system prompt');
 assert.ok(!genReq.system[0].text.includes('great question'), 'no banned phrase planted in the prompt');
-assert.deepEqual(res.plan.actions.map(a => a.type), ['reply', 'reaction']);
+assert.deepEqual(res.plan.actions.map(a => a.type), ['message', 'reaction'], 'nobody quotes here and m60 is the newest: plain message');
 assert.equal((res.plan.actions[0] as any).text, 'kanan said that last season too');
 assert.ok(res.plan.note.includes('angle: callback') && res.plan.note.includes('rewrote 1'));
 

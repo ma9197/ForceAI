@@ -14,7 +14,7 @@ import { CriticSchema, GateV2Schema, PlanV2Schema, RewriteSchema, type GateV2Out
 import {
   botTargets, botTics, callbackKeywords, dynamics, formatDecisionFeedback, formatCallbacks, formatDynamics, formatGroupLaughs, formatLanded,
   formatParticipation, formatStyleStats, formatTargets, formatTaste, formatTics, groupLaughs, landedLines, participation, reception,
-  stripMarker, styleStats, type Dynamics, type MsgRow,
+  formatBits, formatTakes, ownTakes, runningBits, stripMarker, styleStats, type Bit, type Dynamics, type MsgRow, type StyleStats,
 } from './signals.js';
 
 export interface GateV2Result {
@@ -57,6 +57,7 @@ export class BrainV2 {
   private scenes = new Map<string, GateV2Out['scene']>();
   private thoughts = new Map<string, SavedThought>();
   private contextCache = new Map<string, { text: string; version: number; at: number }>();
+  private bitsCache = new Map<string, { bits: Bit[]; at: number }>();
 
   constructor(private ai: AiClient, private repo: Repo, private prompts: PromptBuilder) {}
 
@@ -100,11 +101,13 @@ export class BrainV2 {
       .slice(0, 15).map(i => `- ${i.content}`).join('\n');
     const summary = this.repo.getSummary(chatJid)?.summary;
     const calls = formatDecisionFeedback(this.repo.getDecisionFeedback(BRAIN_V2.DECISION_EXAMPLES));
+    const phrases = formatBits(this.bits(chatJid).slice(0, 4));
     const text = [
       `PEOPLE IN THIS CHAT:\n${who || '(nobody known yet)'}`,
       protectedPeople ? `PROTECTED PEOPLE (owner's absolute boundaries; never plan a joke that crosses them):\n${protectedPeople}` : '',
       bits ? `RUNNING JOKES AND REFERENCES OF THIS GROUP:\n${bits}` : '',
       summary ? `WHAT HAS BEEN GOING ON LATELY:\n${summary}` : '',
+      phrases ?? '',
       calls ?? '',
     ].filter(Boolean).join('\n\n');
     this.contextCache.set(chatJid, { text, version: this.prompts.memoryVersion, at: Date.now() });
@@ -167,8 +170,18 @@ export class BrainV2 {
     }
   }
 
+  /** The group's running phrases over the last days (a heavier query, so cached per group). */
+  private bits(chatJid: string): Bit[] {
+    const cached = this.bitsCache.get(chatJid);
+    if (cached && Date.now() - cached.at < BRAIN_V2.BITS_CACHE_MS) return cached.bits;
+    const rows = this.repo.getTextMessagesSince(chatJid, Date.now() - BRAIN_V2.BITS_DAYS * 86_400_000, BRAIN_V2.BITS_MAX_ROWS, false) as MsgRow[];
+    const bits = runningBits(rows, BOT_NAME);
+    this.bitsCache.set(chatJid, { bits, at: Date.now() });
+    return bits;
+  }
+
   /** The measured context block for the generator: scene, style numbers, own tics, share, callbacks. */
-  private signalsBlock(chatJid: string, rows: MsgRow[], consumedUpToTs: number | null): { text: string; medianLen: number; lowercaseShare: number; botTexts: string[]; humanTexts: string[]; dyn: Dynamics } {
+  private signalsBlock(chatJid: string, rows: MsgRow[], consumedUpToTs: number | null): { text: string; medianLen: number; lowercaseShare: number; botTexts: string[]; humanTexts: string[]; dyn: Dynamics; style: StyleStats | null } {
     const marker = this.marker();
     const history = this.repo.getRecentMessages(chatJid, BRAIN_V2.SIGNAL_LINES) as MsgRow[];
     const botTexts = history.filter(r => r.is_bot && r.type === 'text').map(r => stripMarker(r.text ?? '', marker.prefix, marker.suffix));
@@ -181,7 +194,8 @@ export class BrainV2 {
 
     const newRows = consumedUpToTs === null ? rows.slice(-6) : rows.filter(r => r.ts > consumedUpToTs);
     const oldest = rows.length ? rows[0].ts : Date.now();
-    const callbacks = formatCallbacks(this.repo.searchOlderMessages(chatJid, oldest, callbackKeywords(newRows), BRAIN_V2.CALLBACKS) as MsgRow[]);
+    const callbacks = formatCallbacks((this.repo.searchOlderMessages(chatJid, oldest, callbackKeywords(newRows), BRAIN_V2.CALLBACKS) as MsgRow[])
+      .map(r => (r.is_bot ? { ...r, text: stripMarker(r.text ?? '', marker.prefix, marker.suffix) } : r)));
 
     const parts = [
       scene ? `SCENE RIGHT NOW: ${scene.topic}. ${scene.threads}. vibe: ${scene.vibe}.${scene.running_bit ? ` running bit: ${scene.running_bit}${scene.bit_played_out ? ' (played out, let it go)' : ''}.` : ''}` : '',
@@ -197,8 +211,10 @@ export class BrainV2 {
       formatTargets(botTargets(history.filter(r => r.is_bot).slice(-BRAIN_V2.TARGET_WINDOW), this.repo.getMembersForChat(chatJid).map(m => m.display_name ?? '').filter(Boolean), id => this.repo.getMessageById(id)?.sender_name ?? null)) ?? '',
       formatParticipation(part),
       callbacks ?? '',
+      formatBits(this.bits(chatJid)) ?? '',
+      formatTakes(ownTakes(this.repo.getTextMessagesSince(chatJid, Date.now() - 7 * 86_400_000, 200, true) as MsgRow[], t => stripMarker(t, marker.prefix, marker.suffix))) ?? '',
     ].filter(Boolean);
-    return { text: parts.join('\n\n'), medianLen: style?.medianLen ?? 0, lowercaseShare: style?.lowercaseShare ?? 0, botTexts, humanTexts, dyn };
+    return { text: parts.join('\n\n'), medianLen: style?.medianLen ?? 0, lowercaseShare: style?.lowercaseShare ?? 0, botTexts, humanTexts, dyn, style };
   }
 
   /** T2: read, consider angles, write; then lint and (only if needed) one cheap rewrite. */
@@ -266,6 +282,10 @@ export class BrainV2 {
         medianLen: signals.medianLen, lowercaseShare: signals.lowercaseShare, serious, marker: this.marker(),
         textOf: (id: string) => (this.repo.getMessageByShortId(id)?.text as string | undefined) ?? null,
         lastHumanTexts: rows.filter(r => !r.is_bot && r.type === 'text').map(r => r.text ?? ''),
+        replyShare: signals.style?.replyShare,
+        newestShortId: rows.filter(r => r.type !== 'reaction').slice(-1)[0]?.short_id ?? null,
+        burstiness: signals.style?.burstiness,
+        p80Len: signals.style?.p80Len,
       };
       let lint = lintPlan(actions, { ...lintCtx, recentBotTexts: signals.botTexts.slice(-30), recentHumanTexts: signals.humanTexts.slice(-40) });
       let rewritten = 0;
@@ -295,6 +315,7 @@ export class BrainV2 {
         out.read.sincere ? 'sincere moment' : '',
         lint.dropped.length ? `dropped ${lint.dropped.length}` : '',
         rewritten ? `rewrote ${rewritten}` : '',
+        lint.split ? 'split in 2' : '',
         vetoed ? `second opinion said skip: ${vetoed}` : '',
       ].filter(Boolean).join(' | ');
       return { plan: { actions, note }, out, lint, rewritten, vetoed };
