@@ -94,7 +94,7 @@ export class Arbiter {
     this.shadowInFlight += 1;
     void this.brainV2.gate(this.chatJid, consumedUpToTs, forceDecide, { dryRun: true, shadow: true }).then(async res => {
       // shut down meanwhile (e.g. a fresh start): log nothing; paused or switched away: not this mode's row
-      if (this.suspended || this.paused || this.repo.getBrainMode(this.chatJid) !== 'shadow') return;
+      if (this.suspended || this.paused || this.superIdle || this.repo.getBrainMode(this.chatJid) !== 'shadow') return;
       if (!res) { this.decision('S1v2', 'FAILED', 'thinking stage failed or unparseable'); return; }
       const { out, policy } = res;
       const room = policy.room?.length ? ` (${policy.room.join(', ')})` : '';
@@ -110,7 +110,7 @@ export class Arbiter {
         chatJid: this.chatJid, consumedUpToTs, addressIds: out.address_message_ids, gatekeeperReason: out.reason,
         thought: out.thought?.text ?? null, thoughtWhen: 'now', unprompted: !out.addressed, dryRun: true, shadow: true,
       });
-      if (this.suspended || this.paused || this.repo.getBrainMode(this.chatJid) !== 'shadow') return; // shut down, paused or switched meanwhile
+      if (this.suspended || this.paused || this.superIdle || this.repo.getBrainMode(this.chatJid) !== 'shadow') return; // shut down, paused, asleep or switched meanwhile
       if (!gen) { this.decision('S2v2', 'WOULD_SKIP', 'the reply writer failed'); return; }
       const actions = gen.plan.actions.filter(a => a.type !== 'nothing');
       const says = actions.some(a => a.type === 'message' || a.type === 'reply' || a.type === 'voice');

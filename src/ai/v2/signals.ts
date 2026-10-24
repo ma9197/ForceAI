@@ -339,7 +339,7 @@ export function landedLines(rows: MsgRow[], strip: (t: string) => string, max = 
 export function groupLaughs(rows: MsgRow[], max = 4): { who: string; text: string; laughs: number }[] {
   const laughs = laughCounts(rows);
   return rows.filter(r => !r.is_bot && r.type === 'text' && r.id && !pureLaugh(r.text ?? ''))
-    .map(r => ({ who: r.sender_name ?? '?', text: (r.text ?? '').trim(), laughs: laughs.get(r.id!) ?? 0 }))
+    .map(r => ({ who: r.is_owner ? 'Said (owner)' : r.sender_name ?? '?', text: (r.text ?? '').trim(), laughs: laughs.get(r.id!) ?? 0 }))
     .filter(x => x.laughs >= 2 && x.text.length >= 4)
     .sort((a, b) => b.laughs - a.laughs)
     .slice(0, max);
@@ -455,9 +455,12 @@ export function dynamics(rows: MsgRow[], botName: string, now = Date.now()): Dyn
   const humans = rows.filter(r => !r.is_bot && r.type !== 'reaction');
   const recentText = humans.filter(r => r.type === 'text' && now - r.ts < 3 * 60_000);
   const mentionsBot = (r: MsgRow) => (r.text ?? '').toLowerCase().includes(bot) || (!!r.quoted_id && rows.some(x => x.id === r.quoted_id && x.is_bot));
+  // the owner's messages are stored as "You": label them like the transcript does ("you" is the bot in ROOM NOW)
+  const label = (r: MsgRow | undefined) => (r?.is_owner ? 'Said (owner)' : r?.sender_name ?? '?');
 
   // two people trading messages: last 6 texts from exactly two people, switching at least 3 times
   let privatePair: Dynamics['privatePair'] = null;
+  let pairJids: string[] = [];
   const last6 = recentText.slice(-6);
   const lastRow = rows.filter(r => r.type !== 'reaction').slice(-1)[0];
   if (last6.length >= 5 && !last6.some(mentionsBot) && lastRow && !lastRow.is_bot) {
@@ -465,8 +468,9 @@ export function dynamics(rows: MsgRow[], botName: string, now = Date.now()): Dyn
     let switches = 0;
     for (let i = 1; i < last6.length; i++) if (last6[i].sender_jid !== last6[i - 1].sender_jid) switches += 1;
     if (people.length === 2 && switches >= 3) {
-      const name = (jid: string | null | undefined) => last6.find(r => r.sender_jid === jid)?.sender_name ?? '?';
+      const name = (jid: string | null | undefined) => label(last6.find(r => r.sender_jid === jid));
       privatePair = [name(people[0]), name(people[1])];
+      pairJids = people.map(j => j ?? '');
     }
   }
 
@@ -480,7 +484,7 @@ export function dynamics(rows: MsgRow[], botName: string, now = Date.now()): Dyn
       if (tail[i].sender_jid !== lastHuman.sender_jid || tail[i + 1].ts - tail[i].ts > 40_000) break;
       run += 1;
     }
-    if (run >= 3 && !mentionsBot(lastHuman)) storyteller = lastHuman.sender_name ?? '?';
+    if (run >= 3 && !mentionsBot(lastHuman)) storyteller = label(lastHuman);
   }
 
   // a question to the group: ends in "?", not a reply, not from the owner, nobody else spoke since
@@ -496,9 +500,11 @@ export function dynamics(rows: MsgRow[], botName: string, now = Date.now()): Dyn
       break;
     }
     // answered by someone else or the bot, or taken back by the asker ("nvm found it", "забей", "boş ver")
-    const takenBack = (t: string) => RETRACT.test(t.trim()) || RETRACT.test(t.trim().toLocaleLowerCase('tr'));
+    const takenBack = (t: string) => RETRACT.test(t.trim()) || RETRACT.test(t.trim().toLocaleLowerCase('tr')) || jkText(t);
     const answered = recent.slice(i + 1).some(r => r.sender_jid !== q.sender_jid || takenBack(r.text ?? '')) || rows.some(r => r.is_bot && r.ts > q.ts);
-    if (!answered && q.short_id) hangingQuestion = { shortId: q.short_id, who: q.sender_name ?? '?' };
+    // asked inside a private back-and-forth ("can u send me the slides?"): to the other person, not the group
+    const inPair = !!privatePair && pairJids.includes(q.sender_jid ?? '');
+    if (!answered && !inPair && q.short_id) hangingQuestion = { shortId: q.short_id, who: label(q) };
     break;
   }
 
@@ -506,7 +512,7 @@ export function dynamics(rows: MsgRow[], botName: string, now = Date.now()): Dyn
   let serious: Dynamics['serious'] = null;
   for (const r of recent.slice(-8)) {
     const word = r.type === 'text' ? seriousHit(r.text ?? '') : null;
-    if (word && r.short_id) serious = { shortId: r.short_id, word, who: r.sender_name ?? '?' };
+    if (word && r.short_id) serious = { shortId: r.short_id, word, who: label(r) };
   }
 
   // people saying bye / goodnight (last 15 minutes): the newest human text is a goodbye, or two people
@@ -535,7 +541,8 @@ export function dynamics(rows: MsgRow[], botName: string, now = Date.now()): Dyn
   });
   const shouting = [...new Set(loud.map(r => (r.is_owner ? 'Said (owner)' : r.sender_name ?? '?')))];
   if (!serious && loud.length >= 3 && shouting.length >= 2) hype = shouting;
-  if (hype) privatePair = null; // two friends shouting at a goal together are not a private exchange
+  // two friends shouting at a goal are not a private exchange, and three shouts in a row are not a story
+  if (hype) { privatePair = null; storyteller = null; }
 
   return { privatePair, storyteller, hangingQuestion, serious, windingDown, rhetorical, hype };
 }
@@ -622,7 +629,7 @@ export function reception(rows: MsgRow[], botName: string, now = Date.now(), las
   const chat = rows.filter(r => r.type !== 'reaction');
   const out: Reception[] = [];
   // first names of the people here: "cringe" that names one of them is about them, not the bot's line
-  const people = new Set(rows.filter(r => !r.is_bot && r.sender_name).map(r => r.sender_name!.trim().split(/\s+/)[0].toLowerCase()).filter(n => n.length >= 3));
+  const people = new Set(rows.filter(r => !r.is_bot && !r.is_owner && r.sender_name).map(r => r.sender_name!.trim().split(/\s+/)[0].toLowerCase()).filter(n => n.length >= 3));
   const aimedElsewhere = (t: string) => {
     const w = t.toLowerCase().match(/\p{L}+/gu) ?? [];
     return w.length > 5 || w.some(x => people.has(x) || OTHER_PERSON.has(x));
@@ -642,7 +649,7 @@ export function reception(rows: MsgRow[], botName: string, now = Date.now(), las
     const atIt = (r: MsgRow, k: number) => r.quoted_id === b.id || (r.text ?? '').toLowerCase().includes(bot)
       || (k === 0 && !r.quoted_id && r.ts - b.ts <= 5 * 60_000 && !aimedElsewhere(r.text ?? ''));
     const booed = rows.some(r => r.type === 'reaction' && r.quoted_id === b.id && !r.is_bot && !r.is_owner && COLD_REACTION.test(r.text ?? ''))
-      || after.slice(0, 4).some((r, k) => atIt(r, k) && pushback(r.text ?? ''));
+      || after.slice(0, 4).some((r, k) => atIt(r, k) && pushback(r.text ?? '') && !jokingAfter(rows, r));
     if (booed) { out.push('booed'); continue; }
     const engaged = after.slice(0, 4).some(r => r.quoted_id === b.id || (r.text ?? '').toLowerCase().includes(bot))
       || rows.some(r => r.type === 'reaction' && r.quoted_id === b.id && !r.is_bot);
@@ -991,6 +998,17 @@ const JK_WORD = '(?:' + ['(?:jk)+', 'j/k', 'just kidding', 'just joking', "i['�
   ...['şaka', 'şaka lan', 'şaka yaptım', 'şaka yapıyorum', 'şaka yapıyom', 'şakaydı', 'zarafat', 'zarafat edirəm', 'zarafat eliyirəm', 'zarafatdı', 'zarafat idi', 'zarafat elədim'].map(loose)].join('|') + ')';
 const JK = new RegExp('^' + JK_PAD + '(' + JK_WORD + '(?:[\\s,]+' + JK_WORD + ')?)' + JK_PAD + '$', 'iu');
 
+/** The whole message is a "jk" (or "шучу", "zarafat edirəm"...). */
+function jkText(text: string): boolean {
+  const t = text.trim();
+  return JK.test(t) || JK.test(t.toLocaleLowerCase('tr'));
+}
+
+/** They said "jk" within 2 minutes after this message: it was not meant. */
+function jokingAfter(rows: MsgRow[], r: MsgRow): boolean {
+  return rows.some(x => x.sender_jid === r.sender_jid && x.ts > r.ts && x.ts - r.ts <= 2 * 60_000 && x.type === 'text' && jkText(x.text ?? ''));
+}
+
 /**
  * Taking a question back ("oh nvm found it", "ладно, забей", "boş ver", "neyse"), with at most a few words
  * after and a laugh or emoji at the end. "забей гол" is "score a goal", not "never mind".
@@ -1168,7 +1186,7 @@ export function teaseReception(rows: MsgRow[], names: string[]): TeaseTake[] {
     const theirs = after.filter(isTarget);
     const laughed = reacts.some(r => LAUGH_EMOJI.test(r.text ?? ''))
       || theirs.some(r => (r.quoted_id === b.id || theirs[0] === r) && LAUGH_TEXT.test(r.text ?? ''));
-    const pushed = reacts.some(r => COLD_REACTION.test(r.text ?? '')) || theirs.some(r => pushback(r.text ?? ''));
+    const pushed = reacts.some(r => COLD_REACTION.test(r.text ?? '')) || theirs.some(r => pushback(r.text ?? '') && !jokingAfter(rows, r));
     const p = people.get(tFirst) ?? { name: target, teased: 0, laughed: 0, pushedBack: 0 };
     p.teased += 1;
     if (pushed) p.pushedBack += 1;
@@ -1186,10 +1204,12 @@ export function formatTeasing(targets: { name: string; count: number }[], takes:
   const lines: string[] = [];
   const heavy = targets.filter(t => t.count >= min);
   if (heavy.length) lines.push(`- EASY ON: ${heavy.map(t => `${t.name} (in ${t.count} of your last ${window} messages)`).join(', ')}. Give them a break unless they start it.`);
+  const firstOf = (n: string) => n.trim().split(/\s+/)[0].toLowerCase();
+  const easyOn = new Set(heavy.map(h => firstOf(h.name)));
   for (const t of takes) {
     if (t.teased < 2) continue;
     if (t.pushedBack >= 1) lines.push(`- ${t.name} pushed back on ${t.pushedBack} of your ${t.teased} digs: keep it light with them`);
-    else if (t.laughed >= 2) lines.push(`- ${t.name} laughed at ${t.laughed} of your ${t.teased} digs: they enjoy it`);
+    else if (t.laughed >= 2 && !easyOn.has(firstOf(t.name))) lines.push(`- ${t.name} laughed at ${t.laughed} of your ${t.teased} digs: they enjoy it`); // EASY ON wins
   }
   return lines.length ? `TEASING (measured):\n${lines.join('\n')}` : null;
 }

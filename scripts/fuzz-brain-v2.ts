@@ -51,6 +51,7 @@ for (let round = 0; round < ROUNDS; round++) {
       quoted_id: rnd() < 0.3 && i > 0 ? `r${round}_${Math.floor(rnd() * i)}` : rnd() < 0.02 ? 'missing' : null,
       ts: T0 + i * Math.floor(rnd() * 90_000),
     });
+    if (rows[rows.length - 1].is_owner) rows[rows.length - 1].sender_name = 'You'; // how the owner's messages are stored
   }
   const now = T0 + n * 90_000;
   const strip = (t: string) => t.replace(/^🤖 /, '');

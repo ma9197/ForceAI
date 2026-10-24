@@ -33,7 +33,8 @@ export interface Room {
   rec?: Reception[];
 }
 
-const LAUGHING = /[😂🤣💀😭😹]/u;
+// alternation, not a class: "⚰️" carries U+FE0F. ⚰ is a laugh here ("dead"), never on bad news.
+const LAUGHING = /😂|🤣|💀|😭|😹|⚰/u;
 
 /** How the room moves the bar, with short notes for the live feed. */
 export function roomShift(room: Room): { delta: number; notes: string[] } {
@@ -126,7 +127,8 @@ export function decide(out: GateV2Out, p: Participation, forceDecide: boolean, s
       return { ...base, decision: 'IGNORE', saveThought, why: vibe === 'serious' ? 'no laughing reaction in a serious moment' : 'react without a target' };
     case 'IGNORE':
     default:
-      if (strong && m >= t + POLICY.UPGRADE_MARGIN && out.scores.timing >= 6) {
+      // never overruled where the room says hold back: bad news, people saying bye, pushback on its last line
+      if (strong && m >= t + POLICY.UPGRADE_MARGIN && out.scores.timing >= 6 && vibe !== 'serious' && !room.dyn?.windingDown && room.rec?.at(-1) !== 'booed') {
         return { ...base, decision: 'RESPOND', saveThought: false, why: 'thought too good to keep' };
       }
       return { ...base, decision: 'IGNORE', saveThought, why: 'nothing worth adding' };
