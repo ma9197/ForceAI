@@ -33,6 +33,8 @@ export interface GenerateV2Input extends GenerateInput {
   dryRun?: boolean;
   /** shadow mode: read the shadow's own scene (the live v2 scene does not exist in a v1 group) */
   shadow?: boolean;
+  /** replay: write as if it were this moment (the chat up to then only); implies a dry run */
+  untilTs?: number;
 }
 
 export interface GenerateV2Result {
@@ -202,25 +204,27 @@ export class BrainV2 {
   }
 
   /** The measured context block for the generator: scene, style numbers, own tics, share, callbacks. */
-  private signalsBlock(chatJid: string, rows: MsgRow[], consumedUpToTs: number | null, asked: boolean, shadow = false): { text: string; medianLen: number; lowercaseShare: number; botTexts: string[]; humanTexts: string[]; dyn: Dynamics; style: StyleStats | null; disliked: string[] } {
+  private signalsBlock(chatJid: string, rows: MsgRow[], consumedUpToTs: number | null, asked: boolean, shadow = false, untilTs?: number): { text: string; medianLen: number; lowercaseShare: number; botTexts: string[]; humanTexts: string[]; dyn: Dynamics; style: StyleStats | null; disliked: string[] } {
+    const replay = untilTs !== undefined;
+    const now = untilTs ?? Date.now();
     const marker = this.marker();
     const strip = (t: string) => stripMarker(t, marker.prefix, marker.suffix);
     const names = this.memberNames(chatJid);
     // the owner's 👎 lines: kept out of what it learns from, and close copies are blocked by the linter
     const disliked = this.repo.getFeedbackLines(chatJid, -1, BRAIN_V2.TASTE_LINES * 4).map(strip);
     const notDisliked = (t: string) => !disliked.includes(t);
-    const history = this.repo.getRecentMessages(chatJid, BRAIN_V2.SIGNAL_LINES) as MsgRow[];
+    const history = (replay ? this.repo.getRecentMessagesBefore(chatJid, now, BRAIN_V2.SIGNAL_LINES) : this.repo.getRecentMessages(chatJid, BRAIN_V2.SIGNAL_LINES)) as MsgRow[];
     const botTexts = history.filter(r => r.is_bot && r.type === 'text').map(r => stripMarker(r.text ?? '', marker.prefix, marker.suffix));
     const humanTexts = history.filter(r => !r.is_bot && r.type === 'text').map(r => r.text ?? '');
     const style = styleStats(history);
     const tics = botTics(botTexts.slice(-BRAIN_V2.TICS_WINDOW), names);
-    const part = participation(history);
-    const scene = shadow ? this.shadowScenes.get(chatJid) : this.scenes.get(chatJid);
-    const dyn = dynamics(rows, BOT_NAME);
+    const part = participation(history, now);
+    const scene = replay ? undefined : shadow ? this.shadowScenes.get(chatJid) : this.scenes.get(chatJid);
+    const dyn = dynamics(rows, BOT_NAME, now);
 
     const newRows = consumedUpToTs === null ? rows.slice(-6) : rows.filter(r => r.ts > consumedUpToTs);
     // callbacks come from before the transcript and at least an hour back (not the last few minutes)
-    const before = Math.min(rows.length ? rows[0].ts : Date.now(), Date.now() - 3_600_000);
+    const before = Math.min(rows.length ? rows[0].ts : now, now - 3_600_000);
     const callbacks = formatCallbacks((this.repo.searchOlderMessages(chatJid, before, callbackKeywords(newRows), BRAIN_V2.CALLBACKS) as MsgRow[])
       .map(r => (r.is_bot ? { ...r, text: strip(r.text ?? '') } : r))
       .filter(r => !r.is_bot || notDisliked(r.text ?? '')));
@@ -236,7 +240,7 @@ export class BrainV2 {
       scene ? `SCENE RIGHT NOW: ${scene.topic}. ${scene.threads}. vibe: ${scene.vibe}.${scene.running_bit ? ` running bit: ${scene.running_bit}${scene.bit_played_out ? ' (played out, let it go)' : ''}.` : ''}` : '',
       style ? formatStyleStats(style) : '',
       tics ? formatTics(tics) : '',
-      formatRoomNow({ dyn, part, asked, map: roomMap(rows, names, BOT_NAME), cues: ironyCues(history) }, 'writer') ?? '',
+      formatRoomNow({ dyn, part, asked, map: roomMap(rows, names, BOT_NAME, now), cues: ironyCues(history, now) }, 'writer') ?? '',
       formatTasteRules(readTasteRules(this.repo, chatJid)) ?? '',
       formatLinesThatWorked(
         this.repo.getFeedbackLines(chatJid, 1, BRAIN_V2.TASTE_LINES).map(strip),
@@ -247,19 +251,21 @@ export class BrainV2 {
       formatTargets(targets) ?? '',
       callbacks ?? '',
       formatBits(phrases) ?? '',
-      formatTakes(ownTakes(this.repo.getTextMessagesSince(chatJid, Date.now() - 7 * 86_400_000, 200, true) as MsgRow[], strip).filter(x => notDisliked(x.text))) ?? '',
+      formatTakes(ownTakes((this.repo.getTextMessagesSince(chatJid, now - 7 * 86_400_000, 200, true) as MsgRow[]).filter(r => r.ts <= now), strip, now).filter(x => notDisliked(x.text)), now) ?? '',
     ].filter(Boolean);
     return { text: parts.join('\n\n'), medianLen: style?.medianLen ?? 0, lowercaseShare: style?.lowercaseShare ?? 0, botTexts, humanTexts, dyn, style, disliked };
   }
 
   /** T2: read, consider angles, write; then lint and (only if needed) one cheap rewrite. */
   async generate(input: GenerateV2Input): Promise<GenerateV2Result | null> {
-    const rows = this.repo.getRecentMessages(input.chatJid, input.transcriptLines ?? ARBITER.TRANSCRIPT_LINES) as MsgRow[];
+    const replay = input.untilTs !== undefined;
+    const lines = input.transcriptLines ?? ARBITER.TRANSCRIPT_LINES;
+    const rows = (replay ? this.repo.getRecentMessagesBefore(input.chatJid, input.untilTs!, lines) : this.repo.getRecentMessages(input.chatJid, lines)) as MsgRow[];
     const transcript = this.prompts.formatTranscript(rows, input.consumedUpToTs);
     // someone talked to it (a mention, a reply, an owner instruction): it answers, no second opinion
     const asked = !input.unprompted || !!input.operatorInstruction;
     const tier = input.shadow ? 'shadow' as const : 't2' as const; // shadow lines are never sent: counted apart from real replies
-    const signals = this.signalsBlock(input.chatJid, rows, input.consumedUpToTs, asked, !!input.shadow);
+    const signals = this.signalsBlock(input.chatJid, rows, input.consumedUpToTs, asked, !!input.shadow, input.untilTs);
 
     const parts: string[] = [`Current group chat transcript:`, transcript || '(chat is empty so far)', signals.text];
     if (input.addressIds?.length) {
@@ -279,11 +285,12 @@ export class BrainV2 {
       parts.push(`<operator_instruction>${input.operatorInstruction}</operator_instruction>`);
       parts.push('(An operator instruction is present: you MUST act on it, EXCEPT where it would cross an ABSOLUTE PER-PERSON BOUNDARY from the control panel. Those always win, even over this. "nothing" is not an acceptable plan here.)');
     }
-    parts.push(`Read the room, pick your angle, then decide your actions.\n\n${formatClockLine(this.repo.getClockCities())}`);
+    parts.push(replay ? 'Read the room, pick your angle, then decide your actions.' : `Read the room, pick your angle, then decide your actions.\n\n${formatClockLine(this.repo.getClockCities())}`);
 
     const sinceTs = input.consumedUpToTs ?? Date.now() - 10 * 60_000;
     const imageBlocks: any[] = [];
-    for (const row of (this.repo.getRecentImageMessages(input.chatJid, sinceTs, VISION.MAX_IMAGES_PER_CALL) as any[]).reverse()) {
+    // a replay reads text only (images of that moment are not looked up again)
+    for (const row of (replay ? [] : this.repo.getRecentImageMessages(input.chatJid, sinceTs, VISION.MAX_IMAGES_PER_CALL) as any[]).reverse()) {
       try {
         const data = fs.readFileSync(row.media_path).toString('base64');
         imageBlocks.push({ type: 'text', text: `Image in message #${row.short_id}:` });
@@ -308,7 +315,7 @@ export class BrainV2 {
         return null;
       }
 
-      if (!input.dryRun) {
+      if (!input.dryRun && !replay) {
         const obs = out.observation;
         if (obs?.note?.trim() && obs.about_message_id) {
           const target = this.repo.getMessageByShortId(obs.about_message_id);

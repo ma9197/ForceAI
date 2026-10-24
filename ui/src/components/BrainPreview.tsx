@@ -17,7 +17,7 @@ interface Taste { rules: string[]; at: number | null; newRatings: number; every:
 /** Blind test: the two answers shown as A and B; `flip` = A is v2. Revealed after the owner picks. */
 interface Blind { flip: boolean; picked: 'A' | 'B' | 'tie' | null }
 
-interface ReplayPoint { ts: number; upTo: string; who: string; text: string; decision: string; why: string; urge: number; bar: number; thought: string | null; react: string | null; actual: string }
+interface ReplayPoint { ts: number; upTo: string; who: string; text: string; decision: string; why: string; urge: number; bar: number; thought: string | null; react: string | null; actual: string; lines?: string[] | null }
 type Replay = { error: string } | { points: ReplayPoint[]; hours: number };
 
 const DECISION_LABEL: Record<string, string> = {
@@ -150,7 +150,7 @@ export function BrainPreview({ jid, onClose }: { jid: string; onClose: () => voi
         <button disabled={busy} onClick={() => void run(true)} title="Both brains answer, shown as A and B without saying which is which. You pick the better one; the tally shows which brain wins. About 4 small AI calls.">
           {busy && blind ? 'Thinking…' : 'Blind test'}
         </button>
-        <button disabled={replaying} onClick={() => void runReplay()} title="What v2 would have done at a few moments of the last hours, next to what really happened. About 6 small AI calls. Nothing is sent.">
+        <button disabled={replaying} onClick={() => void runReplay()} title="What v2 would have done at a few moments of the last hours, next to what really happened, with the real line for up to 2 moments it would speak. About 6 small AI calls plus up to 2 reply calls. Nothing is sent.">
           {replaying ? 'Replaying…' : 'Replay last hours with v2'}
         </button>
       </div>
@@ -167,7 +167,7 @@ export function BrainPreview({ jid, onClose }: { jid: string; onClose: () => voi
                 <b>{DECISION_LABEL[p.decision] ?? p.decision}{p.react ? ` ${p.react}` : ''}</b>
                 {p.decision !== 'FAILED' && <span className="muted"> (urge {p.urge} vs bar {p.bar}; {p.why})</span>}
               </div>
-              {p.thought && <div>Thought: {p.thought}</div>}
+              {p.lines ? p.lines.map((l, i) => <div key={i}>{i === 0 ? 'Would say: ' : ''}<b>{l}</b></div>) : p.thought && <div>Thought: {p.thought}</div>}
               <div className="muted">Really: {p.actual}</div>
             </div>
           ))}

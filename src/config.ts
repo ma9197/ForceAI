@@ -145,6 +145,7 @@ export const BRAIN_V2 = {
   DECISION_EXAMPLES: 8,           // owner's latest calls on v2 decisions shown to the v2 gatekeeper
   REPLAY_HOURS: 3,                // dashboard replay: how far back it looks
   REPLAY_POINTS: 6,               // ...and at how many moments it asks v2 (one cheap call each)
+  REPLAY_LINES: 2,                // ...and for how many of the moments it would speak it also writes the line
   BITS_DAYS: 14,                  // running bits: phrases from this many days back...
   BITS_MAX_ROWS: 4000,            // ...at most this many human messages
   BITS_CACHE_MS: 30 * 60_000,     // recomputed at most every 30 minutes per group

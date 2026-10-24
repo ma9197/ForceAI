@@ -645,6 +645,16 @@ assert.ok(replayText.includes('#m50 ') && !replayText.includes('#m51 ') && !repl
 assert.ok(!replayText.includes('Your previous read of the scene'), 'no scene from the future');
 assert.equal(brain.lastScene(G), before, 'replay leaves the live state alone');
 assert.equal(brain.hasThought(G), false, 'replay saves no thought');
+// the writer in replay: the chat as it was at the cut, no current scene or clock, nothing saved
+calls.length = 0;
+const obsBefore = (db.prepare('SELECT COUNT(*) AS n FROM member_observations').get() as any).n;
+genAnswer = { ...genAnswer, actions: [{ type: 'message', text: 'that was a weird pass' }], observation: { note: 'Murad seems tired', about_message_id: 'm50' } };
+const rgen = await brain.generate({ chatJid: G, consumedUpToTs: cutRow.ts - 30_000, addressIds: ['m50'], unprompted: true, untilTs: cutRow.ts });
+assert.ok(rgen);
+const rtext = calls[0].messages[0].content as string;
+assert.ok(rtext.includes('#m50 ') && !rtext.includes('#m51 ') && !rtext.includes('madrid will win the league watch'), 'nothing after the cut');
+assert.ok(!rtext.includes('SCENE RIGHT NOW') && !rtext.includes('Time now'), 'no scene or clock from today');
+assert.equal((db.prepare('SELECT COUNT(*) AS n FROM member_observations').get() as any).n, obsBefore, 'a replay saves no observation');
 
 // a saved thought belongs to its moment: kept while someone is mid-story, let go on a new read, dropped on bad news
 const saveOne = () => { gateAnswer = () => gate({ decision: 'IGNORE', s: { timing: 3 } }); };
