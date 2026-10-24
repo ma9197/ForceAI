@@ -602,3 +602,4 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent2); }
 .rate-btn { cursor: pointer; filter: grayscale(1); }
 .rate-btn.on, .rate-btn:hover { filter: none; }
 .decision-row:hover .rate { opacity: 1; }
+.brain-failed { color: var(--danger); }

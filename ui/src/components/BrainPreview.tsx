@@ -12,6 +12,7 @@ interface Ab { v1: number; v2: number; tie: number }
 interface Stats {
   spoke: number; unprompted: number; pauses: number; reacted: number; quiet: number; vetoed: number; rewrites: number; chattiness?: string;
   shadow?: { spoke: number; reacted: number; quiet: number; waited: number; wrote?: number }; v1Spoke?: number; ab?: Ab;
+  failed?: number; fallbacks?: number;
 }
 interface Taste { rules: string[]; at: number | null; newRatings: number; every: number }
 /** Blind test: the two answers shown as A and B; `flip` = A is v2. Revealed after the owner picks. */
@@ -102,6 +103,12 @@ export function BrainPreview({ jid, onClose }: { jid: string; onClose: () => voi
         <span className="muted">What v1 and v2 would send right now to the latest messages. Nothing is sent. About 4 small AI calls.</span>
         <span className="gclose" onClick={onClose}>✕</span>
       </div>
+      {stats && ((stats.failed ?? 0) > 0 || (stats.fallbacks ?? 0) > 0) && (
+        <div className="hint brain-failed">
+          v2 calls failed {stats.failed ?? 0} times in the last 24 hours{stats.fallbacks ? `, and this group fell back to v1 ${stats.fallbacks} times` : ''}.
+          Look for FAILED or SILENT rows in the feed. v1 answered anyone who asked.
+        </div>
+      )}
       {stats && (stats.spoke + stats.reacted + stats.quiet + stats.pauses) > 0 && (
         <div className="hint">
           v2 in this group, last 24 hours: spoke {stats.spoke} times ({stats.unprompted} unprompted, {stats.pauses} at a pause),
