@@ -80,10 +80,10 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     return { ok: true };
   });
 
-  // brain version per group: v1 (default) or v2 (opt-in). Demo: harmless, it only flips a config key.
+  // brain per group: v1 (default), shadow (v1 acts, v2 thinks along and logs), or v2 (opt-in). Demo: harmless config flip.
   fastify.post<{ Body: { jid?: string; version?: string } }>('/api/brain', async (req, reply) => {
     const { jid, version } = req.body ?? {};
-    if (!jid || (version !== 'v1' && version !== 'v2')) return reply.code(400).send({ error: 'jid and version (v1|v2) required' });
+    if (!jid || (version !== 'v1' && version !== 'v2' && version !== 'shadow')) return reply.code(400).send({ error: 'jid and version (v1, shadow or v2) required' });
     app.setBrainVersion(jid, version);
     return { ok: true };
   });
@@ -92,7 +92,15 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
   fastify.get<{ Querystring: { jid?: string } }>('/api/brain/stats', async (req, reply) => {
     const jid = req.query.jid;
     if (!jid) return reply.code(400).send({ error: 'jid required' });
-    return { ...app.repo.brainV2Stats(jid, Date.now() - 24 * 3_600_000), chattiness: app.repo.getConfig(`v2_chattiness_${jid}`) ?? 'default' };
+    return { ...app.repo.brainV2Stats(jid, Date.now() - 24 * 3_600_000), chattiness: app.repo.getConfig(`v2_chattiness_${jid}`) ?? 'default', ab: app.repo.getBrainAb(jid) };
+  });
+
+  // blind A/B test result from the Compare panel (the owner picked without knowing which brain was which)
+  fastify.post<{ Body: { jid?: string; winner?: string } }>('/api/brain/ab', async (req, reply) => {
+    const { jid, winner } = req.body ?? {};
+    if (!jid || (winner !== 'v1' && winner !== 'v2' && winner !== 'tie')) return reply.code(400).send({ error: 'jid and winner (v1, v2 or tie) required' });
+    app.repo.addBrainAb(jid, winner);
+    return { ok: true, ab: app.repo.getBrainAb(jid) };
   });
 
   // brain v2 chattiness for one group ('default' = follow Settings). Demo: harmless config flip.
@@ -466,7 +474,7 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     const decisions = app.repo.getRecentDecisions(limit, jid);
     const mentions = app.repo.getMentionNameMap();
     const ratings = app.repo.getFeedbackRatings(messages.filter(r => r.is_bot).map(r => r.id));
-    const verdicts = app.repo.getDecisionVerdicts(decisions.filter(d => d.tier === 'T1v2').map(d => d.id));
+    const verdicts = app.repo.getDecisionVerdicts(decisions.filter(d => d.tier === 'T1v2' || d.tier === 'S1v2').map(d => d.id));
     return {
       messages: messages.map(r => ({
         id: r.id, shortId: r.short_id, senderName: r.sender_name, isBot: !!r.is_bot,

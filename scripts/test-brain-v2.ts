@@ -521,6 +521,17 @@ assert.ok(!dislikedText.includes('madrid wins 2-1 sunday, trust me'), 'a dislike
 assert.deepEqual(disliked!.plan.actions, []);
 assert.equal(disliked!.lint.dropped.length, 1, 'blocked (here as its own recent line; the 👎 path is unit-tested above)');
 
+// shadow decisions can be rated and are counted; blind A/B tally
+const sd = repo.insertDecision(G, 'S1v2', 'RESPOND', 'banter | strong thought | urge 7 vs bar 6.5 | thought: x');
+repo.insertDecision(G, 'S1v2', 'IGNORE', 'r | nothing worth adding | urge 3 vs bar 6.5');
+repo.insertDecision(G, 'T2', 'SEND', 'v1 reply');
+assert.equal(repo.setDecisionFeedback(sd, 'good'), true, 'shadow calls teach the gatekeeper too');
+const sst = repo.brainV2Stats(G, 0);
+assert.deepEqual([sst.shadow.spoke, sst.shadow.quiet, sst.v1Sent], [1, 1, 2], 'v1Sent includes the T2 SEND logged earlier in this test');
+repo.addBrainAb(G, 'v2'); repo.addBrainAb(G, 'v2'); repo.addBrainAb(G, 'tie');
+assert.deepEqual(repo.getBrainAb(G), { v1: 0, v2: 2, tie: 1 });
+assert.deepEqual(repo.getBrainAb('other@g.us'), { v1: 0, v2: 0, tie: 0 });
+
 // per-group chattiness beats the global setting; "default" follows it
 repo.setConfig('v2_chattiness', 'chatty');
 assert.equal(repo.getV2Chattiness(G), 'chatty');

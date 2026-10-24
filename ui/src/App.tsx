@@ -178,11 +178,12 @@ export default function App() {
             <span className="phase-chip">{selected.phase}</span>
             <select
               className="brain-select"
-              value={selected.brain ?? 'v1'}
-              title="Which brain answers in this group. v1 = the proven one. v2 = the upgraded beta."
+              value={selected.brain_mode ?? selected.brain ?? 'v1'}
+              title="Which brain answers in this group. v1 = the proven one. v1 + v2 shadow = v1 answers, v2 only thinks along and the feed shows what it would have done. v2 = the upgraded beta."
               onChange={e => post('/api/brain', { jid: selected.jid, version: e.target.value })}
             >
               <option value="v1">Brain v1</option>
+              <option value="shadow">v1 + v2 shadow (watch only)</option>
               <option value="v2">Brain v2 (beta)</option>
             </select>
             {selected.brain === 'v2' && selected.brain_fallback_until && selected.brain_fallback_until > Date.now() && (
@@ -243,6 +244,7 @@ export default function App() {
                   <span className="gstate" />
                   <span className="gname">{g.name ?? g.jid.split('@')[0]}</span>
                   {g.brain === 'v2' && <span className="gbrain" title="This group uses brain v2 (beta)">v2</span>}
+                  {g.brain_mode === 'shadow' && <span className="gbrain" title="v1 answers here; brain v2 thinks along in shadow">v2 👀</span>}
                   {g.paused ? <span className="gpaused">⏸</span> : g.asleep ? <span className="gpaused">💤</span> : null}
                   <span className="gclose" title="Unlink group" onClick={(ev) => { ev.stopPropagation(); void unlink(g.jid); }}>✕</span>
                 </div>

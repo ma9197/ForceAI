@@ -8,7 +8,13 @@ type Preview =
     v2: { gate: string; thought: string | null; scene: string | null; read: string | null; angles: string[]; actions: string[]; fixes: string[] };
   };
 
-interface Stats { spoke: number; unprompted: number; pauses: number; reacted: number; quiet: number; vetoed: number; rewrites: number; chattiness?: string }
+interface Ab { v1: number; v2: number; tie: number }
+interface Stats {
+  spoke: number; unprompted: number; pauses: number; reacted: number; quiet: number; vetoed: number; rewrites: number; chattiness?: string;
+  shadow?: { spoke: number; reacted: number; quiet: number; waited: number }; v1Sent?: number; ab?: Ab;
+}
+/** Blind test: the two answers shown as A and B; `flip` = A is v2. Revealed after the owner picks. */
+interface Blind { flip: boolean; picked: 'A' | 'B' | 'tie' | null }
 
 interface ReplayPoint { ts: number; upTo: string; who: string; text: string; decision: string; why: string; urge: number; bar: number; thought: string | null; react: string | null; actual: string }
 type Replay = { error: string } | { points: ReplayPoint[]; hours: number };
@@ -25,6 +31,7 @@ export function BrainPreview({ jid, onClose }: { jid: string; onClose: () => voi
   const [replay, setReplay] = useState<Replay | null>(null);
   const [replaying, setReplaying] = useState(false);
   const [chattiness, setChattiness] = useState('default');
+  const [blind, setBlind] = useState<Blind | null>(null);
 
   useEffect(() => {
     api<Stats>(`/api/brain/stats?jid=${encodeURIComponent(jid)}`).then(s => {
@@ -51,8 +58,9 @@ export function BrainPreview({ jid, onClose }: { jid: string; onClose: () => voi
     }
   };
 
-  const run = async () => {
+  const run = async (blindTest = false) => {
     setBusy(true);
+    setBlind(blindTest ? { flip: Math.random() < 0.5, picked: null } : null);
     try {
       const res = await api<Preview & { demo?: boolean }>('/api/brain/preview', { method: 'POST', body: JSON.stringify({ jid }) });
       setData(res.demo ? { error: 'Not available in the demo.' } : res);
@@ -85,8 +93,20 @@ export function BrainPreview({ jid, onClose }: { jid: string; onClose: () => voi
           <option value="chatty">Chatty</option>
         </select>
       </label>
+      {stats?.shadow && (stats.shadow.spoke + stats.shadow.reacted + stats.shadow.quiet + stats.shadow.waited) > 0 && (
+        <div className="hint">
+          v2 shadow, last 24 hours: would have spoken {stats.shadow.spoke} times, reacted {stats.shadow.reacted}, stayed quiet {stats.shadow.quiet}.
+          v1 really sent {stats.v1Sent ?? 0} replies.
+        </div>
+      )}
+      {stats?.ab && (stats.ab.v1 + stats.ab.v2 + stats.ab.tie) > 0 && (
+        <div className="hint">Blind tests in this group: v2 won {stats.ab.v2}, v1 won {stats.ab.v1}, same {stats.ab.tie}.</div>
+      )}
       <div className="brain-buttons">
-        <button className="primary" disabled={busy} onClick={() => void run()}>{busy ? 'Thinking…' : data ? 'Run again' : 'Run comparison'}</button>
+        <button className="primary" disabled={busy} onClick={() => void run()}>{busy && !blind ? 'Thinking…' : data && !blind ? 'Run again' : 'Run comparison'}</button>
+        <button disabled={busy} onClick={() => void run(true)} title="Both brains answer, shown as A and B without saying which is which. You pick the better one; the tally shows which brain wins. About 4 small AI calls.">
+          {busy && blind ? 'Thinking…' : 'Blind test'}
+        </button>
         <button disabled={replaying} onClick={() => void runReplay()} title="What v2 would have done at a few moments of the last hours, next to what really happened. About 6 small AI calls. Nothing is sent.">
           {replaying ? 'Replaying…' : 'Replay last hours with v2'}
         </button>
@@ -111,7 +131,40 @@ export function BrainPreview({ jid, onClose }: { jid: string; onClose: () => voi
         </div>
       )}
       {data && 'error' in data && <div className="hint" style={{ color: 'var(--danger)' }}>✗ {data.error}</div>}
-      {data && !('error' in data) && (
+      {data && !('error' in data) && blind && blind.picked === null && (
+        <div className="brain-replay">
+          <div className="brain-title">Which would you rather see in the chat?</div>
+          <div className="brain-cols">
+            {(['A', 'B'] as const).map(side => {
+              const v2side = (side === 'A') === blind.flip;
+              const lines = v2side ? data.v2.actions : data.v1.actions;
+              return (
+                <div key={side} className="brain-col">
+                  <div className="brain-title">Option {side}</div>
+                  {lines.map((a, i) => <div key={i} className="brain-msg">{a}</div>)}
+                </div>
+              );
+            })}
+          </div>
+          <div className="brain-ab-pick">
+            {(['A', 'B', 'tie'] as const).map(pick => (
+              <button key={pick} onClick={() => {
+                const winner = pick === 'tie' ? 'tie' : (pick === 'A') === blind.flip ? 'v2' : 'v1';
+                setBlind({ ...blind, picked: pick });
+                void api<{ ok: boolean; ab?: Ab }>('/api/brain/ab', { method: 'POST', body: JSON.stringify({ jid, winner }) })
+                  .then(res => { if (res.ab && stats) setStats({ ...stats, ab: res.ab }); })
+                  .catch(() => undefined);
+              }}>{pick === 'tie' ? 'Same' : `${pick} is better`}</button>
+            ))}
+          </div>
+        </div>
+      )}
+      {data && !('error' in data) && blind && blind.picked !== null && (
+        <div className="hint">
+          You picked {blind.picked === 'tie' ? 'same' : `${blind.picked} (= brain ${(blind.picked === 'A') === blind.flip ? 'v2' : 'v1'})`}. A was brain {blind.flip ? 'v2' : 'v1'}.
+        </div>
+      )}
+      {data && !('error' in data) && (!blind || blind.picked !== null) && (
         <div className="brain-cols">
           <div className="brain-col">
             <div className="brain-title">Brain v1</div>

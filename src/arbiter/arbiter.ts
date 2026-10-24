@@ -73,6 +73,23 @@ export class Arbiter {
   }
 
   /** This group answers with brain v2 (opt-in per group in the dashboard; v1 is the default). */
+  /**
+   * Shadow mode (v1 + v2 shadow): v1 acts as always; brain v2's thinking stage runs alongside on the
+   * same messages as a dry run and logs what it WOULD have done (tier S1v2). Never awaited, never sends,
+   * never touches the buffer or v2's saved state, so v1's timing and behavior are unchanged.
+   */
+  private shadowV2(forceDecide: boolean): void {
+    if (!this.brainV2 || this.repo.getBrainMode(this.chatJid) !== 'shadow' || this.ai.isOverBudget()) return;
+    void this.brainV2.gate(this.chatJid, this.consumedUpToTs, forceDecide, { dryRun: true }).then(res => {
+      if (!res) return;
+      const { out, policy } = res;
+      const room = policy.room?.length ? ` (${policy.room.join(', ')})` : '';
+      const thought = out.thought ? ` | thought: ${out.thought.text.slice(0, 90)}` : '';
+      const react = policy.decision === 'REACT' && out.react ? ` ${out.react.emoji}` : '';
+      this.decision('S1v2', policy.decision, `${out.reason}${react} | ${policy.why} | urge ${policy.motivation} vs bar ${policy.threshold}${room}${thought}`);
+    }).catch(err => logger.warn({ err }, 'brain v2 shadow call failed'));
+  }
+
   /** When v2 is on but failing, until when this group runs on v1 (null = not falling back). */
   get v2FallbackUntilTs(): number | null {
     return this.v2FallbackUntil > Date.now() ? this.v2FallbackUntil : null;
@@ -353,6 +370,7 @@ export class Arbiter {
         return;
       }
       const sinceBot = this.lastBotActionTs ? (Date.now() - this.lastBotActionTs) / 1000 : null;
+      this.shadowV2(forceDecide); // v1 + v2 shadow groups only; runs alongside, never awaited
       const gate = await this.gatekeeper.decide(this.chatJid, this.consumedUpToTs, sinceBot, forceDecide);
       this.decision('T1', gate.decision, gate.reason);
 

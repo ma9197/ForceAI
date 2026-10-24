@@ -23,7 +23,7 @@ const WIPE_TABLES = [
   'facts', 'group_summary',
   'member_reports', 'member_stat_history', 'member_stat_locks', 'member_observations', 'member_ignored', 'members',
   'influence_lessons', 'initiative_principles',
-  'messages', 'bot_messages', 'decisions', 'poll_votes', 'bot_feedback', 'decision_feedback',
+  'messages', 'bot_messages', 'decisions', 'poll_votes', 'bot_feedback', 'decision_feedback', 'brain_ab',
 ] as const;
 /** Untouched; counted so the log proves it. (config is kept too, minus the keys handled below.) */
 const KEEP_TABLES = ['stickers', 'stats', 'lid_pn_map', 'config'] as const;

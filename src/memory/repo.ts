@@ -22,8 +22,26 @@ export class Repo {
     return this.getConfig(`brain_v2_${chatJid}`) === '1' ? 'v2' : 'v1';
   }
 
-  setBrainVersion(chatJid: string, version: 'v1' | 'v2'): void {
-    this.setConfig(`brain_v2_${chatJid}`, version === 'v2' ? '1' : '0');
+  /** v1 + v2 shadow: v1 acts, brain v2 only thinks along (dry run) and logs what it would have done. */
+  getBrainMode(chatJid: string): 'v1' | 'shadow' | 'v2' {
+    const v = this.getConfig(`brain_v2_${chatJid}`);
+    return v === '1' ? 'v2' : v === 'shadow' ? 'shadow' : 'v1';
+  }
+
+  setBrainVersion(chatJid: string, mode: 'v1' | 'v2' | 'shadow'): void {
+    this.setConfig(`brain_v2_${chatJid}`, mode === 'v2' ? '1' : mode === 'shadow' ? 'shadow' : '0');
+  }
+
+  /** Blind A/B test in the Compare panel: which brain's lines the owner picked (without knowing which was which). */
+  addBrainAb(chatJid: string, winner: 'v1' | 'v2' | 'tie'): void {
+    this.db.prepare('INSERT INTO brain_ab(chat_jid, winner, ts) VALUES(?, ?, ?)').run(chatJid, winner, Date.now());
+  }
+
+  getBrainAb(chatJid: string): { v1: number; v2: number; tie: number } {
+    const rows = this.db.prepare('SELECT winner, COUNT(*) AS n FROM brain_ab WHERE chat_jid = ? GROUP BY winner').all(chatJid) as { winner: string; n: number }[];
+    const out = { v1: 0, v2: 0, tie: 0 };
+    for (const r of rows) if (r.winner in out) out[r.winner as 'v1' | 'v2' | 'tie'] = r.n;
+    return out;
   }
 
   /** Brain v2 chattiness: this group's own setting if set, else the global one (Settings), else balanced. */
@@ -802,10 +820,24 @@ export class Repo {
   }
 
   /** Brain v2 scoreboard for one group since `sinceTs`: how often it spoke, unprompted, reacted, kept quiet. */
-  brainV2Stats(chatJid: string, sinceTs: number): { spoke: number; unprompted: number; pauses: number; reacted: number; quiet: number; vetoed: number; rewrites: number } {
-    const rows = this.db.prepare("SELECT tier, decision, reason FROM decisions WHERE chat_jid = ? AND ts >= ? AND tier IN ('T1v2', 'T2v2')").all(chatJid, sinceTs) as { tier: string; decision: string; reason: string }[];
-    const s = { spoke: 0, unprompted: 0, pauses: 0, reacted: 0, quiet: 0, vetoed: 0, rewrites: 0 };
+  brainV2Stats(chatJid: string, sinceTs: number): {
+    spoke: number; unprompted: number; pauses: number; reacted: number; quiet: number; vetoed: number; rewrites: number;
+    shadow: { spoke: number; reacted: number; quiet: number; waited: number }; v1Sent: number;
+  } {
+    const rows = this.db.prepare("SELECT tier, decision, reason FROM decisions WHERE chat_jid = ? AND ts >= ? AND tier IN ('T1v2', 'T2v2', 'S1v2', 'T2')").all(chatJid, sinceTs) as { tier: string; decision: string; reason: string }[];
+    const s = { spoke: 0, unprompted: 0, pauses: 0, reacted: 0, quiet: 0, vetoed: 0, rewrites: 0, shadow: { spoke: 0, reacted: 0, quiet: 0, waited: 0 }, v1Sent: 0 };
     for (const r of rows) {
+      if (r.tier === 'S1v2') {
+        if (r.decision === 'RESPOND') s.shadow.spoke += 1;
+        else if (r.decision === 'REACT') s.shadow.reacted += 1;
+        else if (r.decision === 'WAIT') s.shadow.waited += 1;
+        else s.shadow.quiet += 1;
+        continue;
+      }
+      if (r.tier === 'T2') {
+        if (r.decision === 'SEND') s.v1Sent += 1;
+        continue;
+      }
       if (r.tier === 'T1v2') {
         if (r.decision === 'RESPOND') {
           s.spoke += 1;
@@ -825,7 +857,7 @@ export class Repo {
   setDecisionFeedback(decisionId: number, verdict: 'good' | 'bad' | null): boolean {
     const d = this.db.prepare('SELECT id, chat_jid, tier, decision, reason FROM decisions WHERE id = ?').get(decisionId) as
       { id: number; chat_jid: string; tier: string; decision: string; reason: string } | undefined;
-    if (!d || d.tier !== 'T1v2') return false;
+    if (!d || (d.tier !== 'T1v2' && d.tier !== 'S1v2')) return false;
     if (verdict === null) {
       this.db.prepare('DELETE FROM decision_feedback WHERE decision_id = ?').run(decisionId);
     } else {
