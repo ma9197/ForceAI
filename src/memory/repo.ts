@@ -313,8 +313,8 @@ export class Repo {
     if (ids.length === 0) return [];
     return this.db.prepare(
       `SELECT id, short_id, sender_jid, sender_name, text, type, is_bot, is_owner, quoted_id, ts FROM messages
-       WHERE chat_jid = ? AND ts <= ? AND quoted_id IN (${ids.map(() => '?').join(',')})`,
-    ).all(chatJid, untilTs, ...ids) as any[];
+       WHERE quoted_id IN (${ids.map(() => '?').join(',')}) AND +chat_jid = ? AND +ts <= ?`, // "+": use the quoted_id index, never scan the whole chat
+    ).all(...ids, chatJid, untilTs) as any[];
   }
 
   getMessagesBetween(chatJid: string, fromTs: number, toTs: number): any[] {

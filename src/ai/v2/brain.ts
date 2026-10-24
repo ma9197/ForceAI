@@ -240,7 +240,7 @@ export class BrainV2 {
   }
 
   /** The measured context block for the generator: scene, style numbers, own tics, share, callbacks. */
-  private signalsBlock(chatJid: string, rows: MsgRow[], consumedUpToTs: number | null, asked: boolean, shadow = false, untilTs?: number, sceneNow?: GateV2Out['scene']): { text: string; medianLen: number; lowercaseShare: number; botTexts: string[]; humanTexts: string[]; dyn: Dynamics; style: StyleStats | null; disliked: string[] } {
+  private signalsBlock(chatJid: string, rows: MsgRow[], consumedUpToTs: number | null, asked: boolean, shadow = false, untilTs?: number, sceneNow?: GateV2Out['scene']): { text: string; medianLen: number; lowercaseShare: number; botTexts: string[]; humanTexts: string[]; dyn: Dynamics; style: StyleStats | null; disliked: string[]; callbackTexts: string[] } {
     const replay = untilTs !== undefined;
     const now = untilTs ?? Date.now();
     const marker = this.marker();
@@ -264,9 +264,11 @@ export class BrainV2 {
     // three times the candidates, so the moments that got laughs back then can rise to the top
     const cands = this.repo.searchOlderMessages(chatJid, before, callbackKeywords(newRows), BRAIN_V2.CALLBACKS * 3) as (MsgRow & { hits: number })[];
     const replies = this.repo.getRepliesTo(chatJid, cands.flatMap(c => (c.id ? [c.id] : [])), now) as MsgRow[]; // a replay never sees later laughs
-    const callbacks = formatCallbacks(rankCallbacks(cands, replies, BRAIN_V2.CALLBACKS)
+    const shownCallbacks = rankCallbacks(cands, replies, BRAIN_V2.CALLBACKS)
       .map(r => (r.is_bot ? { ...r, text: strip(r.text ?? '') } : r))
-      .filter(r => !r.is_bot || notDisliked(r.text ?? '')));
+      .filter(r => !r.is_bot || notDisliked(r.text ?? ''));
+    const callbacks = formatCallbacks(shownCallbacks);
+    const callbackTexts = shownCallbacks.map(r => r.text ?? '');
 
     const targets = botTargets(history.filter(r => r.is_bot).slice(-BRAIN_V2.TARGET_WINDOW), names, id => this.repo.getMessageById(id)?.sender_name ?? null);
     const easyOn = targets.filter(t => t.count >= BRAIN_V2.TARGET_MIN).map(t => t.name);
@@ -292,7 +294,7 @@ export class BrainV2 {
       formatBits(phrases, now) ?? '',
       formatTakes(ownTakes((this.repo.getTextMessagesSince(chatJid, now - 7 * 86_400_000, 200, true) as MsgRow[]).filter(r => r.ts <= now), strip, now).filter(x => notDisliked(x.text)), now) ?? '',
     ].filter(Boolean);
-    return { text: parts.join('\n\n'), medianLen: style?.medianLen ?? 0, lowercaseShare: style?.lowercaseShare ?? 0, botTexts, humanTexts, dyn, style, disliked };
+    return { text: parts.join('\n\n'), medianLen: style?.medianLen ?? 0, lowercaseShare: style?.lowercaseShare ?? 0, botTexts, humanTexts, dyn, style, disliked, callbackTexts };
   }
 
   /** T2: read, consider angles, write; then lint and (only if needed) one cheap rewrite. */
@@ -377,6 +379,7 @@ export class BrainV2 {
         burstiness: signals.style?.burstiness,
         p80Len: signals.style?.p80Len,
         laughEndShare: laughEndShare(signals.humanTexts.slice(-40)),
+        callbackTexts: signals.callbackTexts,
         // only for a jump-in: someone who asked gets a real answer, and an argument or bad news is not hype
         hype: !!signals.dyn.hype && !asked && !serious && out.read.vibe !== 'heated',
       };

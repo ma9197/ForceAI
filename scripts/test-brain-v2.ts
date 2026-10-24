@@ -71,6 +71,11 @@ assert.equal(kw[0], 'madrid');
   assert.deepEqual(top.map(x => [x.id, x.laughs]), [['c2', 2]], 'the one that landed');
   assert.deepEqual(rankCallbacks([plain, landedOne, weak], laughs, 2).map(x => x.id), ['c2', 'c1'], 'a laughed 1-word match does not beat a real match; chat order');
   assert.ok(formatCallbacks(top)!.includes('madrid fans crying in the rain (got laughs from 2)'));
+  // review: on a list with gaps a laugh is only counted when it quotes the line (no "laughed right after")
+  // (the search does not return quoted_id, so a candidate laughing at someone else looks like a laugh "right after")
+  const late = c('c4', 'kanan is late again', 2, 2000);
+  const laughCand = { ...c('c5', 'kanan 😂😂', 1, 2030), sender_jid: 'e', sender_name: 'Rashad' };
+  assert.deepEqual(rankCallbacks([late, laughCand], [], 2).map(x => [x.id, x.laughs]), [['c4', 0], ['c5', 0]]);
 }
 
 const bot1 = row('bot', '🤖 kanan predicted 3-0 and got 0-3', { is_bot: 1, id: 'b1' });
@@ -192,6 +197,12 @@ assert.equal(lintPlan([{ type: 'message', text: 'not bad, but he still missed th
   assert.ok(tells('what do you think? 👀').includes('keep the chat going') && tells('thoughts? 🤔').includes('keep the chat going'), 'emoji after the "?"');
   for (const t of ["what do y'all think?", 'wdyt?', 'ne düşünüyorsunuz?', 'sizce?', 'siz nə fikirləşirsiz?', 'nə deyirsiz?', 'kak dumaete?']) assert.ok(tells(t).includes('keep the chat going'), t);
   assert.equal(tells('rent-free in his head', ['he lives rent free there']), '', 'same phrase, other spelling');
+  // round 25: a callback copied word for word is a repeat (dropped when nobody asked, rewritten when asked)
+  const old = 'madrid fans crying in the rain again';
+  const cb = (text: string, unprompted: boolean) => lintPlan([{ type: 'message', text }], { recentBotTexts: [], recentHumanTexts: [], medianLen: 20, marker, unprompted, callbackTexts: [old] });
+  assert.equal(cb('Madrid fans crying in the rain again!', true).actions.length, 0);
+  assert.ok(cb('madrid fans crying in the rain again', false).issues.some(i => i.problem.includes('old line from this chat word for word')));
+  assert.equal(cb('rain check for madrid fans again lol', true).actions.length, 1, 'a callback in new words is fine');
   assert.ok(tells('chef’s kiss').includes('stock AI joke'), 'curly apostrophe');
 }
 // round 18: Azerbaijani or Turkish (models drift from Azerbaijani into Turkish), typed with or without the letters
@@ -804,6 +815,8 @@ assert.ok(userText.includes('OLDER MOMENTS'), 'callback candidates found');
   assert.equal(repo.getRepliesTo(G, ['cb1']).length, 1);
   assert.equal(repo.getRepliesTo(G, ['cb1'], 4_000).length, 0, 'not after the replayed moment');
   assert.equal(repo.getRepliesTo('other@g.us', ['cb1']).length, 0, 'groups never share memory');
+  const plan = (db.prepare("EXPLAIN QUERY PLAN SELECT id FROM messages WHERE quoted_id IN (?) AND +chat_jid = ? AND +ts <= ?").all('cb1', G, 9e15) as any[]).map(r => r.detail).join(' ');
+  assert.ok(plan.includes('idx_msg_quoted'), `uses the quoted_id index, never a chat scan: ${plan}`);
 }
 assert.ok(!userText.includes('you: 🤖'), 'callbacks show the bot lines without its marker');
 assert.ok(userText.includes('A THOUGHT YOU HAD A MOMENT AGO'), 'saved thought offered');
