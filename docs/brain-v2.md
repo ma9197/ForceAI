@@ -100,7 +100,7 @@ Note: the research agent could only open GitHub and Anthropic pages directly; mo
 - Scoreboard: `Repo.brainV2Stats`, `GET /api/brain/stats`.
 - Replay: `App.replayV2`, `POST /api/brain/replay`. Per-group chattiness: `Repo.getV2Chattiness`, `POST /api/brain/chattiness`.
 - Owner feedback: `POST /api/feedback` (👍 / 👎 on lines), `POST /api/decision-feedback` (👍 / 👎 on decisions).
-- Tests: `scripts/test-brain-v2.ts`, `scripts/test-arbiter-v2.ts`, `scripts/test-brain-v2-e2e.ts` (real arbiter + real v2 brain, fake API). v1 parity: `scripts/v1-request-dump.ts`.
+- Tests: `scripts/test-brain-v2.ts`, `scripts/test-arbiter-v2.ts`, `scripts/test-brain-v2-e2e.ts` (real arbiter + real v2 brain, fake API), `scripts/fuzz-brain-v2.ts [rounds] [seed]` (3000 random rounds passed; slowest call 57 ms, the cached bits table). v1 parity: `scripts/v1-request-dump.ts`.
 - Safety net: `Arbiter.v2Result` (`BRAIN_V2.FALLBACK_AFTER`, `FALLBACK_MS`).
 
 ## Testing plan for the owner
