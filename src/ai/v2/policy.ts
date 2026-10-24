@@ -51,6 +51,10 @@ export function roomShift(room: Room): { delta: number; notes: string[] } {
   const coldDelta = Math.max(booed ? POLICY.BOOED : 0, cold >= 2 ? Math.min(POLICY.IGNORED_MAX, POLICY.IGNORED_STEP * (cold - 1)) : 0);
   if (coldDelta > 0) add(coldDelta, booed ? 'pushback on last line' : rec.slice(-cold).includes('booed') ? `${cold} landed cold` : `${cold} ignored`);
   else if ((room.rec ?? []).filter(r => r === 'laughed').length >= 2) add(POLICY.LAUGHED, 'landing');
+  // facts that change how to speak, not the bar: listed so the owner sees what v2 noticed (feed, replay)
+  if (room.dyn?.serious) notes.push('bad news');
+  if (room.dyn?.rhetorical) notes.push('rhetorical question');
+  if (room.dyn?.hype) notes.push('hype');
   return { delta: Math.round(delta * 10) / 10, notes };
 }
 
