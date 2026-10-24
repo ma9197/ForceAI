@@ -152,6 +152,7 @@ export const BRAIN_V2 = {
   FALLBACK_MS: 30 * 60_000,       // ...and the group runs on v1 for this long
   TASTE_EVERY: 8,                 // learning loop: new owner ratings in a group before house rules are relearned
   TASTE_LEARN_LINES: 20,          // latest liked / disliked lines and decision calls it learns from (each)
+  TASTE_RETRY_MS: 30 * 60_000,    // after a failed learn, no automatic retry for this long
 } as const;
 
 // ---- Outbound humanization ----

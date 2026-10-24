@@ -1,10 +1,10 @@
 import { z } from 'zod';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
-import { BOT_NAME, BRAIN_V2 } from '../../config.js';
+import { BOT_NAME, BRAIN_V2, DEFAULT_MSG_PREFIX, DEFAULT_MSG_SUFFIX } from '../../config.js';
 import { logger } from '../../logger.js';
 import type { Repo } from '../../memory/repo.js';
 import type { AiClient } from '../client.js';
-import { parseDecisionLine } from './signals.js';
+import { parseDecisionLine, stripMarker } from './signals.js';
 
 /**
  * Brain v2 learning loop: the owner's 👍 / 👎 on lines and decisions in a group are distilled into a
@@ -35,6 +35,8 @@ export interface TasteState {
 
 export class TasteLearner {
   private running = new Set<string>();
+  /** bumped by clear(): a learn that started before a clear must not write its rules back */
+  private generation = new Map<string, number>();
 
   constructor(private repo: Repo, private ai: AiClient, private onLearned: (chatJid: string, rules: string[]) => void) {}
 
@@ -52,13 +54,19 @@ export class TasteLearner {
     return { rules: this.rules(chatJid), at, newRatings: this.repo.countRatingsSince(chatJid, at ?? 0), every: BRAIN_V2.TASTE_EVERY };
   }
 
-  /** After a rating: learn when enough new ones piled up (only where v2 runs or shadows). */
+  /**
+   * After a rating: learn when enough new ones piled up (only where v2 runs or shadows). After a failed
+   * learn it waits TASTE_RETRY_MS, so a broken call is not retried (and paid for) on every rating.
+   */
   maybeAuto(chatJid: string): void {
-    if (this.repo.getBrainMode(chatJid) === 'v1') return;
+    if (this.repo.getBrainMode(chatJid) === 'v1' || this.running.has(chatJid)) return;
+    const failedAt = Number(this.repo.getConfig(`v2_taste_fail_${chatJid}`) ?? 0);
+    if (Date.now() - failedAt < BRAIN_V2.TASTE_RETRY_MS) return;
     if (this.state(chatJid).newRatings >= BRAIN_V2.TASTE_EVERY) void this.run(chatJid);
   }
 
   clear(chatJid: string): void {
+    this.generation.set(chatJid, (this.generation.get(chatJid) ?? 0) + 1);
     this.repo.setConfig(`v2_taste_rules_${chatJid}`, '[]');
     this.repo.setConfig(`v2_taste_at_${chatJid}`, String(Date.now()));
     this.onLearned(chatJid, []);
@@ -73,16 +81,21 @@ export class TasteLearner {
     if (liked.length + disliked.length + calls.length === 0) return { status: 'empty', rules: this.rules(chatJid) };
     this.running.add(chatJid);
     const startedAt = Date.now();
+    const gen = this.generation.get(chatJid) ?? 0;
+    const prefix = this.repo.getConfig('msg_prefix') ?? DEFAULT_MSG_PREFIX;
+    const suffix = this.repo.getConfig('msg_suffix') ?? DEFAULT_MSG_SUFFIX;
+    const strip = (t: string) => stripMarker(t, prefix, suffix);
+    const WHAT: Record<string, string> = { IGNORE: 'stay quiet', REACT: 'react', WAIT: 'wait for them to finish', PAUSE: 'offer a saved thought at a pause', RESPOND: 'speak' };
     try {
       const current = this.rules(chatJid);
       const decisions = calls.map(c => {
         const { reason, thought } = parseDecisionLine(c.reason);
-        return `- ${c.verdict === 'good' ? 'RIGHT' : 'WRONG'} to ${c.decision === 'IGNORE' ? 'stay quiet' : c.decision === 'REACT' ? 'react' : 'speak'}: ${reason}${thought ? ` (its idea: ${thought})` : ''}`.slice(0, 220);
+        return `- ${c.verdict === 'good' ? 'RIGHT' : 'WRONG'} to ${WHAT[c.decision] ?? 'speak'}: ${reason}${thought ? ` (its idea: ${thought})` : ''}`.slice(0, 220);
       });
       const content = [
         `CURRENT HOUSE RULES:\n${current.length ? current.map(r => `- ${r}`).join('\n') : '(none yet)'}`,
-        `LINES THE OWNER LIKED:\n${liked.length ? liked.map(t => `- ${t.slice(0, 160)}`).join('\n') : '(none)'}`,
-        `LINES THE OWNER DISLIKED:\n${disliked.length ? disliked.map(t => `- ${t.slice(0, 160)}`).join('\n') : '(none)'}`,
+        `LINES THE OWNER LIKED:\n${liked.length ? liked.map(t => `- ${strip(t).slice(0, 160)}`).join('\n') : '(none)'}`,
+        `LINES THE OWNER DISLIKED:\n${disliked.length ? disliked.map(t => `- ${strip(t).slice(0, 160)}`).join('\n') : '(none)'}`,
         `DECISIONS THE OWNER JUDGED:\n${decisions.length ? decisions.join('\n') : '(none)'}`,
       ].join('\n\n');
       const model = this.ai.gatekeeperModel;
@@ -95,7 +108,12 @@ export class TasteLearner {
         output_config: { format: zodOutputFormat(TasteSchema), ...(effort ? { effort } : {}) },
       });
       this.ai.recordUsage(model, response.usage, 'taste', chatJid);
-      if (!response.parsed_output) return { status: 'error', rules: current };
+      if (!response.parsed_output) {
+        this.repo.setConfig(`v2_taste_fail_${chatJid}`, String(Date.now()));
+        return { status: 'error', rules: current };
+      }
+      // the owner cleared the rules while this was running: their clear wins
+      if ((this.generation.get(chatJid) ?? 0) !== gen) return { status: 'ok', rules: this.rules(chatJid) };
       const rules = response.parsed_output.rules.map(r => r.trim()).filter(Boolean).slice(0, 6);
       this.repo.setConfig(`v2_taste_rules_${chatJid}`, JSON.stringify(rules));
       this.repo.setConfig(`v2_taste_at_${chatJid}`, String(startedAt));
@@ -104,6 +122,7 @@ export class TasteLearner {
       return { status: 'ok', rules };
     } catch (err) {
       logger.warn({ err }, 'brain v2 taste learning failed');
+      this.repo.setConfig(`v2_taste_fail_${chatJid}`, String(Date.now()));
       return { status: 'error', rules: this.rules(chatJid) };
     } finally {
       this.running.delete(chatJid);
@@ -123,5 +142,5 @@ export function readTasteRules(repo: Repo, chatJid: string): string[] {
 
 export function formatTasteRules(rules: string[]): string | null {
   if (rules.length === 0) return null;
-  return `YOUR OWNER'S HOUSE RULES FOR THIS GROUP (learned from their ratings; follow them):\n${rules.map(r => `- ${r}`).join('\n')}`;
+  return `YOUR OWNER'S HOUSE RULES FOR THIS GROUP (learned from their ratings; follow them, but their boundaries and usage dials still win):\n${rules.map(r => `- ${r}`).join('\n')}`;
 }
