@@ -7,7 +7,7 @@ import type { ActionPlan, BotAction } from '../../types.js';
 import type { AiClient } from '../client.js';
 import type { GenerateInput } from '../generator.js';
 import type { PromptBuilder } from '../prompts.js';
-import { lintPlan, type LintResult } from './lint.js';
+import { laughEndShare, lintPlan, type LintResult } from './lint.js';
 import { CHATTINESS_SHIFT, decide, type PolicyResult } from './policy.js';
 import { CRITIC_SYSTEM, GATEKEEPER_V2_SYSTEM, REWRITE_SYSTEM } from './prompts.js';
 import { formatTasteRules, readTasteRules } from './taste.js';
@@ -373,6 +373,7 @@ export class BrainV2 {
         newestShortId: rows.filter(r => r.type !== 'reaction').slice(-1)[0]?.short_id ?? null,
         burstiness: signals.style?.burstiness,
         p80Len: signals.style?.p80Len,
+        laughEndShare: laughEndShare(signals.humanTexts.slice(-40)),
       };
       let lint = lintPlan(actions, { ...lintCtx, recentBotTexts: signals.botTexts.slice(-30), recentHumanTexts: signals.humanTexts.slice(-40) });
       let rewritten = 0;

@@ -25,7 +25,32 @@ const AI_TELLS: { re: RegExp; label: string }[] = [
   { re: /\b(it'?s|it is|this is|that'?s|that is) not (about |just |only )?[^.!?]{1,30}?,\s*(it'?s|it is|this is|that'?s|that is)\b/i, label: '"it is not X, it is Y" template' },
   { re: /;/, label: 'semicolon (nobody texts with semicolons)' },
   { re: /^(haha|lol|lmao)[ ,.!]+(true|fair|facts|exactly|so true)\b/i, label: 'stock opener' },
+  { re: /^ah+,?\s+(the|yes)\b/i, label: 'stock opener "ah, the..."' },
+  // ending on a question to the room just to keep the chat going: an assistant habit, not a friend's
+  {
+    re: new RegExp('(?<!\\p{L})(?:' + [
+      'what do you (?:guys |all )?think', 'thoughts', "who'?s with me", 'am i right', 'anyone else', 'agree or disagree', 'right guys', 'change my mind',
+      'а вы как думаете', 'что думаете', 'как думаете', 'кто со мной', 'согласны',
+      'siz n[əe] d[üu][şs][üu]n[üu]rs[üu]n[üu]z', 'n[əe] fikirl[əe][şs]irsiniz', 'siz ne d[üu][şs][üu]n[üu]yorsunuz', 'ne dersiniz', 'kat[ıi]l[ıi]yor musunuz',
+    ].join('|') + ')\\s*\\?+\\s*$', 'iu'),
+    label: 'ends on a question to the room just to keep the chat going (end where the thought ends)',
+  },
 ];
+
+/** Joke phrases language models lean on; flagged unless this group uses them itself. */
+const STOCK_JOKES = /(?<!\p{L})(?:plot twist|the audacity|rent[- ]free|understood the assignment|chef'?s kiss|main character energy)(?!\p{L})/iu;
+
+/** A laugh at the end of a message ("lol", "hahaha", "ахах", 😂): how often the group ends its own lines with one. */
+const LAUGH_END = /(?:(?<!\p{L})(?:lol|lmao|lmfao|a?(?:ha){2,}h*|(?:ah){2,}|(?:xa){2,}|ахах\p{L}*|хаха\p{L}*|kek)|😂|🤣|💀|😭)[\s!.]*$/iu;
+/** The same, typed out only (an emoji there is the owner's emoji dial's business, so it is never cut) */
+const TEXT_LAUGH_END = /\s+(?:lol|lmao|lmfao|a?(?:ha){2,}h*|(?:ah){2,}|(?:xa){2,}|ахах\p{L}*|хаха\p{L}*|kek)[!.]*$/iu;
+
+/** Share of the group's texts that end on a laugh (undefined under 8 texts: not enough to say). */
+export function laughEndShare(texts: string[]): number | undefined {
+  const t = texts.map(x => x.trim()).filter(Boolean);
+  if (t.length < 8) return undefined;
+  return t.filter(x => LAUGH_END.test(x)).length / t.length;
+}
 
 const EMOJI = /\p{Extended_Pictographic}/gu;
 const LAUGHING = /😂|🤣|💀|😭|😹/u;
@@ -111,6 +136,8 @@ export interface LintContext {
   burstiness?: number;
   /** 80% of human messages are shorter than this */
   p80Len?: number;
+  /** share of human texts that end on a laugh; under 0.1 the bot does not laugh at its own line either */
+  laughEndShare?: number;
 }
 
 /**
@@ -179,6 +206,11 @@ export function lintPlan(actions: BotAction[], ctx: LintContext): LintResult {
     if (raw === null) { out.push(a); continue; }
     let fixed = autoFix(raw, ctx.marker);
     if (a.type !== 'voice' && (ctx.lowercaseShare ?? 0) > 0.7) fixed = phoneStyle(fixed);
+    // laughing at its own line in a group where nobody does that reads like a bot selling its joke
+    if (a.type !== 'voice' && ctx.laughEndShare !== undefined && ctx.laughEndShare < 0.1) {
+      const cut = fixed.replace(TEXT_LAUGH_END, '').trim();
+      if (cut !== fixed && cut.split(/\s+/).length >= 2) fixed = cut;
+    }
     const norm = normalize(fixed);
     if (!norm && a.type !== 'voice' && !(fixed.match(EMOJI) ?? []).length) { dropped.push('empty text'); continue; }
     // the same joke in new words is still a repeat (LLMs recycle jokes, arXiv 2306.04563)
@@ -193,6 +225,10 @@ export function lintPlan(actions: BotAction[], ctx: LintContext): LintResult {
     out.push(withText(a, fixed));
     if (repeat) issues.push({ index, problem: `${repeat}: say it in new words` });
     for (const tell of AI_TELLS) if (tell.re.test(fixed)) issues.push({ index, problem: tell.label });
+    const stock = fixed.match(STOCK_JOKES);
+    if (stock && !ctx.recentHumanTexts.some(t => t.toLowerCase().includes(stock[0].toLowerCase()))) {
+      issues.push({ index, problem: `stock AI joke phrase ("${stock[0]}"): say it the way this group would` });
+    }
     const limit = Math.max(220, ctx.medianLen * 6);
     if (a.type !== 'voice' && fixed.length > limit) {
       issues.push({ index, problem: `too long for this chat (${fixed.length} characters, people here write about ${ctx.medianLen || 'short'})` });

@@ -6,7 +6,7 @@ import { openDb } from '../src/memory/db.js';
 import { Repo } from '../src/memory/repo.js';
 import { PromptBuilder } from '../src/ai/prompts.js';
 import { BrainV2 } from '../src/ai/v2/brain.js';
-import { lintPlan, phoneStyle, autoFix, overlap, scriptOf, splitInTwo } from '../src/ai/v2/lint.js';
+import { laughEndShare, lintPlan, phoneStyle, autoFix, overlap, scriptOf, splitInTwo } from '../src/ai/v2/lint.js';
 import { CHATTINESS_SHIFT, decide, roomShift, threshold } from '../src/ai/v2/policy.js';
 import { actualAfter, pickReplayCuts } from '../src/ai/v2/replay.js';
 import { TasteLearner, readTasteRules } from '../src/ai/v2/taste.js';
@@ -141,6 +141,26 @@ assert.ok(lintPlan([{ type: 'message', text: 'it is not just football, it is rel
   { recentBotTexts: [], recentHumanTexts: [], medianLen: 20, marker }).issues.length >= 1, 'contrast template caught');
 assert.equal(lintPlan([{ type: 'message', text: 'not bad, but he still missed the pen' }],
   { recentBotTexts: [], recentHumanTexts: [], medianLen: 20, marker }).issues.length, 0, 'normal "not ... but" speech is fine');
+// round 16: more tells. A question to the room just to keep it going, "ah, the...", stock AI joke phrases
+{
+  const tells = (text: string, humans: string[] = []) => lintPlan([{ type: 'message', text }], { recentBotTexts: [], recentHumanTexts: humans, medianLen: 20, marker }).issues.map(i => i.problem).join(' | ');
+  for (const t of ['madrid fans in shambles, what do you think?', 'thoughts?', 'kanan really did that, а вы как думаете?', 'siz nə düşünürsünüz?', 'ne dersiniz?']) assert.ok(tells(t).includes('keep the chat going'), t);
+  for (const t of ['what do you mean?', 'who won the game?', 'what do you think he meant by that']) assert.ok(!tells(t).includes('keep the chat going'), t);
+  assert.ok(tells('Ah, the classic Kanan move').includes('ah, the'));
+  assert.ok(tells('plot twist: kanan was right').includes('stock AI joke phrase ("plot twist")'));
+  assert.equal(tells('the audacity of this man', ['bro the audacity']), '', 'the group says it itself: fine');
+  // laughing at its own line, only where the group never does
+  const plain = Array.from({ length: 10 }, (_, i) => `plain message ${i}`);
+  const laughy = Array.from({ length: 10 }, (_, i) => `funny one ${i} 😂`);
+  assert.deepEqual([laughEndShare(plain), laughEndShare(laughy), laughEndShare(['a'])], [0, 1, undefined]);
+  const own = (text: string, share: number | undefined) => (lintPlan([{ type: 'message', text }], { recentBotTexts: [], recentHumanTexts: [], medianLen: 20, marker, laughEndShare: share }).actions[0] as { text: string }).text;
+  assert.equal(own('kanan predicted 3-0 again lol', 0), 'kanan predicted 3-0 again');
+  assert.equal(own('madrid in shambles ахахах', 0), 'madrid in shambles');
+  assert.equal(own('kanan predicted 3-0 again 😂', 0), 'kanan predicted 3-0 again 😂', 'emojis are the emoji dial\'s business');
+  assert.equal(own('haha ok', 0), 'haha ok', 'a laugh that is the whole message stays');
+  assert.equal(own('kanan predicted 3-0 again lol', 1), 'kanan predicted 3-0 again lol', 'a group that laughs at its own lines: kept');
+  assert.equal(own('kanan predicted 3-0 again lol', undefined), 'kanan predicted 3-0 again lol', 'unknown: kept');
+}
 const long = lintPlan([{ type: 'message', text: 'x'.repeat(300) }], { recentBotTexts: [], recentHumanTexts: [], medianLen: 20, marker });
 assert.ok(long.issues[0].problem.startsWith('too long'));
 
