@@ -8,7 +8,7 @@ import { PromptBuilder } from '../src/ai/prompts.js';
 import { BrainV2 } from '../src/ai/v2/brain.js';
 import { laughEndShare, lintPlan, phoneStyle, autoFix, overlap, scriptOf, splitInTwo } from '../src/ai/v2/lint.js';
 import { azOrTr } from '../src/ai/v2/language.js';
-import { CHATTINESS_SHIFT, decide, roomShift, threshold } from '../src/ai/v2/policy.js';
+import { CHATTINESS_SHIFT, decide, motivation, roomShift, threshold } from '../src/ai/v2/policy.js';
 import { actualAfter, pickReplayCuts } from '../src/ai/v2/replay.js';
 import { TasteLearner, readTasteRules } from '../src/ai/v2/taste.js';
 import {
@@ -282,6 +282,15 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
     'bro what time is the match?', 'bro what channel is it on?', 'what was that song called?', 'wtf happened? just got here', 'wtf is the score?', 'who tf scored?',
     'guys what time is the match???', 'where are you guys???', 'who scored???', 'а кто вообще играет сегодня?', 'кто вообще идёт завтра?', 'olar belə edək?', 'who even is that guy?'])
     assert.equal(rhetoricalText(t), false, t);
+  // round 21: the gate's calibration covers both new facts, and each example's scores match its decision under the policy
+  const { GATEKEEPER_V2_SYSTEM: gateSys } = await import('../src/ai/v2/prompts.js');
+  assert.ok(gateSys.includes('(rhetorical)') && gateSys.includes('(hype)'));
+  for (const line of gateSys.split('\n').filter((l: string) => /relevance \d+, novelty \d+, humor \d+, timing \d+, fit \d+/.test(l))) {
+    const [rel, nov, hum, tim, fit] = (line.match(/\d+/g) ?? []).slice(-5).map(Number);
+    const urge = motivation({ relevance: rel, novelty: nov, humor: hum, timing: tim, fit });
+    if (line.includes(': RESPOND')) assert.ok(urge >= 6.5 && Math.max(nov, hum) >= 6, line);
+    else assert.ok(urge < 6.5 || Math.max(nov, hum) < 6 || tim <= 3, line);
+  }
   const slowT0 = performance.now();
   rhetoricalText('?'.repeat(60_000) + 'x?');
   assert.ok(performance.now() - slowT0 < 100, 'a long run of "?" is not re-scanned');
