@@ -11,7 +11,7 @@ import { CHATTINESS_SHIFT, decide, roomShift, threshold } from '../src/ai/v2/pol
 import { actualAfter, pickReplayCuts } from '../src/ai/v2/replay.js';
 import { TasteLearner, readTasteRules } from '../src/ai/v2/taste.js';
 import {
-  botTargets, botTics, callbackKeywords, dynamics, formatDecisionFeedback, formatTargets, formatTics, formatClockLine, formatLinesThatWorked, formatRoomNow,
+  botTargets, botTics, callbackKeywords, closingText, dynamics, formatDecisionFeedback, formatTeasing, formatTics, teaseReception, formatClockLine, formatLinesThatWorked, formatRoomNow,
   formatBits, formatReactionHabit, formatTakes, groupLaughs, ironyCues, parseDecisionLine, roomMap, ignoredStreak, laughCounts, landedLines, ownTakes, participation, reception, runningBits, seriousHit,
   styleStats, type MsgRow,
 } from '../src/ai/v2/signals.js';
@@ -66,8 +66,39 @@ const botLines = ['kanan you are washed', 'murad what was that', 'Kanan again lo
 botLines.push(row('bot', 'take the L', { is_bot: 1, quoted_id: 'q1' }));
 const targets = botTargets(botLines, ['Kanan Aliyev', 'Murad'], id => (id === 'q1' ? 'Kanan Aliyev' : null));
 assert.deepEqual(targets, [{ name: 'Kanan Aliyev', count: 5 }, { name: 'Murad', count: 1 }]);
-assert.ok(formatTargets(targets)!.startsWith('EASY ON: Kanan Aliyev'));
-assert.equal(formatTargets([{ name: 'Murad', count: 2 }]), null);
+assert.ok(formatTeasing(targets, [])!.includes('- EASY ON: Kanan Aliyev (in 5 of your last 15 messages)'));
+assert.equal(formatTeasing([{ name: 'Murad', count: 2 }], []), null);
+
+// how each friend takes the bot's digs
+{
+  const T = 1_800_000_000_000;
+  let k = 0;
+  const r = (who: string, text: string, at: number, extra: Partial<MsgRow> = {}): MsgRow =>
+    ({ id: `t${++k}`, short_id: `m${k}`, sender_jid: who, sender_name: who, text, type: 'text', is_bot: who === 'bot' ? 1 : 0, is_owner: 0, ts: T + at * 1000, ...extra });
+  const rows: MsgRow[] = [];
+  // Kanan laughs at digs (a laughing reply, a 😂 reaction)
+  const d1 = r('bot', 'kanan predicted 3-0 again', 10); rows.push(d1, r('Kanan', 'HAHAHA ok fair', 12));
+  const d2 = r('bot', 'kanan and his penalties', 60); rows.push(d2, { ...r('Kanan', '😂', 62), type: 'reaction', quoted_id: d2.id });
+  // Aysel pushes back
+  const d3 = r('bot', 'aysel still lost in the parking lot', 120); rows.push(d3, r('Aysel', 'not funny', 125));
+  const d4 = r('bot', 'aysel driving again', 180); rows.push(d4, { ...r('Aysel', '🙄', 182), type: 'reaction', quoted_id: d4.id });
+  // a line about two people tells nothing about either; a line nobody answers is just "teased"
+  rows.push(r('bot', 'kanan and aysel both cooked', 240), r('bot', 'kanan you ok', 300), r('Murad', 'lol', 305));
+  const takes = teaseReception(rows, ['Kanan Aliyev', 'Aysel', 'Murad']);
+  const kanan = takes.find(t => t.name === 'Kanan Aliyev')!;
+  const aysel = takes.find(t => t.name === 'Aysel')!;
+  assert.deepEqual([kanan.teased, kanan.laughed, kanan.pushedBack], [3, 2, 0], JSON.stringify(kanan));
+  assert.deepEqual([aysel.teased, aysel.laughed, aysel.pushedBack], [2, 0, 2]);
+  const tx = formatTeasing([], takes)!;
+  assert.ok(tx.includes('- Aysel pushed back on 2 of your 2 digs: keep it light with them') && tx.includes('- Kanan Aliyev laughed at 2 of your 3 digs: they enjoy it'), tx);
+  assert.ok(teaseReception([r('bot', 'murad is washed', 10), r('Murad', 'отстань', 12)], ['Murad'])[0].pushedBack === 1, 'pushback in Russian');
+  assert.ok(teaseReception([r('bot', 'murad is washed', 10), r('Murad', 'bəsdir', 12)], ['Murad'])[0].pushedBack === 1, 'pushback in Azerbaijani');
+  assert.equal(teaseReception([r('bot', 'that is sus', 10), r('Murad', 'sus', 12)], ['Murad']).length, 0, 'English "sus" is not pushback (and nobody was named)');
+  // quoting Kanan and naming him is one person, not two (full name in the member list, first name in the chat)
+  const q = r('Kanan', 'i will score tonight', 400);
+  const one = teaseReception([q, r('bot', 'kanan you will not', 410, { quoted_id: q.id }), r('Kanan', 'hahaha', 415)], ['Kanan Aliyev']);
+  assert.deepEqual(one.map(t => [t.name, t.teased, t.laughed]), [['Kanan Aliyev', 1, 1]], JSON.stringify(one));
+}
 // lines that worked: one deduped list, without the bot's current tics or digs at an "easy on" person
 const worked = formatLinesThatWorked(['good one 🔥', 'kanan is cooked 💀'], [{ text: 'good one 🔥', laughs: 2 }, { text: 'murad and the penalty again', laughs: 3 }],
   [{ who: 'Aysel', text: 'he drives like he takes pens', laughs: 2 }], { emojis: ['💀'], names: ['Kanan Aliyev'] })!;
@@ -176,6 +207,19 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
   assert.equal(dynamics(q, 'ForceAI', now).hangingQuestion?.shortId, q[1].short_id);
   assert.equal(dynamics([...q, r('Murad', 'barca', 170)], 'ForceAI', now).hangingQuestion, null, 'answered');
   assert.equal(dynamics([r('Said', 'who is playing tonight?', 160, { is_owner: 1 })], 'ForceAI', now).hangingQuestion, null, "owner's questions are never a cue");
+
+  // the chat winding down: goodbyes in each language; "пока" / "hələlik" only as a whole message, never a question
+  const bye = [r('Murad', 'ok that was a good game', 100), r('Kanan', 'gn guys', 150), r('Murad', 'спокойной', 160)];
+  const wd = dynamics(bye, 'ForceAI', now)!.windingDown;
+  assert.deepEqual(wd, { who: ['Kanan', 'Murad'], shortId: bye[2].short_id }, JSON.stringify(wd));
+  assert.equal(dynamics([...bye, r('Aysel', 'wait who scored the second one', 170), r('Kanan', 'messi', 175)], 'ForceAI', now).windingDown, null, 'they kept talking');
+  assert.ok(dynamics([r('Murad', 'lol', 150), r('Aysel', 'gecən xeyrə', 160)], 'ForceAI', now).windingDown, 'the newest message is a goodbye');
+  assert.deepEqual(dynamics([...bye, r('Aysel', 'lol ok', 170)], 'ForceAI', now).windingDown?.who, ['Kanan', 'Murad'], 'two left, one "lol" after');
+  for (const t of ['iyi geceler', 'görüşürüz', 'yatiram', 'ну пока', 'helelik', 'ok bye', 'gtg', 'İyi geceler 😴']) assert.ok(closingText(t), t);
+  for (const t of ['пока нет', 'helelik yox', 'are you going to sleep?', 'later today we play', 'what a night', 'gnome']) assert.equal(closingText(t), false, t);
+  const shift = roomShift({ dyn: dynamics(bye, 'ForceAI', now) });
+  assert.ok(shift.delta === 1 && shift.notes.includes('winding down +1'), JSON.stringify(shift));
+  assert.ok(formatRoomNow({ dyn: dynamics(bye, 'ForceAI', now), map: roomMap(bye, [], 'ForceAI', now), cues: [] }, 'gate')!.includes(`- winding down: Kanan, Murad said bye or goodnight (#${bye[2].short_id})`));
 
   // bad news, in several languages; slang is not
   assert.ok(seriousHit('my dad passed away this morning'));
@@ -604,6 +648,7 @@ assert.equal(calls.length, 2, 'answers when addressed never get a second opinion
 
 // owner's calls on v2 decisions reach the v2 gatekeeper as examples of when to talk
 const d1 = repo.insertDecision(G, 'T1v2', 'RESPOND', 'r | strong thought | urge 7 vs bar 6.5 | thought: roast kanan again');
+repo.insertDecision(G, 'T2v2', 'SEND', 'v2 line');
 const d2 = repo.insertDecision(G, 'T1v2', 'IGNORE', 'r | nothing worth adding | urge 4 vs bar 6.5 | thought: ask about the match');
 const d3 = repo.insertDecision(G, 'T2', 'SEND', 'v1 line');
 assert.equal(repo.setDecisionFeedback(d1, 'bad'), true);
@@ -630,6 +675,31 @@ assert.equal(sb.spoke, 1, 'RESPOND counted');
 assert.equal(sb.unprompted, 1, 'not addressed: unprompted');
 assert.equal(sb.quiet, 1);
 assert.ok(sb.rewrites >= 1 || sb.vetoed >= 0);
+// the scoreboard counts what was really sent: direct answers too, never a line the second opinion stopped
+{
+  const GX = 'stats@g.us';
+  repo.insertDecision(GX, 'T2v2', 'SEND', 'answered a mention (no T1v2 row)');
+  repo.insertDecision(GX, 'T1v2', 'RESPOND', 'r | strong thought | urge 7 vs bar 6.5');
+  repo.insertDecision(GX, 'T2v2', 'NOTHING', 'second opinion said skip: too try-hard');
+  repo.insertDecision(GX, 'T1v2', 'PAUSE', 'chat paused, offering a saved thought: x');
+  repo.insertDecision(GX, 'T2v2', 'SEND', 'v2 line');
+  repo.insertDecision(GX, 'T1v2', 'RESPOND', 'r | addressed: direct trigger on m4 | urge 0 vs bar 6.5');
+  repo.insertDecision(GX, 'T2v2', 'SEND', 'v2 answer');
+  repo.insertDecision(GX, 'T1v2', 'FAILED', 'gatekeeper failed or unparseable');
+  repo.insertDecision(GX, 'T1v2', 'DROPPED', 'put to sleep or paused while thinking: nothing sent');
+  const st = repo.brainV2Stats(GX, 0);
+  assert.deepEqual([st.spoke, st.unprompted, st.pauses, st.vetoed, st.quiet], [3, 0, 1, 1, 0], JSON.stringify(st));
+  // a jump-in that was dropped or whose writer failed does not make the next direct answer "unprompted"
+  const GY = 'stats2@g.us';
+  repo.insertDecision(GY, 'T1v2', 'RESPOND', 'r | strong thought | urge 7 vs bar 6.5');
+  repo.insertDecision(GY, 'T1v2', 'DROPPED', 'put to sleep or paused while thinking: nothing sent');
+  repo.insertDecision(GY, 'T2v2', 'SEND', 'answered a mention');
+  repo.insertDecision(GY, 'T1v2', 'RESPOND', 'r | strong thought | urge 7 vs bar 6.5');
+  repo.insertDecision(GY, 'T2v2', 'SILENT', 'generation failed or unparseable');
+  repo.insertDecision(GY, 'T2v2', 'SEND', 'answered a mention');
+  const sy = repo.brainV2Stats(GY, 0);
+  assert.deepEqual([sy.spoke, sy.unprompted], [2, 0], JSON.stringify(sy));
+}
 assert.equal(repo.setDecisionFeedback(d1, null), true);
 assert.equal(repo.getDecisionFeedback(G, 8).length, 1);
 
@@ -651,6 +721,22 @@ prompts.memoryVersion += 1;
 calls.length = 0;
 await brain.gate(G, cutRow.ts - 30_000, false, { untilTs: cutRow.ts });
 assert.ok(!calls[0].system[1].text.includes('Murad got fired'), 'the gate in a replay never sees a summary of later events');
+// owner calls (their reasons quote later chat) and house rules learned after the moment stay out of a replay
+repo.setConfig(`v2_taste_rules_${G}`, JSON.stringify(['keep jump-ins to one line']));
+repo.setConfig(`v2_taste_at_${G}`, String(Date.now()));
+brain.invalidate(G);
+calls.length = 0;
+await brain.gate(G, Date.now() - 60_000, false, { dryRun: true });
+assert.ok(calls[0].system[1].text.includes("YOUR OWNER'S CALLS") && calls[0].system[1].text.includes('keep jump-ins to one line'), 'live: both are there');
+calls.length = 0;
+await brain.gate(G, cutRow.ts - 30_000, false, { untilTs: cutRow.ts });
+assert.ok(!calls[0].system[1].text.includes("YOUR OWNER'S CALLS") && !calls[0].system[1].text.includes('keep jump-ins to one line'), calls[0].system[1].text);
+repo.setConfig(`v2_taste_at_${G}`, String(cutRow.ts - 1000)); // rules learned before the moment are fine
+calls.length = 0;
+await brain.gate(G, cutRow.ts - 30_000, false, { untilTs: cutRow.ts });
+assert.ok(calls[0].system[1].text.includes('keep jump-ins to one line'));
+repo.setConfig(`v2_taste_rules_${G}`, '[]');
+brain.invalidate(G);
 calls.length = 0;
 const obsBefore = (db.prepare('SELECT COUNT(*) AS n FROM member_observations').get() as any).n;
 genAnswer = { ...genAnswer, actions: [{ type: 'message', text: 'that was a weird pass' }], observation: { note: 'Murad seems tired', about_message_id: 'm50' } };
@@ -704,9 +790,14 @@ const sd = repo.insertDecision(GS, 'S1v2', 'RESPOND', 'banter | strong thought |
 repo.insertDecision(GS, 'T1', 'RESPOND', 'v1 spoke');
 repo.insertDecision(GS, 'S1v2', 'IGNORE', 'r | nothing worth adding | urge 3 vs bar 6.5');
 repo.insertDecision(GS, 'T1', 'IGNORE', 'v1 quiet');
+await new Promise(r => setTimeout(r, 5));
+repo.insertDecision(GS, 'T1', 'RESPOND', 'v1 spoke, its shadow failed');
+repo.insertDecision(GS, 'S1v2', 'FAILED', 'thinking stage failed or unparseable');
+await new Promise(r => setTimeout(r, 5));
+repo.insertDecision(GS, 'T1', 'RESPOND', 'v1 spoke, no shadow row at all (over budget)');
 assert.equal(repo.setDecisionFeedback(sd, 'good'), true, 'shadow calls teach the gatekeeper too');
 const sst = repo.brainV2Stats(GS, 0);
-assert.deepEqual([sst.shadow.spoke, sst.shadow.quiet, sst.v1Spoke], [1, 1, 1], 'v1 counted only in the moments the shadow saw');
+assert.deepEqual([sst.shadow.spoke, sst.shadow.quiet, sst.v1Spoke], [1, 1, 1], 'v1 counted only in the moments the shadow saw (and did not fail)');
 repo.addBrainAb(G, 'v2'); repo.addBrainAb(G, 'v2'); repo.addBrainAb(G, 'tie');
 assert.deepEqual(repo.getBrainAb(G), { v1: 0, v2: 2, tie: 1 });
 assert.deepEqual(repo.getBrainAb('other@g.us'), { v1: 0, v2: 0, tie: 0 });

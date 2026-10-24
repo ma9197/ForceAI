@@ -140,7 +140,7 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     const { id, rating } = req.body ?? {};
     if (!id || (rating !== 1 && rating !== -1 && rating !== 0)) return reply.code(400).send({ error: 'id and rating (1, -1 or 0) required' });
     if (!app.repo.setFeedback(id, rating)) return reply.code(404).send({ error: 'not a bot text message' });
-    app.prompts.memoryVersion += 1;
+    // nothing cached reads line ratings (v2 reads them fresh each call), so no cache is reset here
     const jid = app.repo.getMessageById(id)?.chat_jid as string | undefined;
     if (jid && !DEMO_MODE && !app.memoryLocked) app.tasteLearner.maybeAuto(jid); // enough new ratings: relearn the house rules
     return { ok: true };
@@ -153,8 +153,8 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
       return reply.code(400).send({ error: 'id and verdict (good, bad or null) required' });
     }
     if (!app.repo.setDecisionFeedback(id, verdict)) return reply.code(404).send({ error: 'not a brain v2 decision' });
-    app.prompts.memoryVersion += 1;
     const jid = app.repo.getDecisionChat(id);
+    if (jid) app.brainV2.invalidate(jid); // the owner's calls live in v2's cached gate context of that group only
     if (jid && !DEMO_MODE && !app.memoryLocked) app.tasteLearner.maybeAuto(jid);
     return { ok: true };
   });

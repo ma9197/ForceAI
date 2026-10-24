@@ -104,7 +104,7 @@ export function LiveFeed({ items, selectedShortId, onSelect }: {
           lastSenderKey = null; // a system row breaks the run
           return (
             <div key={item.id != null ? `d${item.id}` : `d${i}`} className={`decision-row${item.tier === 'S1v2' || item.tier === 'S2v2' ? ' shadow' : ''}`} title={new Date(item.ts).toLocaleString()}>
-              <b>{item.tier === 'S1v2' ? `v2 shadow would ${item.decision}` : item.tier === 'S2v2' ? (item.decision === 'WOULD_SAY' ? 'v2 shadow would say' : 'v2 shadow would end up quiet') : `${item.tier} ${item.decision}`}</b>: {item.reason}
+              <b>{item.tier === 'S1v2' ? (item.decision === 'FAILED' ? 'v2 shadow failed' : `v2 shadow would ${item.decision}`) : item.tier === 'S2v2' ? (item.decision === 'WOULD_SAY' ? 'v2 shadow would say' : 'v2 shadow would end up quiet') : `${item.tier} ${item.decision}`}</b>: {item.reason}
               {(item.tier === 'T1v2' || item.tier === 'S1v2') && item.id != null && ['RESPOND', 'IGNORE', 'REACT', 'PAUSE'].includes(item.decision) && (
                 <DecisionRate id={item.id} initial={item.verdict} />
               )}

@@ -20,6 +20,7 @@ export const POLICY = {
   PRIVATE_PAIR: 0.8,         // two people in a back-and-forth: jumping in needs more
   STORYTELLER: 0.5,          // someone mid-story: let them finish
   HANGING_QUESTION: -0.5,    // a question nobody answered: a natural moment to come in
+  WINDING_DOWN: 1.0,         // people saying bye / goodnight: nobody starts something new now
   IGNORED_STEP: 0.5,         // each ignored unprompted line after the first raises the bar...
   IGNORED_MAX: 1.0,          // ...up to this much
   LAUGHED: -0.3,             // two recent unprompted lines got laughs: the room is with it
@@ -41,6 +42,7 @@ export function roomShift(room: Room): { delta: number; notes: string[] } {
   if (room.dyn?.privatePair) add(POLICY.PRIVATE_PAIR, 'pair talking');
   if (room.dyn?.storyteller) add(POLICY.STORYTELLER, 'mid-story');
   if (room.dyn?.hangingQuestion) add(POLICY.HANGING_QUESTION, 'open question');
+  if (room.dyn?.windingDown) add(POLICY.WINDING_DOWN, 'winding down');
   const streak = ignoredStreak(room.rec ?? []);
   if (streak >= 2) add(Math.min(POLICY.IGNORED_MAX, POLICY.IGNORED_STEP * (streak - 1)), `${streak} ignored`);
   else if ((room.rec ?? []).filter(r => r === 'laughed').length >= 2) add(POLICY.LAUGHED, 'landing');

@@ -108,7 +108,7 @@ export class App {
       onDistilled: () => this.bus.publish({ kind: 'status', status: this.statusPayload() }),
     });
     this.tasteLearner = new TasteLearner(this.repo, this.ai, (jid, rules) => {
-      this.prompts.memoryVersion += 1; // v2's cached group context picks the new rules up
+      this.brainV2.invalidate(jid); // v2's cached group context picks the new rules up (v1's caches are untouched)
       const reason = rules.length ? `learned ${rules.length} house rules for brain v2 from your ratings` : 'brain v2 house rules cleared';
       const id = this.repo.insertDecision(jid, 'T0', 'TASTE', reason);
       this.bus.publish({ kind: 'decision', chatJid: jid, ts: Date.now(), tier: 'T0', decision: 'TASTE', reason, id });
