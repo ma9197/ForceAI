@@ -190,6 +190,14 @@ export function openDb(file: string = DB_PATH): Database.Database {
       ts             INTEGER,
       distilled      INTEGER NOT NULL DEFAULT 0
     );
+    -- owner's thumbs up / down on the bot's lines (dashboard feed); brain v2 learns the owner's taste from it
+    CREATE TABLE IF NOT EXISTS bot_feedback (
+      message_id TEXT PRIMARY KEY,
+      chat_jid   TEXT,
+      text       TEXT,
+      rating     INTEGER NOT NULL,   -- 1 = more like this, -1 = not like this
+      ts         INTEGER
+    );
     CREATE TABLE IF NOT EXISTS initiative_principles (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
       content       TEXT NOT NULL,

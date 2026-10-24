@@ -272,6 +272,7 @@ export default function App() {
                   <span className="gclose" style={{ marginLeft: 'auto', cursor: 'pointer' }} onClick={() => setReplyTarget(null)}>✕</span>
                 </div>
               )}
+              {showCompare && selectedJid && <BrainPreview jid={selectedJid} onClose={() => setShowCompare(false)} />}
               <div className="controls">
                 {!hideInfluence && (
                   <div className="influence-box">
@@ -302,7 +303,6 @@ export default function App() {
                     </div>
                   </div>
                 )}
-                {showCompare && selectedJid && <BrainPreview jid={selectedJid} onClose={() => setShowCompare(false)} />}
                 <div className="controls-sys">
                   <button onClick={() => setShowCompare(v => !v)} title="See what brain v1 and v2 would say right now (nothing is sent)">Compare v1 / v2</button>
                   <button onClick={() => selectedJid && post('/api/continue', { jid: selectedJid })}>Continue ▶</button>

@@ -275,3 +275,41 @@ export function formatLanded(lines: { text: string; laughs: number }[]): string 
   if (lines.length === 0) return null;
   return `WHAT LANDED WITH THIS GROUP LATELY (your lines that got laughs; learn the kind of humor, never repeat the line):\n${lines.map(l => `- "${l.text.slice(0, 140)}" (${l.laughs} laugh${l.laughs > 1 ? 's' : ''})`).join('\n')}`;
 }
+
+/** The owner's thumbs up / down from the dashboard: their taste, shown as examples. */
+export function formatTaste(liked: string[], disliked: string[]): string | null {
+  const l = liked.filter(Boolean).map(t => `- "${t.slice(0, 140)}"`);
+  const d = disliked.filter(Boolean).map(t => `- "${t.slice(0, 140)}"`);
+  if (l.length === 0 && d.length === 0) return null;
+  return [
+    "YOUR OWNER'S TASTE (they rated some of your lines; aim for the spirit of the liked ones, steer away from the style of the disliked ones, never repeat any):",
+    l.length ? `liked:\n${l.join('\n')}` : '',
+    d.length ? `disliked:\n${d.join('\n')}` : '',
+  ].filter(Boolean).join('\n');
+}
+
+/**
+ * Who the bot keeps aiming at: names in its recent lines plus the senders it replied to. Picking on
+ * the same friend again and again stops being banter.
+ */
+export function botTargets(botRows: MsgRow[], names: string[], senderOf: (id: string) => string | null): { name: string; count: number }[] {
+  const counts = new Map<string, number>();
+  for (const r of botRows) {
+    const hit = new Set<string>();
+    const text = (r.text ?? '').toLowerCase();
+    for (const name of names) {
+      const first = name.trim().split(/\s+/)[0].toLowerCase();
+      if (first.length >= 3 && new RegExp(`(?<![\\p{L}])${first.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}])`, 'u').test(text)) hit.add(name);
+    }
+    const target = r.quoted_id ? senderOf(r.quoted_id) : null;
+    if (target && names.includes(target)) hit.add(target);
+    for (const h of hit) counts.set(h, (counts.get(h) ?? 0) + 1);
+  }
+  return [...counts.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
+}
+
+export function formatTargets(targets: { name: string; count: number }[], min = 4, window = 15): string | null {
+  const heavy = targets.filter(t => t.count >= min);
+  if (heavy.length === 0) return null;
+  return `EASY ON: ${heavy.map(t => `${t.name} (in ${t.count} of your last ${window} messages)`).join(', ')}. You keep going at the same person; give them a break unless they start it.`;
+}

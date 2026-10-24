@@ -8,12 +8,12 @@ import type { AiClient } from '../client.js';
 import type { GenerateInput } from '../generator.js';
 import type { PromptBuilder } from '../prompts.js';
 import { lintPlan, type LintResult } from './lint.js';
-import { decide, type PolicyResult } from './policy.js';
+import { CHATTINESS_SHIFT, decide, type PolicyResult } from './policy.js';
 import { GATEKEEPER_V2_SYSTEM, REWRITE_SYSTEM } from './prompts.js';
 import { GateV2Schema, PlanV2Schema, RewriteSchema, type GateV2Out, type PlanV2Out } from './schemas.js';
 import {
-  botTics, callbackKeywords, formatCallbacks, formatLanded, formatParticipation, formatStyleStats, formatTics,
-  landedLines, participation, stripMarker, styleStats, type MsgRow,
+  botTargets, botTics, callbackKeywords, formatCallbacks, formatLanded, formatParticipation, formatStyleStats,
+  formatTargets, formatTaste, formatTics, landedLines, participation, stripMarker, styleStats, type MsgRow,
 } from './signals.js';
 
 export interface GateV2Result {
@@ -22,8 +22,9 @@ export interface GateV2Result {
 }
 
 export interface GenerateV2Input extends GenerateInput {
-  /** a thought saved from an earlier read, offered again at a pause in the chat */
+  /** the gatekeeper's inner thought: 'now' = the reason it decided to talk, 'pause' = saved earlier, offered at a pause */
   thought?: string | null;
+  thoughtWhen?: 'now' | 'pause';
   /** preview: no observations saved, nothing recorded besides token usage */
   dryRun?: boolean;
 }
@@ -136,7 +137,7 @@ export class BrainV2 {
         logger.warn({ stop: response.stop_reason }, 'brain v2 gatekeeper returned unparseable output');
         return null;
       }
-      const policy = decide(out, part, forceDecide);
+      const policy = decide(out, part, forceDecide, CHATTINESS_SHIFT[this.repo.getConfig('v2_chattiness') ?? 'balanced'] ?? 0);
       if (!opts.dryRun) {
         this.scenes.set(chatJid, out.scene);
         if (policy.saveThought && out.thought) this.thoughts.set(chatJid, { text: out.thought.text, at: Date.now() });
@@ -169,6 +170,11 @@ export class BrainV2 {
       style ? formatStyleStats(style) : '',
       tics ? formatTics(tics) : '',
       formatLanded(landedLines(history, t => stripMarker(t, marker.prefix, marker.suffix))) ?? '',
+      formatTaste(
+        this.repo.getFeedbackLines(1, BRAIN_V2.TASTE_LINES).map(t => stripMarker(t, marker.prefix, marker.suffix)),
+        this.repo.getFeedbackLines(-1, BRAIN_V2.TASTE_LINES).map(t => stripMarker(t, marker.prefix, marker.suffix)),
+      ) ?? '',
+      formatTargets(botTargets(history.filter(r => r.is_bot).slice(-BRAIN_V2.TARGET_WINDOW), this.repo.getMembersForChat(chatJid).map(m => m.display_name ?? '').filter(Boolean), id => this.repo.getMessageById(id)?.sender_name ?? null)) ?? '',
       formatParticipation(part),
       callbacks ?? '',
     ].filter(Boolean);
@@ -185,7 +191,9 @@ export class BrainV2 {
     if (input.addressIds?.length) {
       parts.push(`HINT: address ${input.addressIds.map(i => '#' + i).join(', ')}${input.gatekeeperReason ? ` (${input.gatekeeperReason})` : ''}`);
     }
-    if (input.thought) {
+    if (input.thought && input.thoughtWhen === 'now') {
+      parts.push(`YOUR INNER THOUGHT WHILE READING (why you are speaking now): "${input.thought}". It is a rough idea, not the final text: keep it if it is the best angle, sharpen it, or beat it.`);
+    } else if (input.thought) {
       parts.push(`A THOUGHT YOU HAD A MOMENT AGO (the chat has just paused): "${input.thought}". If it still lands, say it now in your own words, like it just came to you. If the moment has passed, send nothing.`);
     }
     if (input.operatorInstruction) {

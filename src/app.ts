@@ -867,6 +867,7 @@ export class App {
       voice_available: voiceAvailable(this.repo),
       voice_id: this.repo.getConfig('voice_id') || ELEVENLABS.DEFAULT_VOICE_ID,
       voice_provider: voiceProvider(this.repo),
+      v2_chattiness: this.repo.getConfig('v2_chattiness') ?? 'balanced',
       gemini_voice: this.repo.getConfig('gemini_voice') || GEMINI_TTS.DEFAULT_VOICE,
       voice_style: this.repo.getConfig('voice_style') ?? GEMINI_TTS.DEFAULT_STYLE,
       persona_mode: this.repo.getConfig('persona_mode') ?? 'default',

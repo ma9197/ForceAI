@@ -75,7 +75,7 @@ const two = harness(V2);
 v2Gate.decision = 'RESPOND';
 two.arb.onMessage(msg(V2, 'a', 'kanan thinks madrid wins'));
 await sleep(700);
-assert.ok(log.includes(`v2gate:${V2}`) && log.includes(`v2gen:${V2}:`), log.join(' '));
+assert.ok(log.includes(`v2gate:${V2}`) && log.includes(`v2gen:${V2}:saved line`), 'the inner thought seeds the reply');
 assert.ok(!log.includes(`v1gate:${V2}`) && log.includes('T1v2:RESPOND') && log.includes('T2v2:SEND'));
 assert.deepEqual(two.sent.map(a => a.text), ['v2 says hi']);
 

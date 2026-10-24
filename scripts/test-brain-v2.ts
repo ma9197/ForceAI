@@ -7,9 +7,9 @@ import { Repo } from '../src/memory/repo.js';
 import { PromptBuilder } from '../src/ai/prompts.js';
 import { BrainV2 } from '../src/ai/v2/brain.js';
 import { lintPlan, phoneStyle, autoFix } from '../src/ai/v2/lint.js';
-import { decide, threshold } from '../src/ai/v2/policy.js';
+import { CHATTINESS_SHIFT, decide, threshold } from '../src/ai/v2/policy.js';
 import {
-  botTics, callbackKeywords, formatTics, landedLines, participation, styleStats, type MsgRow,
+  botTargets, botTics, callbackKeywords, formatTargets, formatTaste, formatTics, landedLines, participation, styleStats, type MsgRow,
 } from '../src/ai/v2/signals.js';
 import type { GateV2Out } from '../src/ai/v2/schemas.js';
 
@@ -55,6 +55,15 @@ const landed = landedLines([
   row('a', '😂', { type: 'reaction', quoted_id: 'b1' }), row('b', 'HAHAHA', { quoted_id: 'b1' }), row('c', 'ok', { quoted_id: 'b2' }),
 ], t => t.replace(/^🤖 /, ''));
 assert.deepEqual(landed, [{ text: 'kanan predicted 3-0 and got 0-3', laughs: 2 }]);
+
+const botLines = ['kanan you are washed', 'murad what was that', 'Kanan again lol', 'kanan predicted 3-0', 'kanan pls', 'nice weather'].map(t => row('bot', t, { is_bot: 1 }));
+botLines.push(row('bot', 'take the L', { is_bot: 1, quoted_id: 'q1' }));
+const targets = botTargets(botLines, ['Kanan Aliyev', 'Murad'], id => (id === 'q1' ? 'Kanan Aliyev' : null));
+assert.deepEqual(targets, [{ name: 'Kanan Aliyev', count: 5 }, { name: 'Murad', count: 1 }]);
+assert.ok(formatTargets(targets)!.startsWith('EASY ON: Kanan Aliyev'));
+assert.equal(formatTargets([{ name: 'Murad', count: 2 }]), null);
+assert.ok(formatTaste(['good one'], ['cringe one'])!.includes('liked:\n- "good one"'));
+assert.equal(formatTaste([], []), null);
 
 // ---- linter ----
 const marker = { prefix: '🤖 ', suffix: '' };
@@ -109,6 +118,9 @@ assert.equal(decide(gate({ thought: null, decision: 'WAIT' }), quiet, true).deci
 assert.equal(decide(gate({ decision: 'IGNORE', s: { timing: 3 } }), quiet, false).saveThought, true, 'good idea, bad moment: saved');
 assert.ok(threshold({ ...quiet, humansSinceBot: 40 }, 'banter') < threshold(quiet, 'banter'), 'silence lowers the bar');
 assert.ok(threshold(quiet, 'serious') > threshold(quiet, 'banter'));
+assert.equal(threshold(quiet, 'banter', CHATTINESS_SHIFT.quiet), threshold(quiet, 'banter') + 1, 'quiet raises the bar');
+assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relevance: 6, timing: 6, fit: 6 } }), quiet, false, CHATTINESS_SHIFT.chatty).decision, 'RESPOND');
+assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relevance: 6, timing: 6, fit: 6 } }), quiet, false, CHATTINESS_SHIFT.quiet).decision, 'IGNORE');
 
 // ---- brain on a throwaway DB with a fake client ----
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forceai-v2-'));
@@ -164,7 +176,11 @@ genAnswer = {
   actions: [{ type: 'reply', text: 'Kanan said that last season too — as an AI I remember everything', target_message_id: 'm60' }, { type: 'reaction', emoji: '💀', target_message_id: 'm60' }],
   note: 'callback', observation: null,
 };
-const res = await brain.generate({ chatJid: G, consumedUpToTs: Date.now() - 60_000, addressIds: ['m60'], thought: 'kanan predicted 3-0' });
+assert.equal(repo.setFeedback('x1', 1), false, 'only bot lines can be rated');
+assert.equal(repo.setFeedback(`x${n - 1}`, 1), true);
+assert.deepEqual(repo.getFeedbackLines(1, 5), ['🤖 madrid fans in shambles 💀']);
+assert.deepEqual([...repo.getFeedbackRatings([`x${n - 1}`, 'x1']).entries()], [[`x${n - 1}`, 1]]);
+const res = await brain.generate({ chatJid: G, consumedUpToTs: Date.now() - 60_000, addressIds: ['m60'], thought: 'kanan predicted 3-0', thoughtWhen: 'pause' });
 assert.ok(res);
 assert.equal(calls.length, 2, 'generator + one rewrite (AI tell found)');
 const genReq = calls[0];
@@ -173,6 +189,7 @@ assert.ok(userText.includes('SCENE RIGHT NOW: football'), 'scene from the gateke
 assert.ok(userText.includes('HOW THIS CHAT TEXTS RIGHT NOW'), 'style numbers');
 assert.ok(userText.includes('OLDER MOMENTS'), 'callback candidates found');
 assert.ok(userText.includes('A THOUGHT YOU HAD A MOMENT AGO'), 'saved thought offered');
+assert.ok(userText.includes("YOUR OWNER'S TASTE") && userText.includes('- "madrid fans in shambles 💀"'), 'owner taste reaches the generator, marker stripped');
 assert.ok(genReq.system[0].text.includes('HOW A REAL FRIEND TEXTS'), 'v2 craft block in the system prompt');
 assert.ok(!genReq.system[0].text.includes('great question'), 'no banned phrase planted in the prompt');
 assert.deepEqual(res.plan.actions.map(a => a.type), ['reply', 'reaction']);

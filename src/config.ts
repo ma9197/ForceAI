@@ -138,6 +138,9 @@ export const BRAIN_V2 = {
   LULL_ACTIVE_WINDOW_MS: 5 * 60_000, // ...only if the chat was alive in this window
   LULL_MIN_HUMAN_MSGS: 6,         // ...with at least this many human messages
   REACT_MIN_GAP_MS: 45_000,       // at most one gatekeeper-chosen reaction per this window
+  TASTE_LINES: 5,                 // owner's latest liked / disliked lines shown as taste examples
+  TARGET_WINDOW: 15,              // bot's last N messages checked for picking on one person
+  TARGET_MIN: 4,                  // ...this many aimed at one person = "give them a break"
 } as const;
 
 // ---- Outbound humanization ----

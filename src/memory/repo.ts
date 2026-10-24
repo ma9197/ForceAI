@@ -26,6 +26,32 @@ export class Repo {
     this.setConfig(`brain_v2_${chatJid}`, version === 'v2' ? '1' : '0');
   }
 
+  // ---- owner feedback on the bot's lines (thumbs up / down in the feed) ----
+  /** rating 1 / -1 saves, 0 clears. Only the bot's own text messages can be rated. */
+  setFeedback(messageId: string, rating: 1 | -1 | 0): boolean {
+    const msg = this.getMessageById(messageId) as { chat_jid: string; text: string | null; is_bot: number; type: string } | undefined;
+    if (!msg || !msg.is_bot || msg.type !== 'text') return false;
+    if (rating === 0) {
+      this.db.prepare('DELETE FROM bot_feedback WHERE message_id = ?').run(messageId);
+    } else {
+      this.db.prepare(
+        'INSERT INTO bot_feedback(message_id, chat_jid, text, rating, ts) VALUES(?, ?, ?, ?, ?) ON CONFLICT(message_id) DO UPDATE SET rating = excluded.rating, ts = excluded.ts',
+      ).run(messageId, msg.chat_jid, msg.text ?? '', rating, Date.now());
+    }
+    return true;
+  }
+
+  getFeedbackRatings(ids: string[]): Map<string, number> {
+    if (ids.length === 0) return new Map();
+    const rows = this.db.prepare(`SELECT message_id, rating FROM bot_feedback WHERE message_id IN (${ids.map(() => '?').join(',')})`).all(...ids) as { message_id: string; rating: number }[];
+    return new Map(rows.map(r => [r.message_id, r.rating]));
+  }
+
+  /** The owner's latest rated lines across all groups (their taste is the same everywhere). */
+  getFeedbackLines(rating: 1 | -1, limit: number): string[] {
+    return (this.db.prepare('SELECT text FROM bot_feedback WHERE rating = ? ORDER BY ts DESC LIMIT ?').all(rating, limit) as { text: string }[]).map(r => r.text);
+  }
+
   // ---- API keys (entered in the dashboard, stored in config; env is the fallback) ----
   // DB value wins over env so the UI can override a stale env var. NEVER log these values.
   private static readonly KEY_ENV: Record<string, string> = {

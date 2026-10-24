@@ -35,8 +35,11 @@ export function motivation(s: GateV2Out['scores']): number {
   return 0.25 * clamp(s.relevance) + 0.2 * clamp(s.novelty) + 0.25 * clamp(s.humor) + 0.2 * clamp(s.timing) + 0.1 * clamp(s.fit);
 }
 
-export function threshold(p: Participation, vibe: GateV2Out['scene']['vibe']): number {
-  let t = POLICY.BASE_THRESHOLD;
+/** Settings "Brain v2 chattiness": moves the bar for unprompted lines. Answers when addressed are unaffected. */
+export const CHATTINESS_SHIFT: Record<string, number> = { quiet: 1, balanced: 0, chatty: -1 };
+
+export function threshold(p: Participation, vibe: GateV2Out['scene']['vibe'], shift = 0): number {
+  let t = POLICY.BASE_THRESHOLD + shift;
   if (p.botShare >= 0.35) t += 1.5;
   else if (p.botShare >= 0.2) t += 0.7;
   if (p.secondsSinceBot !== null && p.secondsSinceBot < 45) t += 1;
@@ -45,9 +48,9 @@ export function threshold(p: Participation, vibe: GateV2Out['scene']['vibe']): n
   return Math.round(t * 10) / 10;
 }
 
-export function decide(out: GateV2Out, p: Participation, forceDecide: boolean): PolicyResult {
+export function decide(out: GateV2Out, p: Participation, forceDecide: boolean, shift = 0): PolicyResult {
   const m = out.thought ? Math.round(motivation(out.scores) * 10) / 10 : 0;
-  const t = threshold(p, out.scene.vibe);
+  const t = threshold(p, out.scene.vibe, shift);
   // talk-share cap (Time to Talk, arXiv 2506.05309): past it, only answer when addressed
   // and on-topic-but-flat is not enough: it has to be funny or add something new
   const spark = Math.max(out.scores.humor, out.scores.novelty) >= POLICY.MIN_SPARK;
