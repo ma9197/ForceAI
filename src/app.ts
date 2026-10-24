@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { downloadMediaMessage, type WAMessage } from 'baileys';
-import { INTRO_MESSAGE, DATA_DIR, DEFAULT_DAILY_BUDGET_USD, DEFAULT_MSG_PREFIX, DEFAULT_MSG_SUFFIX, DEMO_MODE, ELEVENLABS, IMAGE_DIR, IMAGE_GEN, INITIATIVE, applyMentions } from './config.js';
+import { INTRO_MESSAGE, DATA_DIR, DEFAULT_DAILY_BUDGET_USD, DEFAULT_MSG_PREFIX, DEFAULT_MSG_SUFFIX, DEMO_MODE, ELEVENLABS, GEMINI_TTS, IMAGE_DIR, IMAGE_GEN, INITIATIVE, applyMentions } from './config.js';
 import { logger, waLogger } from './logger.js';
 import { openDb } from './memory/db.js';
 import { Repo } from './memory/repo.js';
@@ -14,6 +14,7 @@ import {
   freeBytes, getKeptVoiceItems, getKnownNames, wipeMemory, type RowCounts, type WipeResult,
 } from './memory/freshStart.js';
 import { JidResolver } from './wa/jid.js';
+import { voiceAvailable, voiceProvider } from './voice/tts.js';
 import { WaConnection } from './wa/connection.js';
 import { Normalizer } from './wa/inbound.js';
 import { Groups } from './wa/groups.js';
@@ -717,8 +718,11 @@ export class App {
       msg_prefix: this.repo.getConfig('msg_prefix') ?? DEFAULT_MSG_PREFIX,
       msg_suffix: this.repo.getConfig('msg_suffix') ?? DEFAULT_MSG_SUFFIX,
       voice_enabled: this.repo.getConfig('voice_enabled') === '1',
-      voice_available: this.repo.hasKey('elevenlabs_api_key'),
+      voice_available: voiceAvailable(this.repo),
       voice_id: this.repo.getConfig('voice_id') || ELEVENLABS.DEFAULT_VOICE_ID,
+      voice_provider: voiceProvider(this.repo),
+      gemini_voice: this.repo.getConfig('gemini_voice') || GEMINI_TTS.DEFAULT_VOICE,
+      voice_style: this.repo.getConfig('voice_style') ?? GEMINI_TTS.DEFAULT_STYLE,
       persona_mode: this.repo.getConfig('persona_mode') ?? 'default',
       persona_custom: this.repo.getConfig('persona_custom') ?? '',
       sticker_freq: this.repo.getConfig('sticker_freq') ?? 'often',

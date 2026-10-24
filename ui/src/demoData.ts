@@ -57,6 +57,9 @@ export const demoData = {
       "voice_enabled": false,
       "voice_available": true,
       "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+      "voice_provider": "gemini",
+      "gemini_voice": "Puck",
+      "voice_style": "like a cheeky, laid-back young guy sending a quick voice note to his friends, natural and casual",
       "persona_mode": "default",
       "persona_custom": "",
       "sticker_freq": "often",
@@ -578,6 +581,9 @@ export const demoData = {
     "voice_enabled": false,
     "voice_available": true,
     "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+    "voice_provider": "gemini",
+    "gemini_voice": "Puck",
+    "voice_style": "like a cheeky, laid-back young guy sending a quick voice note to his friends, natural and casual",
     "persona_mode": "default",
     "persona_custom": "",
     "sticker_freq": "often",
@@ -622,6 +628,150 @@ export const demoData = {
       {
         "value": "wholesome",
         "label": "Wholesome arc"
+      }
+    ],
+    "model_options": [
+      {
+        "value": "opus55",
+        "label": "Opus 5.5 (smartest, $4 / $20)"
+      },
+      {
+        "value": "sonnet55",
+        "label": "Sonnet 5.5 ($2 / $10)"
+      },
+      {
+        "value": "haiku55",
+        "label": "Haiku 5.5 (fastest, $0.10 / $0.50)"
+      },
+      {
+        "value": "sonnet",
+        "label": "Sonnet 4.6 (old, $3 / $15)"
+      },
+      {
+        "value": "haiku",
+        "label": "Haiku 4.5 (old, $1 / $5)"
+      }
+    ],
+    "gemini_voices": [
+      {
+        "value": "Puck",
+        "label": "Puck (upbeat)"
+      },
+      {
+        "value": "Fenrir",
+        "label": "Fenrir (excitable)"
+      },
+      {
+        "value": "Zubenelgenubi",
+        "label": "Zubenelgenubi (casual)"
+      },
+      {
+        "value": "Achird",
+        "label": "Achird (friendly)"
+      },
+      {
+        "value": "Sadachbia",
+        "label": "Sadachbia (lively)"
+      },
+      {
+        "value": "Umbriel",
+        "label": "Umbriel (easy-going)"
+      },
+      {
+        "value": "Algenib",
+        "label": "Algenib (gravelly)"
+      },
+      {
+        "value": "Orus",
+        "label": "Orus (firm)"
+      },
+      {
+        "value": "Charon",
+        "label": "Charon (informative)"
+      },
+      {
+        "value": "Iapetus",
+        "label": "Iapetus (clear)"
+      },
+      {
+        "value": "Enceladus",
+        "label": "Enceladus (breathy)"
+      },
+      {
+        "value": "Algieba",
+        "label": "Algieba (smooth)"
+      },
+      {
+        "value": "Rasalgethi",
+        "label": "Rasalgethi (informative)"
+      },
+      {
+        "value": "Alnilam",
+        "label": "Alnilam (firm)"
+      },
+      {
+        "value": "Schedar",
+        "label": "Schedar (even)"
+      },
+      {
+        "value": "Sadaltager",
+        "label": "Sadaltager (knowledgeable)"
+      },
+      {
+        "value": "Zephyr",
+        "label": "Zephyr (bright)"
+      },
+      {
+        "value": "Kore",
+        "label": "Kore (firm)"
+      },
+      {
+        "value": "Leda",
+        "label": "Leda (youthful)"
+      },
+      {
+        "value": "Aoede",
+        "label": "Aoede (breezy)"
+      },
+      {
+        "value": "Callirrhoe",
+        "label": "Callirrhoe (easy-going)"
+      },
+      {
+        "value": "Autonoe",
+        "label": "Autonoe (bright)"
+      },
+      {
+        "value": "Despina",
+        "label": "Despina (smooth)"
+      },
+      {
+        "value": "Erinome",
+        "label": "Erinome (clear)"
+      },
+      {
+        "value": "Laomedeia",
+        "label": "Laomedeia (upbeat)"
+      },
+      {
+        "value": "Achernar",
+        "label": "Achernar (soft)"
+      },
+      {
+        "value": "Gacrux",
+        "label": "Gacrux (mature)"
+      },
+      {
+        "value": "Pulcherrima",
+        "label": "Pulcherrima (forward)"
+      },
+      {
+        "value": "Vindemiatrix",
+        "label": "Vindemiatrix (gentle)"
+      },
+      {
+        "value": "Sulafat",
+        "label": "Sulafat (warm)"
       }
     ]
   },

@@ -38,7 +38,7 @@ export const ActionSchema = z.discriminatedUnion('type', [
   }),
   z.object({
     type: z.literal('voice'),
-    text: z.string().describe('What to SAY out loud. Plain speakable text — no emojis, no formatting.'),
+    text: z.string().describe('What to SAY out loud. Plain speakable text, no emojis or formatting. Delivery tags in [brackets] only if your VOICE LANGUAGE line allows them.'),
     target_message_id: z.string().nullable().describe('Optional short id to attach the voice note as a quoted reply.'),
   }),
   z.object({

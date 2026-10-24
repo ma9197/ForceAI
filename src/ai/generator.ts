@@ -62,14 +62,15 @@ export class Generator {
       : parts.join('\n\n');
 
     try {
+      const { max_tokens, effort } = this.ai.tuning(this.ai.generationModel, 2000, 'reply');
       const response = await this.ai.client.messages.parse({
         model: this.ai.generationModel,
-        max_tokens: 2000,
+        max_tokens,
         system: this.prompts.buildSystemBlocks(input.chatJid) as any,
         messages: [{ role: 'user', content: userContent }],
         output_config: {
           format: zodOutputFormat(ActionPlanSchema),
-          effort: this.ai.effort,
+          ...(effort ? { effort } : {}),
         },
       });
 

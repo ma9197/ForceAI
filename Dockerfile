@@ -4,6 +4,9 @@ FROM node:22-bookworm
 
 WORKDIR /app
 
+# ffmpeg turns Gemini's raw voice audio into WhatsApp's Ogg/Opus voice-note format
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+
 # install backend deps (cache-friendly: copy manifests first)
 COPY package*.json ./
 RUN npm ci

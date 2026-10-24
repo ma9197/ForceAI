@@ -37,17 +37,27 @@ export function applyMentions(text: string, map: Record<string, string>): string
 
 // ---- Models ----
 export const GENERATION_MODEL = 'claude-sonnet-4-6';
-export const GATEKEEPER_MODELS = {
+/** Settings choices for the thinking stage and reply writing. Keys are stored in config, so the old
+ *  'sonnet' / 'haiku' keys keep meaning Sonnet 4.6 / Haiku 4.5. */
+export const CLAUDE_CHOICES = {
+  opus55: 'claude-opus-5-5',
+  sonnet55: 'claude-sonnet-5-5',
+  haiku55: 'claude-haiku-5-5',
   sonnet: 'claude-sonnet-4-6',
   haiku: 'claude-haiku-4-5',
 } as const;
-export type GatekeeperChoice = keyof typeof GATEKEEPER_MODELS;
+export type ClaudeChoice = keyof typeof CLAUDE_CHOICES;
+export const GATEKEEPER_MODELS = CLAUDE_CHOICES;
+export type GatekeeperChoice = ClaudeChoice;
 /** Reply-generation model — separately selectable so the owner can trade quality for cost. */
-export const GENERATION_MODELS = {
-  sonnet: 'claude-sonnet-4-6',
-  haiku: 'claude-haiku-4-5',
-} as const;
-export type GenerationChoice = keyof typeof GENERATION_MODELS;
+export const GENERATION_MODELS = CLAUDE_CHOICES;
+export type GenerationChoice = ClaudeChoice;
+/** The 5.5 models think by default (Opus 5.5 always does); `effort` caps how much. */
+export const THINKS_BY_DEFAULT = new Set<string>(['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5']);
+/** Haiku 4.5 rejects the `effort` parameter (400). */
+export const NO_EFFORT = new Set<string>(['claude-haiku-4-5']);
+/** Extra max_tokens for models that think, so thinking can't cut the JSON answer off. */
+export const THINKING_HEADROOM_TOKENS = 6000;
 /**
  * Model for the background voice profiler. Pinned to Sonnet on purpose: capturing the group's
  * nuanced texting style is quality-sensitive, and it runs in the background (incl. during sleep)
@@ -82,7 +92,11 @@ export const INITIATIVE = {
 } as const;
 
 // $/MTok pricing for cost accounting (input, output, cacheRead, cacheWrite)
+// (cacheWrite = the 5-minute write price, 1.25x input; Haiku 5.5 is priced for prompts up to 100K tokens)
 export const PRICING: Record<string, { in: number; out: number; cacheRead: number; cacheWrite: number }> = {
+  'claude-opus-5-5': { in: 4, out: 20, cacheRead: 0.2, cacheWrite: 5 },
+  'claude-sonnet-5-5': { in: 2, out: 10, cacheRead: 0.2, cacheWrite: 2.5 },
+  'claude-haiku-5-5': { in: 0.1, out: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
   'claude-sonnet-4-6': { in: 3, out: 15, cacheRead: 0.3, cacheWrite: 3.75 },
   'claude-haiku-4-5': { in: 1, out: 5, cacheRead: 0.1, cacheWrite: 1.25 },
 };
@@ -153,6 +167,27 @@ export const ELEVENLABS = {
   DEFAULT_VOICE_ID: 'JBFqnCBsd6RMkjVDRZzb', // "George" premade voice — change in Settings
   TIMEOUT_MS: 20000,
 } as const;
+
+// ---- Gemini voice notes (free tier on the same Gemini key as images) ----
+export const GEMINI_TTS = {
+  /** Tried in order. A model that fails (unknown, out of free quota, error) hands over to the next;
+   *  each has its own free quota. 3.8 Flash TTS speaks 130+ languages incl. Azerbaijani. */
+  MODELS: ['gemini-3.8-flash-tts', 'gemini-3.8-flash-lite-tts', 'gemini-3.1-flash-tts-preview', 'gemini-2.5-flash-preview-tts'],
+  DEFAULT_VOICE: 'Puck',
+  /** Gemini's 30 prebuilt voices with Google's own one-word description. */
+  VOICES: {
+    Puck: 'upbeat', Fenrir: 'excitable', Zubenelgenubi: 'casual', Achird: 'friendly', Sadachbia: 'lively',
+    Umbriel: 'easy-going', Algenib: 'gravelly', Orus: 'firm', Charon: 'informative', Iapetus: 'clear',
+    Enceladus: 'breathy', Algieba: 'smooth', Rasalgethi: 'informative', Alnilam: 'firm', Schedar: 'even',
+    Sadaltager: 'knowledgeable', Zephyr: 'bright', Kore: 'firm', Leda: 'youthful', Aoede: 'breezy',
+    Callirrhoe: 'easy-going', Autonoe: 'bright', Despina: 'smooth', Erinome: 'clear', Laomedeia: 'upbeat',
+    Achernar: 'soft', Gacrux: 'mature', Pulcherrima: 'forward', Vindemiatrix: 'gentle', Sulafat: 'warm',
+  } as Record<string, string>,
+  /** How the bot sounds; editable in Settings. Sent as "Say <style>: <text>". */
+  DEFAULT_STYLE: 'like a cheeky, laid-back young guy sending a quick voice note to his friends, natural and casual',
+  TIMEOUT_MS: 30000,
+} as const;
+export type VoiceProvider = 'gemini' | 'elevenlabs';
 
 // ---- Image generation (Google Gemini) ----
 export const IMAGE_GEN = {
