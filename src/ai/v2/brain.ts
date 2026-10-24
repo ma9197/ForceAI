@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
-import { ARBITER, BOT_NAME, BRAIN_V2, DEFAULT_MSG_PREFIX, DEFAULT_MSG_SUFFIX, VISION, formatCityTimes } from '../../config.js';
+import { ARBITER, BOT_NAME, BRAIN_V2, DEFAULT_MSG_PREFIX, DEFAULT_MSG_SUFFIX, VISION } from '../../config.js';
 import { logger } from '../../logger.js';
 import type { Repo } from '../../memory/repo.js';
 import type { ActionPlan, BotAction } from '../../types.js';
@@ -13,9 +13,9 @@ import { CRITIC_SYSTEM, GATEKEEPER_V2_SYSTEM, REWRITE_SYSTEM } from './prompts.j
 import { formatTasteRules, readTasteRules } from './taste.js';
 import { CriticSchema, GateV2Schema, PlanV2Schema, RewriteSchema, type GateV2Out, type PlanV2Out } from './schemas.js';
 import {
-  botTargets, botTics, callbackKeywords, dynamics, formatDecisionFeedback, formatCallbacks, formatDynamics, formatGroupLaughs, formatLanded,
-  formatParticipation, formatStyleStats, formatTargets, formatTaste, formatTics, groupLaughs, landedLines, participation, reception,
-  formatBits, formatIronyCues, formatReactionHabit, formatRoomMap, formatTakes, ironyCues, ownTakes, roomMap, runningBits, stripMarker, styleStats, type Bit, type Dynamics, type MsgRow, type StyleStats,
+  botTargets, botTics, callbackKeywords, dynamics, formatBits, formatCallbacks, formatClockLine, formatDecisionFeedback, formatLinesThatWorked,
+  formatReactionHabit, formatRoomNow, formatStyleStats, formatTakes, formatTargets, formatTics, groupLaughs, ironyCues, landedLines, ownTakes,
+  participation, reception, roomMap, runningBits, stripMarker, styleStats, type Bit, type Dynamics, type MsgRow, type StyleStats,
 } from './signals.js';
 
 export interface GateV2Result {
@@ -106,12 +106,13 @@ export class BrainV2 {
       return `- ${name}${gist ? `: ${gist}` : ''}`;
     }).join('\n');
     const protectedPeople = this.repo.getBoundariesForChat(chatJid).map(b => `- ${b.name}: ${b.instructions}`).join('\n');
-    const bits = this.repo.getVoiceItems(chatJid)
-      .filter(i => i.category === 'joke' || i.category === 'reference')
-      .slice(0, 15).map(i => `- ${i.content}`).join('\n');
+    const jokes = this.repo.getVoiceItems(chatJid).filter(i => i.category === 'joke' || i.category === 'reference').slice(0, 15);
+    const bits = jokes.map(i => `- ${i.content}`).join('\n');
     const summary = this.repo.getSummary(chatJid)?.summary;
     const calls = formatDecisionFeedback(this.repo.getDecisionFeedback(chatJid, BRAIN_V2.DECISION_EXAMPLES));
-    const phrases = formatBits(this.bits(chatJid).slice(0, 4));
+    // measured phrases the running-jokes list does not already cover
+    const jokeText = jokes.map(i => i.content.toLowerCase()).join(' | ');
+    const phrases = formatBits(this.bits(chatJid).filter(b => !jokeText.includes(b.phrase)).slice(0, 4));
     const text = [
       `PEOPLE IN THIS CHAT:\n${who || '(nobody known yet)'}`,
       protectedPeople ? `PROTECTED PEOPLE (owner's absolute boundaries; never plan a joke that crosses them):\n${protectedPeople}` : '',
@@ -142,13 +143,9 @@ export class BrainV2 {
     const lastScene = replay ? undefined : opts.shadow ? this.shadowScenes.get(chatJid) : this.scenes.get(chatJid);
     const content = [
       transcript || '(chat is empty so far)',
-      replay ? '' : formatCityTimes(this.repo.getClockCities()),
-      formatParticipation(part),
-      formatDynamics(dyn, rec) ?? '',
-      formatRoomMap(roomMap(rows, this.memberNames(chatJid), BOT_NAME, now)) ?? '',
-      formatIronyCues(ironyCues(history, now)) ?? '',
+      replay ? '' : formatClockLine(this.repo.getClockCities()),
+      formatRoomNow({ dyn, rec, part, map: roomMap(rows, this.memberNames(chatJid), BOT_NAME, now), cues: ironyCues(history, now) }, 'gate') ?? '',
       formatReactionHabit(history) ?? '',
-      part.secondsSinceBot !== null && part.secondsSinceBot < 60 ? `(You last spoke ${part.secondsSinceBot}s ago.)` : '',
       lastScene ? `Your previous read of the scene: ${lastScene.topic} / ${lastScene.vibe}${lastScene.running_bit ? ` / bit: ${lastScene.running_bit}` : ''}` : '',
       forceDecide ? 'You have already waited the maximum amount of time. Decide RESPOND, REACT or IGNORE now: WAIT is not allowed.' : '',
     ].filter(Boolean).join('\n');
@@ -220,26 +217,34 @@ export class BrainV2 {
     const dyn = dynamics(rows, BOT_NAME);
 
     const newRows = consumedUpToTs === null ? rows.slice(-6) : rows.filter(r => r.ts > consumedUpToTs);
-    const oldest = rows.length ? rows[0].ts : Date.now();
-    const callbacks = formatCallbacks((this.repo.searchOlderMessages(chatJid, oldest, callbackKeywords(newRows), BRAIN_V2.CALLBACKS) as MsgRow[])
+    // callbacks come from before the transcript and at least an hour back (not the last few minutes)
+    const before = Math.min(rows.length ? rows[0].ts : Date.now(), Date.now() - 3_600_000);
+    const callbacks = formatCallbacks((this.repo.searchOlderMessages(chatJid, before, callbackKeywords(newRows), BRAIN_V2.CALLBACKS) as MsgRow[])
       .map(r => (r.is_bot ? { ...r, text: strip(r.text ?? '') } : r))
       .filter(r => !r.is_bot || notDisliked(r.text ?? '')));
+
+    const targets = botTargets(history.filter(r => r.is_bot).slice(-BRAIN_V2.TARGET_WINDOW), names, id => this.repo.getMessageById(id)?.sender_name ?? null);
+    const easyOn = targets.filter(t => t.count >= BRAIN_V2.TARGET_MIN).map(t => t.name);
+    const easyFirst = easyOn.map(n => n.trim().split(/\s+/)[0].toLowerCase());
+    // the group's phrases, minus a bit the scene calls played out and phrases about someone to go easy on
+    const playedOut = scene?.bit_played_out && scene.running_bit ? scene.running_bit.toLowerCase() : '';
+    const phrases = this.bits(chatJid).filter(b => !(playedOut && playedOut.includes(b.phrase)) && !easyFirst.some(n => b.phrase.split(' ').includes(n)));
 
     const parts = [
       scene ? `SCENE RIGHT NOW: ${scene.topic}. ${scene.threads}. vibe: ${scene.vibe}.${scene.running_bit ? ` running bit: ${scene.running_bit}${scene.bit_played_out ? ' (played out, let it go)' : ''}.` : ''}` : '',
       style ? formatStyleStats(style) : '',
       tics ? formatTics(tics) : '',
-      formatDynamics(dyn, []) ?? '',
-      formatRoomMap(roomMap(rows, names, BOT_NAME)) ?? '',
-      formatIronyCues(ironyCues(history)) ?? '',
-      formatLanded(landedLines(history, strip).filter(l => notDisliked(l.text))) ?? '',
-      formatGroupLaughs(groupLaughs(history)) ?? '',
+      formatRoomNow({ dyn, part, asked, map: roomMap(rows, names, BOT_NAME), cues: ironyCues(history) }, 'writer') ?? '',
       formatTasteRules(readTasteRules(this.repo, chatJid)) ?? '',
-      formatTaste(this.repo.getFeedbackLines(chatJid, 1, BRAIN_V2.TASTE_LINES).map(strip)) ?? '',
-      formatTargets(botTargets(history.filter(r => r.is_bot).slice(-BRAIN_V2.TARGET_WINDOW), names, id => this.repo.getMessageById(id)?.sender_name ?? null)) ?? '',
-      formatParticipation(part, asked),
+      formatLinesThatWorked(
+        this.repo.getFeedbackLines(chatJid, 1, BRAIN_V2.TASTE_LINES).map(strip),
+        landedLines(history, strip).filter(l => notDisliked(l.text)),
+        groupLaughs(history),
+        { emojis: tics?.emojis.map(e => e.emoji), names: easyOn },
+      ) ?? '',
+      formatTargets(targets) ?? '',
       callbacks ?? '',
-      formatBits(this.bits(chatJid)) ?? '',
+      formatBits(phrases) ?? '',
       formatTakes(ownTakes(this.repo.getTextMessagesSince(chatJid, Date.now() - 7 * 86_400_000, 200, true) as MsgRow[], strip).filter(x => notDisliked(x.text))) ?? '',
     ].filter(Boolean);
     return { text: parts.join('\n\n'), medianLen: style?.medianLen ?? 0, lowercaseShare: style?.lowercaseShare ?? 0, botTexts, humanTexts, dyn, style, disliked };
@@ -271,7 +276,7 @@ export class BrainV2 {
       parts.push(`<operator_instruction>${input.operatorInstruction}</operator_instruction>`);
       parts.push('(An operator instruction is present: you MUST act on it, EXCEPT where it would cross an ABSOLUTE PER-PERSON BOUNDARY from the control panel. Those always win, even over this. "nothing" is not an acceptable plan here.)');
     }
-    parts.push(`Read the room, pick your angle, then decide your actions.\n\n${formatCityTimes(this.repo.getClockCities())}`);
+    parts.push(`Read the room, pick your angle, then decide your actions.\n\n${formatClockLine(this.repo.getClockCities())}`);
 
     const sinceTs = input.consumedUpToTs ?? Date.now() - 10 * 60_000;
     const imageBlocks: any[] = [];

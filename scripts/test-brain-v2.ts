@@ -11,8 +11,8 @@ import { CHATTINESS_SHIFT, decide, roomShift, threshold } from '../src/ai/v2/pol
 import { actualAfter, pickReplayCuts } from '../src/ai/v2/replay.js';
 import { TasteLearner, readTasteRules } from '../src/ai/v2/taste.js';
 import {
-  botTargets, botTics, callbackKeywords, dynamics, formatDecisionFeedback, formatDynamics, formatGroupLaughs, formatTargets, formatTaste, formatTics,
-  formatBits, formatIronyCues, formatReactionHabit, formatRoomMap, formatTakes, groupLaughs, ironyCues, parseDecisionLine, roomMap, ignoredStreak, laughCounts, landedLines, ownTakes, participation, reception, runningBits, seriousHit,
+  botTargets, botTics, callbackKeywords, dynamics, formatDecisionFeedback, formatTargets, formatTics, formatClockLine, formatLinesThatWorked, formatRoomNow,
+  formatBits, formatReactionHabit, formatTakes, groupLaughs, ironyCues, parseDecisionLine, roomMap, ignoredStreak, laughCounts, landedLines, ownTakes, participation, reception, runningBits, seriousHit,
   styleStats, type MsgRow,
 } from '../src/ai/v2/signals.js';
 import type { GateV2Out } from '../src/ai/v2/schemas.js';
@@ -68,8 +68,21 @@ const targets = botTargets(botLines, ['Kanan Aliyev', 'Murad'], id => (id === 'q
 assert.deepEqual(targets, [{ name: 'Kanan Aliyev', count: 5 }, { name: 'Murad', count: 1 }]);
 assert.ok(formatTargets(targets)!.startsWith('EASY ON: Kanan Aliyev'));
 assert.equal(formatTargets([{ name: 'Murad', count: 2 }]), null);
-assert.ok(formatTaste(['good one'])!.includes('- "good one"'));
-assert.equal(formatTaste([]), null);
+// lines that worked: one deduped list, without the bot's current tics or digs at an "easy on" person
+const worked = formatLinesThatWorked(['good one 🔥', 'kanan is cooked 💀'], [{ text: 'good one 🔥', laughs: 2 }, { text: 'murad and the penalty again', laughs: 3 }],
+  [{ who: 'Aysel', text: 'he drives like he takes pens', laughs: 2 }], { emojis: ['💀'], names: ['Kanan Aliyev'] })!;
+assert.ok(worked.startsWith('LINES THAT WORKED HERE'));
+assert.ok(worked.includes('- "good one 🔥" (your owner liked it)') && !worked.includes('(2 laughs)'), 'deduped: the owner-liked version wins');
+assert.ok(!worked.includes('kanan is cooked'), 'a line with a current tic or aimed at an easy-on person is left out');
+assert.ok(worked.includes('- Aysel: "he drives like he takes pens" (2 laughing)'));
+assert.ok(formatLinesThatWorked(['ref is cooked 💀'], [], [], { emojis: ['💀'] })!.includes('- "ref is cooked" (your owner liked it)'), 'a liked line keeps its words; only the tic emoji is taken out');
+assert.equal(formatLinesThatWorked(['kanan is cooked'], [], [], { names: ['Kanan'] }), null, 'never a dig at an easy-on person, even as the only example');
+const capped = formatLinesThatWorked(['one a', 'two b', 'three c', 'four d'], [{ text: 'landed line', laughs: 2 }], [{ who: 'Aysel', text: 'group line', laughs: 2 }])!;
+assert.equal((capped.match(/your owner liked it/g) ?? []).length, 2, 'at most 2 liked lines');
+assert.ok(capped.includes('landed line') && capped.includes('group line'), 'the other kinds still get a place');
+assert.equal(formatLinesThatWorked([], [], []), null);
+assert.ok(formatClockLine([{ label: 'Baku', offset: 4 }]).startsWith('Time now (read off, never calculate; mention it only when the time or date matters): '));
+assert.ok(formatClockLine([{ label: 'Baku', offset: 4 }], new Date(Date.UTC(2026, 9, 24, 3, 5))).includes('Baku Sat 24 Oct 2026, 07:05'));
 
 // ---- linter ----
 const marker = { prefix: '🤖 ', suffix: '' };
@@ -144,8 +157,7 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
   assert.equal(laughCounts([joke, r('Murad', 'hahaha', 200)]).get(joke.id!), undefined, 'too late to be a laugh at it');
   const gl = groupLaughs([joke, r('Murad', 'HAHAHAHA', 5), r('Aysel', '💀💀', 8), r('Aysel', 'ok', 30)]);
   assert.deepEqual(gl.map(x => x.who), ['Kanan']);
-  assert.ok(formatGroupLaughs(gl)!.includes('Kanan: "murad drives like'));
-  assert.equal(formatGroupLaughs([]), null);
+  assert.ok(formatLinesThatWorked([], [], gl)!.includes('Kanan: "murad drives like'));
 
   // a private back-and-forth between two people
   const now = T + 200_000;
@@ -172,7 +184,8 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
   assert.equal(seriousHit("i'm dead 💀 öldüm rip madrid"), null);
   const sad = dynamics([r('Aysel', 'guys my grandma is in the hospital', 150)], 'ForceAI', now);
   assert.equal(sad.serious?.shortId, `m${k}`);
-  assert.ok(formatDynamics(sad, [])!.includes('real bad news'));
+  const emptyMap = { people: [], chains: [] };
+  assert.ok(formatRoomNow({ dyn: sad, map: emptyMap, cues: [] }, 'writer')!.includes('- bad news: #'));
 
   // reception: unprompted lines that got nothing raise the bar; an answer to a question is not judged
   const b = (text: string, at: number) => r('bot', text, at, { is_bot: 1 });
@@ -181,7 +194,9 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
   const rec = reception(ignored, 'ForceAI', T + 100_000);
   assert.deepEqual(rec, ['ignored', 'ignored']);
   assert.equal(ignoredStreak(rec), 2);
-  assert.ok(formatDynamics({ privatePair: null, storyteller: null, hangingQuestion: null, serious: null }, rec)!.includes('no reaction'));
+  const quietDyn = { privatePair: null, storyteller: null, hangingQuestion: null, serious: null };
+  assert.ok(formatRoomNow({ dyn: quietDyn, map: emptyMap, cues: [], rec }, 'gate')!.includes('- your last 2 unprompted lines got no reaction'));
+  assert.equal(formatRoomNow({ dyn: quietDyn, map: emptyMap, cues: [], rec }, 'writer'), null, 'reception is a timing fact: gate only');
   assert.deepEqual(reception([r('Murad', 'forceai thoughts?', 0), b('madrid is done', 5), r('Kanan', 'ok', 6), r('Murad', 'ok', 7), r('Aysel', 'ok', 8)], 'ForceAI', T + 100_000), [], 'asked: not judged');
   const funny = b('ref is on the barca payroll', 5);
   assert.deepEqual(reception([r('Murad', 'match', 0), funny, r('Kanan', 'HAHAHA', 8)], 'ForceAI', T + 100_000), ['laughed']);
@@ -362,11 +377,32 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
   assert.equal(who.Aysel.openQuestion, null, 'others spoke after her question, so it is not "open" any more');
   assert.equal(who['Said (owner)'].openQuestion, null, "the owner's questions are never a cue (labelled like the transcript)");
   assert.ok(who.Leyla.serious);
-  assert.deepEqual(map.chains, [{ ids: [a1.short_id, a2.short_id, a3.short_id], people: ['Murad', 'Kanan'] }]);
-  const txt = formatRoomMap(map)!;
-  assert.ok(txt.includes('- Murad: 2 messages, loud (shouting, arguing or hyped), talking to Kanan') && txt.includes('may be going through something real') && txt.includes('REPLY CHAINS RUNNING'), txt);
-  assert.ok(txt.startsWith('WHO IS DOING WHAT (recent messages, measured):'));
-  assert.equal(formatRoomMap(roomMap([], [], 'ForceAI', T)), null);
+  assert.deepEqual(map.chains, [{ ids: [a1.short_id, a2.short_id, a3.short_id], people: ['Murad', 'Kanan'], fresh: true }]);
+  const noDyn = { privatePair: null, storyteller: null, hangingQuestion: null, serious: null };
+  const txt = formatRoomNow({ dyn: noDyn, map, cues: [] }, 'writer')!;
+  assert.ok(txt.startsWith('ROOM NOW (facts counted in code):'), txt);
+  assert.ok(txt.includes('- people: ') && txt.includes('Murad loud talking to Kanan') && txt.includes('Kanan laughing talking to Murad'), txt);
+  assert.ok(txt.includes('- bad news: Leyla may be going through something real'), txt);
+  assert.ok(txt.includes(`- reply chain: #${a1.short_id} > #${a2.short_id} > #${a3.short_id} (Murad, Kanan)`), txt);
+  assert.ok(!txt.includes('messages,'), 'no per-person message counts');
+  assert.equal(formatRoomNow({ dyn: noDyn, map: roomMap([], [], 'ForceAI', T), cues: [] }, 'writer'), null);
+  assert.equal(roomMap([a1, a2, a3], [], 'ForceAI', T + 10 * 60_000).chains[0].fresh, false, 'an old chain is not shown as running');
+  // one fact, said once: an open question and bad news are not repeated
+  const qDyn = dynamics([r('Aysel', 'who is coming to dinner?', 100), r('Leyla', 'my grandpa is in the hospital', 101)], 'ForceAI', T + 110_000);
+  const qMap = roomMap([r('Aysel', 'who is coming to dinner?', 100), r('Leyla', 'my grandpa is in the hospital', 101)], [], 'ForceAI', T + 110_000);
+  const once = formatRoomNow({ dyn: qDyn, map: qMap, cues: [] }, 'writer')!;
+  assert.equal(once.split('bad news').length - 1, 1, once);
+  assert.ok(once.includes('(Leyla) may be real'), 'says who sent the bad news');
+  // a question at the end of someone's run is shown as possibly part of the story, and the policy stays neutral
+  const run = [r('Kanan', 'so yesterday im at the gym', 100), r('Kanan', 'and this guy walks in', 105), r('Kanan', 'you know what he did?', 110)];
+  const runDyn = dynamics(run, 'ForceAI', T + 115_000);
+  assert.ok(runDyn.storyteller === 'Kanan' && runDyn.hangingQuestion, 'both facts kept for the policy');
+  const runTxt = formatRoomNow({ dyn: runDyn, map: roomMap(run, [], 'ForceAI', T + 115_000), cues: [] }, 'gate')!;
+  assert.ok(runTxt.includes('- Kanan: several messages in a row, the last one a question') && !runTxt.includes('open question:'), runTxt);
+  // the writer, when nobody asked and it has talked a lot
+  const loudPart = { window: 30, botShare: 0.4, humansSinceBot: 1, secondsSinceBot: 20 };
+  assert.ok(formatRoomNow({ dyn: noDyn, map: { people: [], chains: [] }, cues: [], part: loudPart }, 'writer')!.includes('(a lot lately: say less)'));
+  assert.ok(formatRoomNow({ dyn: noDyn, map: { people: [], chains: [] }, cues: [], part: loudPart, asked: true }, 'writer')!.includes('(answer, and keep it short)'));
   assert.equal(roomMap([r('Murad', 'old', 0)], [], 'ForceAI', T + 20 * 60_000).people.length, 0, 'only recent minutes');
   const lone = roomMap([r('Aysel', 'who is coming to dinner?', 40)], [], 'ForceAI', T + 60_000);
   assert.equal(lone.people[0].openQuestion, `m${k}`);
@@ -442,8 +478,8 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
   assert.equal(ironyCues([...usual.slice(0, 4), r('Murad', 'ну конечно он лучший игрок', 60)], now).length, 0, 'not enough history to call it a switch');
   assert.equal(ironyCues([r('Said', 'yeah right', 60, { is_owner: 1 })], now).length, 0, "the owner's lines are never cues");
   assert.equal(ironyCues([r('Kanan', 'yeah right', 0)], T + 20 * 60_000).length, 0, 'only the last minutes');
-  assert.ok(formatIronyCues(sw)!.includes('often still sincere'));
-  assert.equal(formatIronyCues([]), null);
+  const quiet = { privatePair: null, storyteller: null, hangingQuestion: null, serious: null };
+  assert.ok(formatRoomNow({ dyn: quiet, map: { people: [], chains: [] }, cues: sw }, 'gate')!.includes(`- possible irony: #${sw[0].shortId} Murad, a switch to Russian`));
 }
 
 // ---- brain on a throwaway DB with a fake client ----
@@ -503,7 +539,8 @@ assert.ok(brain.hasThought(G), 'good idea at a bad moment is kept for the pause'
 assert.equal(brain.lastScene(G)?.topic, 'football');
 const gateReq = calls[0];
 assert.ok(gateReq.system[1].text.includes('Murad'), 'gatekeeper gets who is in the chat');
-assert.ok(gateReq.messages[0].content.includes('YOUR SHARE OF THE CHAT'), 'gatekeeper gets the talk share');
+assert.ok(gateReq.messages[0].content.includes('ROOM NOW (facts counted in code):') && /- you: \d+% of the last \d+ messages, \d+ human messages since you last spoke/.test(gateReq.messages[0].content), 'gatekeeper gets the talk share in ROOM NOW');
+assert.ok(gateReq.messages[0].content.includes('Time now (read off, never calculate; mention it only when the time or date matters):'), 'one-line clock');
 assert.equal(brain.takeThought(G)?.text, 'kanan predicted 3-0 last week too');
 assert.equal(brain.takeThought(G), null, 'a thought is offered once');
 
@@ -533,8 +570,9 @@ assert.ok(userText.includes('A THOUGHT YOU HAD A MOMENT AGO'), 'saved thought of
 assert.ok(userText.includes('Someone talked to you: answer them'), 'the writer knows it was asked');
 assert.ok(userText.includes('"kanan tax": Murad, Kanan, 3 times over 3 days'), 'running bits reach the generator');
 assert.ok(userText.includes('2 days ago: "madrid wins 2-1 sunday, trust me"'), 'own takes reach the generator, marker stripped');
-assert.ok(userText.includes("YOUR OWNER'S TASTE") && userText.includes('- "madrid fans in shambles 💀"'), 'owner taste reaches the generator, marker stripped');
+assert.ok(userText.includes('LINES THAT WORKED HERE') && userText.includes('- "madrid fans in shambles 💀" (your owner liked it)'), 'owner taste reaches the generator, marker stripped');
 assert.ok(genReq.system[0].text.includes('HOW A REAL FRIEND TEXTS'), 'v2 craft block in the system prompt');
+assert.ok(genReq.system[0].text.includes('bad news in ROOM NOW, if it is real, means no jokes'), 'the writer knows bad news works like a rule');
 assert.ok(!genReq.system[0].text.includes('great question'), 'no banned phrase planted in the prompt');
 assert.deepEqual(res.plan.actions.map(a => a.type), ['message', 'reaction'], 'nobody quotes here and m60 is the newest: plain message');
 assert.equal((res.plan.actions[0] as any).text, 'kanan said that last season too');
