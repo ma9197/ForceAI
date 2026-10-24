@@ -1,4 +1,5 @@
 import type { BotAction } from '../../types.js';
+import { azOrTr } from './language.js';
 
 /**
  * Brain v2 anti-cringe linter: free, deterministic checks on a plan before it is sent.
@@ -29,27 +30,33 @@ const AI_TELLS: { re: RegExp; label: string }[] = [
   // ending on a question to the room just to keep the chat going: an assistant habit, not a friend's
   {
     re: new RegExp('(?<!\\p{L})(?:' + [
-      'what do you (?:guys |all )?think', 'thoughts', "who'?s with me", 'am i right', 'anyone else', 'agree or disagree', 'right guys', 'change my mind',
-      'а вы как думаете', 'что думаете', 'как думаете', 'кто со мной', 'согласны',
-      'siz n[əe] d[üu][şs][üu]n[üu]rs[üu]n[üu]z', 'n[əe] fikirl[əe][şs]irsiniz', 'siz ne d[üu][şs][üu]n[üu]yorsunuz', 'ne dersiniz', 'kat[ıi]l[ıi]yor musunuz',
-    ].join('|') + ')\\s*\\?+\\s*$', 'iu'),
+      "what do (?:you|y['’]?all|u) (?:guys |all )?think", 'wdyt', 'thoughts', "who['’]?s with me", 'am i right', 'anyone else', 'agree or disagree', 'right guys', 'change my mind',
+      'а вы как думаете', 'что думаете', 'как думаете', 'кто со мной', 'согласны', 'kak dumaete', 'chto dumaete',
+      'siz n[əe] d[üu][şs][üu]n[üu]rs[üu]n[üu]z', 'n[əe] fikirl[əe][şs]irsi(?:ni)?z', 'n[əe] deyirsi(?:ni)?z',
+      'ne d[üu][şs][üu]n[üu]yorsunuz', 'sizce', 'ne diyorsunuz', 'ne dersiniz', 'kat[ıi]l[ıi]yor musunuz',
+    ].join('|') + ')\\s*\\?+[\\s\\p{Extended_Pictographic}\\u{1F3FB}-\\u{1F3FF}\\u200d\\ufe0f]*$', 'iu'),
     label: 'ends on a question to the room just to keep the chat going (end where the thought ends)',
   },
 ];
 
 /** Joke phrases language models lean on; flagged unless this group uses them itself. */
-const STOCK_JOKES = /(?<!\p{L})(?:plot twist|the audacity|rent[- ]free|understood the assignment|chef'?s kiss|main character energy)(?!\p{L})/iu;
+const STOCK_JOKES = /(?<!\p{L})(?:plot twist|the audacity|rent[- ]free|understood the assignment|chef['’]?s kiss|main character energy)(?!\p{L})/iu;
 
-/** A laugh at the end of a message ("lol", "hahaha", "ахах", 😂): how often the group ends its own lines with one. */
-const LAUGH_END = /(?:(?<!\p{L})(?:lol|lmao|lmfao|a?(?:ha){2,}h*|(?:ah){2,}|(?:xa){2,}|ахах\p{L}*|хаха\p{L}*|kek)|😂|🤣|💀|😭)[\s!.]*$/iu;
-/** The same, typed out only (an emoji there is the owner's emoji dial's business, so it is never cut) */
-const TEXT_LAUGH_END = /\s+(?:lol|lmao|lmfao|a?(?:ha){2,}h*|(?:ah){2,}|(?:xa){2,}|ахах\p{L}*|хаха\p{L}*|kek)[!.]*$/iu;
+/** A laugh at the end of a message ("lol", "hahaha", "ахах", 😂). No "kek" (Turkish cake) and no "хахаль". */
+const LAUGH_WORD = String.raw`(?:lol|lmao|lmfao|a?(?:ha){2,}h*|(?:ah){2,}|(?:xa){2,}|ахах[ах]*|(?:ха){2,}х*)`;
+const LAUGH_END = new RegExp(String.raw`(?:(?<!\p{L})${LAUGH_WORD}|😂|🤣|💀|😭)[\s!.]*$`, 'iu');
+/** The same, typed out only (an emoji there is the owner's emoji dial's business, so it is never cut). The
+ * lookbehind keeps the separator run whole, so a long run of spaces is not re-scanned from every position. */
+const TEXT_LAUGH_END = new RegExp(String.raw`(?<![\s,])[\s,]+${LAUGH_WORD}[!.]*$`, 'iu');
 
-/** Share of the group's texts that end on a laugh (undefined under 8 texts: not enough to say). */
+/**
+ * Share of the group's own lines that end on a laugh ("X happened lol"). Lines that are only a laugh
+ * ("ахахах", "😂") are replies, not lines, so they are left out. Undefined under 8 lines: not enough to say.
+ */
 export function laughEndShare(texts: string[]): number | undefined {
-  const t = texts.map(x => x.trim()).filter(Boolean);
-  if (t.length < 8) return undefined;
-  return t.filter(x => LAUGH_END.test(x)).length / t.length;
+  const lines = texts.map(x => x.trim()).filter(x => (x.replace(LAUGH_END, '').match(/\p{L}+/gu) ?? []).length >= 2);
+  if (lines.length < 8) return undefined;
+  return lines.filter(x => LAUGH_END.test(x)).length / lines.length;
 }
 
 const EMOJI = /\p{Extended_Pictographic}/gu;
@@ -154,25 +161,42 @@ export function phoneStyle(text: string): string {
 }
 
 /**
- * A reply in another script than the person it answers (they wrote Russian, it answers in English,
- * or the other way round). For a plain message: only when the last three human texts all agree.
- * Azerbaijani, Turkish and English are all Latin, so those mixes are left alone.
+ * A reply in another language than the person it answers. Script first: they wrote Russian, it answers in
+ * Latin letters, or the other way round. Then Azerbaijani versus Turkish (both Latin; models drift from
+ * Azerbaijani into Turkish), only when both sides are clear. For a plain message the room decides: the
+ * last three human texts (script) or the last four with a clear verdict, at least two (Azerbaijani/Turkish).
+ * English mixed with either is left alone.
  */
 function languageMismatch(a: BotAction, text: string, ctx: LintContext): string | null {
   if (a.type !== 'message' && a.type !== 'reply') return null;
+  const target = a.type === 'reply' && a.target_message_id && ctx.textOf ? ctx.textOf(a.target_message_id) ?? '' : null;
   const mine = scriptOf(text, 12);
-  if (!mine) return null;
-  let theirs: 'cyrillic' | 'latin' | null = null;
-  if (a.type === 'reply' && a.target_message_id && ctx.textOf) {
-    theirs = scriptOf(ctx.textOf(a.target_message_id) ?? '');
-  } else {
-    const last = (ctx.lastHumanTexts ?? []).slice(-3).map(t => scriptOf(t));
-    if (last.length === 3 && last.every(x => x && x === last[0])) theirs = last[0];
+  if (mine) {
+    let theirs: 'cyrillic' | 'latin' | null = null;
+    if (target !== null) theirs = scriptOf(target);
+    else {
+      const last = (ctx.lastHumanTexts ?? []).slice(-3).map(t => scriptOf(t));
+      if (last.length === 3 && last.every(x => x && x === last[0])) theirs = last[0];
+    }
+    if (theirs && theirs !== mine) {
+      return theirs === 'cyrillic'
+        ? 'they wrote in Russian (Cyrillic) but this answers in another language: answer in their language and mix'
+        : 'they wrote in Latin letters (English/Azerbaijani/Turkish) but this answers in Russian: answer in their language and mix';
+    }
   }
-  if (!theirs || theirs === mine) return null;
-  return theirs === 'cyrillic'
-    ? 'they wrote in Russian (Cyrillic) but this answers in another language: answer in their language and mix'
-    : 'they wrote in Latin letters (English/Azerbaijani/Turkish) but this answers in Russian: answer in their language and mix';
+  if (mine === 'cyrillic') return null;
+  const myTk = azOrTr(text);
+  if (!myTk) return null;
+  let theirTk: 'az' | 'tr' | null = null;
+  if (target !== null) theirTk = azOrTr(target);
+  else {
+    const clear = (ctx.lastHumanTexts ?? []).slice(-4).map(azOrTr).filter((x): x is 'az' | 'tr' => !!x);
+    if (clear.length >= 2 && clear.every(x => x === clear[0])) theirTk = clear[0];
+  }
+  if (!theirTk || theirTk === myTk) return null;
+  return theirTk === 'az'
+    ? 'they write Azerbaijani but this reads Turkish: write it in Azerbaijani, the way they type it'
+    : 'they write Turkish but this reads Azerbaijani: write it in Turkish, the way they type it';
 }
 
 export interface LintResult {
@@ -205,12 +229,13 @@ export function lintPlan(actions: BotAction[], ctx: LintContext): LintResult {
     const raw = textOf(a);
     if (raw === null) { out.push(a); continue; }
     let fixed = autoFix(raw, ctx.marker);
-    if (a.type !== 'voice' && (ctx.lowercaseShare ?? 0) > 0.7) fixed = phoneStyle(fixed);
     // laughing at its own line in a group where nobody does that reads like a bot selling its joke
+    // (before the phone-style pass, so "... again. lol" loses its lone period too)
     if (a.type !== 'voice' && ctx.laughEndShare !== undefined && ctx.laughEndShare < 0.1) {
       const cut = fixed.replace(TEXT_LAUGH_END, '').trim();
       if (cut !== fixed && cut.split(/\s+/).length >= 2) fixed = cut;
     }
+    if (a.type !== 'voice' && (ctx.lowercaseShare ?? 0) > 0.7) fixed = phoneStyle(fixed);
     const norm = normalize(fixed);
     if (!norm && a.type !== 'voice' && !(fixed.match(EMOJI) ?? []).length) { dropped.push('empty text'); continue; }
     // the same joke in new words is still a repeat (LLMs recycle jokes, arXiv 2306.04563)
@@ -226,7 +251,7 @@ export function lintPlan(actions: BotAction[], ctx: LintContext): LintResult {
     if (repeat) issues.push({ index, problem: `${repeat}: say it in new words` });
     for (const tell of AI_TELLS) if (tell.re.test(fixed)) issues.push({ index, problem: tell.label });
     const stock = fixed.match(STOCK_JOKES);
-    if (stock && !ctx.recentHumanTexts.some(t => t.toLowerCase().includes(stock[0].toLowerCase()))) {
+    if (stock && !ctx.recentHumanTexts.some(t => normalize(t).includes(normalize(stock[0])))) {
       issues.push({ index, problem: `stock AI joke phrase ("${stock[0]}"): say it the way this group would` });
     }
     const limit = Math.max(220, ctx.medianLen * 6);

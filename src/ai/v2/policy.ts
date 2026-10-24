@@ -1,5 +1,5 @@
 import type { GateV2Out } from './schemas.js';
-import { ignoredStreak, type Dynamics, type Participation, type Reception } from './signals.js';
+import { coldStreak, type Dynamics, type Participation, type Reception } from './signals.js';
 
 /**
  * Brain v2 turn-taking, in code (the "Inner Thoughts" idea: an agent keeps forming thoughts while it
@@ -45,9 +45,11 @@ export function roomShift(room: Room): { delta: number; notes: string[] } {
   if (room.dyn?.hangingQuestion) add(POLICY.HANGING_QUESTION, 'open question');
   if (room.dyn?.windingDown) add(POLICY.WINDING_DOWN, 'winding down');
   const rec = room.rec ?? [];
-  const streak = ignoredStreak(rec);
-  if (rec[rec.length - 1] === 'booed') add(POLICY.BOOED, 'pushback on last line');
-  else if (streak >= 2) add(Math.min(POLICY.IGNORED_MAX, POLICY.IGNORED_STEP * (streak - 1)), `${streak} ignored`);
+  // lines that landed cold in a row (ignored or pushback): pushback on the last one never lowers the bar
+  const cold = coldStreak(rec);
+  const booed = rec[rec.length - 1] === 'booed';
+  const coldDelta = Math.max(booed ? POLICY.BOOED : 0, cold >= 2 ? Math.min(POLICY.IGNORED_MAX, POLICY.IGNORED_STEP * (cold - 1)) : 0);
+  if (coldDelta > 0) add(coldDelta, booed ? 'pushback on last line' : rec.slice(-cold).includes('booed') ? `${cold} landed cold` : `${cold} ignored`);
   else if ((room.rec ?? []).filter(r => r === 'laughed').length >= 2) add(POLICY.LAUGHED, 'landing');
   return { delta: Math.round(delta * 10) / 10, notes };
 }
