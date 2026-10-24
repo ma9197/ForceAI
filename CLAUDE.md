@@ -48,6 +48,7 @@ A WhatsApp group-chat AI that acts like one of the friends (banter, roasts, foot
 ## Traps that already cost time
 
 - zod must stay v4; Baileys is pinned to an RC (upgrades can break poll decryption and LID/PN identity handling).
+- WhatsApp rejects Baileys rc13's built-in WA Web version (405, stuck on "Generating QR"). `src/wa/connection.ts` reads the live version from web.whatsapp.com on connect; keep that.
 - Never let the model do date or time-zone math: compute city times in code (`formatCityTimes`), inject finished lines only. `Intl` time zones returned UTC on the Railway container.
 - Frequency asks must be quantified ("every 2nd to 3rd reply"), or the model barely uses a feature.
 - The model obeys text it sees in the chat (a fake "Admin:" worked once); defend in code, not only in the prompt.

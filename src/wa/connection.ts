@@ -1,9 +1,11 @@
 import makeWASocket, {
   DisconnectReason,
+  fetchLatestWaWebVersion,
   useMultiFileAuthState,
   jidNormalizedUser,
   type WASocket,
   type WAMessage,
+  type WAVersion,
 } from 'baileys';
 import type { Boom } from '@hapi/boom';
 import QRCode from 'qrcode';
@@ -23,6 +25,7 @@ export class WaConnection extends EventEmitter {
   state: ConnState = 'connecting';
   private reconnectDelay = 1000;
   private stopped = false;
+  private waVersion: { version: WAVersion; at: number } | null = null;
 
   /** set by App: lets Baileys re-fetch a sent message for decrypt retries / resends */
   getStoredMessage: ((id: string) => any | undefined) | null = null;
@@ -62,10 +65,29 @@ export class WaConnection extends EventEmitter {
     }
   }
 
+  /**
+   * The WhatsApp Web build to announce. Baileys rc13's built-in build (2.3000.1035194821) is too old:
+   * WhatsApp closes the socket with 405 before any QR (Baileys issue #2679). So ask web.whatsapp.com
+   * for the live build, cache it 6 h, keep the last good one on failure, else fall back to Baileys'.
+   */
+  private async resolveVersion(): Promise<WAVersion | undefined> {
+    if (this.waVersion && Date.now() - this.waVersion.at < 6 * 3_600_000) return this.waVersion.version;
+    const res = await fetchLatestWaWebVersion({ signal: AbortSignal.timeout(10_000) });
+    if (res.isLatest) {
+      this.waVersion = { version: res.version, at: Date.now() };
+      logger.info({ version: res.version.join('.') }, 'using live WhatsApp Web version');
+      return res.version;
+    }
+    logger.warn({ error: String((res.error as Error)?.message ?? res.error) }, 'live WhatsApp Web version unavailable, using the last known one');
+    return this.waVersion?.version;
+  }
+
   private async connect(): Promise<void> {
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+    const version = await this.resolveVersion();
 
     const sock = makeWASocket({
+      ...(version ? { version } : {}),
       auth: state,
       logger: waLogger,
       markOnlineOnConnect: false, // don't suppress phone notifications; less bot-like
@@ -115,6 +137,8 @@ export class WaConnection extends EventEmitter {
           setTimeout(() => this.connect().catch(e => logger.error(e)), 1000);
           return;
         }
+
+        if (statusCode === 405) this.waVersion = null; // "client too old": re-read the live version next time
 
         if (statusCode === DisconnectReason.restartRequired) {
           // Expected right after the first QR scan — reconnect immediately.
