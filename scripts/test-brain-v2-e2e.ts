@@ -80,7 +80,7 @@ const reset = () => { sent.length = 0; calls.length = 0; decisions.length = 0; }
 
 // 1. a strong unprompted jump-in: gate -> writer (thought seeded) -> linter fixes the dash + AI tell -> second opinion -> sent
 say('a@s', 'kanan said madrid wins the league again');
-say('b@s', 'they will, watch');
+say('b@s', 'they will, watch 🙄');
 gateOut = { scene: scene(), addressed: false, thought: { text: 'kanan says this every season', why: 'callback' }, scores: scores(8),
   decision: 'RESPOND', react: null, reason: 'callback', address_message_ids: ['m2'], wait_ms: null };
 planOut = plan([{ type: 'reply', text: 'Kanan said that last season too — as an AI I remember everything', target_message_id: 'm2' }]);
@@ -88,6 +88,7 @@ await sleep(800);
 assert.ok(has('T1v2', 'RESPOND') && has('T2v2', 'SEND'), decisions.join('\n'));
 assert.deepEqual(calls.map(c => c.kind), ['gate', 'plan', 'rewrite', 'critic']);
 assert.ok(calls[0].text.includes('WHO IS DOING WHAT') && calls[1].text.includes('WHO IS DOING WHAT'), 'the room map reaches both stages');
+assert.ok(calls[0].text.includes('POSSIBLE IRONY') && calls[1].text.includes('POSSIBLE IRONY'), 'irony cues reach both stages');
 assert.ok(calls[1].text.includes('YOUR INNER THOUGHT WHILE READING') && calls[1].text.includes('kanan says this every season'), 'thought reaches the writer');
 assert.ok(!calls[1].text.includes('Someone talked to you'), 'a jump-in is not told it was asked');
 assert.equal(sent.length, 1);

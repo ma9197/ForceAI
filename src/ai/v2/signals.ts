@@ -791,3 +791,90 @@ export function formatRoomMap(map: { people: PersonNow[]; chains: { ids: string[
   const chains = map.chains.map(c => `- ${c.ids.map(i => `#${i}`).join(' > ')} (${c.people.join(', ')})`);
   return [`WHO IS DOING WHAT (recent messages, measured):`, ...lines, ...(chains.length ? ['REPLY CHAINS RUNNING:', ...chains] : [])].join('\n');
 }
+
+/**
+ * Turkish / Azerbaijani letters typed either way ("canım" / "canim", "çox" / "cox"), so the markers
+ * below also match messages typed without the special letters.
+ */
+function loose(phrase: string): string {
+  const map: Record<string, string> = { ç: '[çc]', ğ: '[ğg]', ı: '[ıi]', i: '[iı]', ş: '[şs]', ö: '[öo]', ü: '[üu]', ə: '[əe]' };
+  // words joined by an optional comma and any spaces ("hə də, hə də" / "he de he de")
+  return phrase.split(' ').map(w => w.split('').map(c => map[c] ?? c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('')).join(',?\\s+');
+}
+
+/**
+ * Phrases that are sarcastic far more often than not, in this group's languages. Deliberately narrow:
+ * everyday words that are usually sincere ("aynen", "çox sağ ol", "thanks a lot", "tabii canım") are NOT
+ * here, because a wrong "possible irony" hint on a sincere message is worse than no hint. A hit is still
+ * only a hint. LLMs miss mixed-language sarcasm without help (arXiv 2602.21933), so code points at it.
+ */
+const IRONY_MARKERS = new RegExp('(?<!\\p{L})(?:' + [
+  // English
+  'yeah right', 'sure buddy', 'sure jan', 'sure pal', 'real smooth', 'nice one,? genius', 'what a surprise', 'shocker',
+  'said no one ever', 'cool story', 'great,? just great', 'oh wow,? groundbreaking',
+  // Russian (and the same in Latin letters)
+  'ага,? конечно', 'ага,? щас', 'конечно-конечно', 'да-да,? конечно', 'ну-ну', 'ну да,? ну да', 'спасибо,? кэп', 'кто бы сомневался',
+  'какая неожиданность', 'ну спасибо', 'aga,? konechno', 'nu da,? nu da',
+  // Turkish
+  ...['yaa tabii', 'ne demezsin', 'çok biliyorsun', 'tabii tabii'].map(loose),
+  // Azerbaijani
+  ...['hə də hə də', 'çox bilirsən', 'hə hə əlbəttə'].map(loose),
+].join('|') + ')(?!\\p{L})', 'iu');
+/** "very funny" with no laugh next to it is usually dry; with a laugh it is just funny. */
+const DRY_FUNNY = new RegExp('(?<!\\p{L})(?:very funny|очень смешно|' + loose('çok komik') + '|' + loose('çox gülməli') + ')(?!\\p{L})', 'iu');
+const SARCASM_EMOJI = /🙄|🙃|😏|🤡/u;
+const CLAPS = /\S\s*👏\s*\S+\s*👏/u;
+
+export interface IronyCue { shortId: string; who: string; cue: string }
+
+/**
+ * Likely irony in the recent human messages, measured, strongest first: a known sarcastic phrase, a dry
+ * "very funny", an eye-roll / upside-down / smirk / clown emoji, claps between words, or a clear switch
+ * of alphabet by someone who always writes the other way (switching language often marks a joke or a
+ * quote; switching features help humor and sarcasm detection, ACL 2020). Never the owner's lines.
+ */
+export function ironyCues(rows: MsgRow[], now = Date.now(), max = 3): IronyCue[] {
+  const human = rows.filter(r => !r.is_bot && !r.is_owner && r.type === 'text' && r.text);
+  const recent = human.filter(r => now - r.ts <= 10 * 60_000).slice(-8);
+  const found: (IronyCue & { strength: number; ts: number })[] = [];
+  for (const r of recent) {
+    const raw = r.text ?? '';
+    const t = `${raw}\n${raw.toLocaleLowerCase('tr')}`; // Turkish İ / I lowercase properly
+    let cue: string | null = null;
+    let strength = 0;
+    const m = t.match(IRONY_MARKERS);
+    if (m) { cue = `"${m[0].trim()}"`; strength = 3; }
+    else if (DRY_FUNNY.test(t) && !LAUGH_TEXT.test(raw)) { cue = 'a dry "very funny" (no laugh with it)'; strength = 3; }
+    else if (SARCASM_EMOJI.test(raw)) { cue = 'an eye-roll, smirk or clown emoji'; strength = 2; }
+    else if (CLAPS.test(raw)) { cue = 'claps between words'; strength = 2; }
+    else if (/(^|\s)\/s(?=$|\s|[.!?,])/.test(raw)) { cue = '"/s"'; strength = 3; }
+    else {
+      // a clear switch of alphabet: they wrote the other way in at least 5 of their last 6 texts and in
+      // the one right before, and this is a real sentence (3+ words, links removed)
+      const clean = raw.replace(/https?:\/\/\S+/g, ' ');
+      const nowScript = clean.trim().split(/\s+/).length >= 3 ? scriptOfText(clean) : null;
+      const mine = human.filter(x => x.sender_jid === r.sender_jid && x.ts < r.ts).slice(-6)
+        .map(x => scriptOfText((x.text ?? '').replace(/https?:\/\/\S+/g, ' '))).filter(Boolean);
+      if (nowScript && mine.length >= 5 && mine[mine.length - 1] !== nowScript && mine.filter(x => x !== nowScript).length >= 5) {
+        cue = `a switch to ${nowScript === 'cyrillic' ? 'Russian' : 'Latin letters'} (sometimes a joke or a quote)`;
+        strength = 1;
+      }
+    }
+    if (cue && r.short_id) found.push({ shortId: r.short_id, who: r.sender_name ?? '?', cue, strength, ts: r.ts });
+  }
+  return found.sort((a, b) => b.strength - a.strength || b.ts - a.ts).slice(0, max)
+    .sort((a, b) => a.ts - b.ts).map(({ strength: _s, ts: _t, ...c }) => c);
+}
+
+/** Same rule as the linter's scriptOf, kept local so signals stay independent of lint. */
+function scriptOfText(text: string): 'cyrillic' | 'latin' | null {
+  const letters = text.replace(EMOJI, '').match(/\p{L}/gu) ?? [];
+  if (letters.length < 6) return null;
+  const cyr = letters.filter(c => /[Ѐ-ӿ]/.test(c)).length / letters.length;
+  return cyr >= 0.6 ? 'cyrillic' : cyr <= 0.05 ? 'latin' : null;
+}
+
+export function formatIronyCues(cues: IronyCue[]): string | null {
+  if (cues.length === 0) return null;
+  return `POSSIBLE IRONY (measured hints, often still sincere: decide from the context what they really mean before you answer):\n${cues.map(c => `- #${c.shortId} ${c.who}: ${c.cue}`).join('\n')}`;
+}
