@@ -233,6 +233,86 @@ assert.deepEqual(calls.map(c => c.kind), ['plan', 'rewrite'], decisions.join('\n
 assert.ok(calls[1].text.includes('they write Azerbaijani but this reads Turkish'), calls[1].text);
 assert.equal(sent.length, 1);
 
+// 8. soak: one long chat with everything from rounds 14-24 at once (a rhetorical question, "jk", a goal burst,
+// pushback, Azerbaijani with a Turkish answer, a mention, "nvm", goodbyes), the real arbiter and brain, rotating
+// fake decisions. Nothing may throw, the lock must end free, and every thinking call gets the room facts.
+reset();
+const unhandled: unknown[] = [];
+process.on('unhandledRejection', e => unhandled.push(e));
+const KG = 'e2e-soak@g.us';
+repo.setBrainVersion(KG, 'v2');
+repo.setConfig('rate_per_min', '100'); // a fast test chat: the rate limit is not what is tested here
+repo.setConfig('rate_per_hour', '1000');
+const soakSent: any[] = [];
+const arbSoak = new Arbiter(
+  KG, repo, ai, {} as any, {} as any,
+  { abortCurrentPlan: false, executePlan: async (_jid: string, actions: any[], onSent: any) => {
+    for (const a of actions) {
+      soakSent.push(a);
+      if (a.type === 'message' || a.type === 'reply') {
+        n += 1;
+        repo.insertMessage({ id: `id${n}`, shortId: `m${n}`, chatJid: KG, senderJid: 'bot@s', senderName: 'ForceAI', fromMe: true, isBot: true, isOwner: false,
+          type: 'text', text: a.text, quotedId: null, mentionedJids: [], ts: Date.now(), raw: {} } as any);
+      }
+      onSent?.({ action: a });
+    }
+  } } as any,
+  { isOwnJid: () => false } as any,
+  { onDecision: (tier: string, d: string, reason: string) => decisions.push(`${tier}:${d}:${reason}`), onAction: () => undefined, onPhase: () => undefined },
+  brain,
+);
+const origParse = ai.client.messages.parse;
+const rotation = ['IGNORE', 'RESPOND', 'REACT', 'IGNORE', 'WAIT', 'RESPOND'];
+const lines = ['yok abi ben bilmiyorum valla, çok zor maç', 'messi just reminded everyone why they call him the goat, kanan in shambles lol', 'kanan, religiously', 'thoughts?'];
+let gateN = 0;
+let planN = 0;
+let usedTurkish = false;
+let lastSoakId = 'm1';
+ai.client.messages.parse = async (req: any) => {
+  const schema = JSON.stringify(req.output_config.format);
+  if (schema.includes('"addressed"')) {
+    const d = rotation[gateN++ % rotation.length];
+    gateOut = { scene: scene(), addressed: false, thought: { text: 'a take', why: '' }, scores: scores(d === 'RESPOND' ? 9 : 4), decision: d,
+      react: d === 'REACT' ? { target_message_id: lastSoakId, emoji: '😂' } : null, reason: `soak ${d}`, address_message_ids: [], wait_ms: d === 'WAIT' ? 200 : null };
+  } else if (schema.includes('"angles"')) {
+    // the answer to the Azerbaijani mention comes back in Turkish (the drift models have); other turns rotate
+    const content = req.messages[0].content;
+    const asked = (typeof content === 'string' ? content : content[0].text).includes('forceai sən bilirsən kim udacaq');
+    planOut = plan([{ type: 'message', text: asked && !usedTurkish ? lines[0] : lines[1 + (planN++ % (lines.length - 1))] }]);
+    if (asked) usedTurkish = true;
+  }
+  return origParse(req);
+};
+const soakSay = (who: 'a@s' | 'b@s', text: string) => {
+  n += 1;
+  const m = { id: `id${n}`, shortId: `m${n}`, chatJid: KG, senderJid: who, senderName: who === 'a@s' ? 'Murad' : 'Kanan', fromMe: false, isBot: false,
+    isOwner: false, type: 'text', text, quotedId: null, mentionedJids: [], ts: Date.now(), raw: {} } as any;
+  repo.insertMessage(m);
+  lastSoakId = m.shortId;
+  arbSoak.onMessage(m);
+};
+const script: [('a@s' | 'b@s'), string, number][] = [
+  ['a@s', 'who even watches the conference league?', 450], ['b@s', 'kanan does lol', 450],
+  ['b@s', 'madrid is the best club in history', 450], ['b@s', 'jk 😂', 450],
+  ['a@s', 'GOOOOL', 60], ['b@s', 'LETS GOOO!!', 60], ['a@s', 'MESSI!!', 450],
+  ['b@s', 'cringe', 450], ['a@s', 'qardas sen bilirsen kim udacaq?', 450], ['b@s', 'forceai sən bilirsən kim udacaq?', 450],
+  ['a@s', 'who has the link?', 120], ['a@s', 'nvm found it', 450],
+  ['b@s', 'ok gn guys', 120], ['a@s', 'спокойной', 450],
+];
+for (const [who, text, wait] of script) { soakSay(who, text); await sleep(wait); }
+await sleep(2500);
+ai.client.messages.parse = origParse;
+assert.deepEqual(unhandled, [], 'nothing threw');
+assert.equal(arbSoak.working, false, 'the lock ends free');
+const gates = calls.filter(c => c.kind === 'gate');
+assert.ok(gates.length >= 6 && gates.every(c => c.text.includes('ROOM NOW (facts counted in code):')), `${gates.length} gate calls`);
+for (const fact of ['- rhetorical (likely):', 'they say it was a joke', '- hype:', '- winding down:']) {
+  assert.ok(gates.some(c => c.text.includes(fact)), `a gate call saw "${fact}": ${decisions.filter(d => d.startsWith('T')).map(d => d.slice(0, 40)).join(' | ')}`);
+}
+assert.ok(decisions.some(d => d.startsWith('T0:HARD_TRIGGER')), 'the mention was answered as a direct trigger');
+assert.ok(calls.some(c => c.kind === 'rewrite' && c.text.includes('reads Turkish')), 'a Turkish answer to Azerbaijani got the rewrite');
+assert.ok(soakSent.length >= 2 && soakSent.length <= decisions.filter(d => /^(T1v2:(RESPOND|REACT|PAUSE)|T0:HARD_TRIGGER)/.test(d)).length * 2, `${soakSent.length} actions sent`);
+
 fs.rmSync(dir, { recursive: true, force: true });
 console.log('brain v2 end to end: all checks passed');
 process.exit(0);
