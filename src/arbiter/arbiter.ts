@@ -451,7 +451,8 @@ export class Arbiter {
     }
     const { out, policy } = res;
     const thought = out.thought ? ` | thought: ${out.thought.text.slice(0, 90)}` : '';
-    this.decision('T1v2', policy.decision, `${out.reason} | ${policy.why} | urge ${policy.motivation} vs bar ${policy.threshold}${thought}`);
+    const room = policy.room?.length ? ` (${policy.room.join(', ')})` : '';
+    this.decision('T1v2', policy.decision, `${out.reason} | ${policy.why} | urge ${policy.motivation} vs bar ${policy.threshold}${room}${thought}`);
 
     if (policy.decision === 'WAIT') {
       this.consecutiveWaits += 1;

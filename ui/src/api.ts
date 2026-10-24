@@ -115,7 +115,7 @@ function staticDemoResponse(path: string, options?: RequestInit): unknown {
   };
   if (url in exact) return exact[url];
   if (url.includes('/stat/') && url.endsWith('/history')) return []; // per-member stat timeline
-  if (url === '/api/brain/stats') return { spoke: 0, unprompted: 0, pauses: 0, reacted: 0, quiet: 0, vetoed: 0, rewrites: 0 };
+  if (url === '/api/brain/stats') return { spoke: 0, unprompted: 0, pauses: 0, reacted: 0, quiet: 0, vetoed: 0, rewrites: 0, chattiness: 'default' };
   if (url.startsWith('/api/people/')) {
     const jid = decodeURIComponent(url.slice('/api/people/'.length));
     return (d.profiles as Record<string, unknown>)[jid] ?? null;

@@ -1,5 +1,5 @@
 import type { GateV2Out } from './schemas.js';
-import type { Participation } from './signals.js';
+import { ignoredStreak, type Dynamics, type Participation, type Reception } from './signals.js';
 
 /**
  * Brain v2 turn-taking, in code (the "Inner Thoughts" idea: an agent keeps forming thoughts while it
@@ -17,7 +17,35 @@ export const POLICY = {
   SILENCE_MAX: 1.0,          // ...up to this much
   HARD_SHARE_CAP: 0.45,      // above this share of recent messages: no unprompted lines at all
   MIN_SPARK: 6,              // an unprompted line must be funny or new (humor or novelty at least this)
+  PRIVATE_PAIR: 0.8,         // two people in a back-and-forth: jumping in needs more
+  STORYTELLER: 0.5,          // someone mid-story: let them finish
+  HANGING_QUESTION: -0.5,    // a question nobody answered: a natural moment to come in
+  IGNORED_STEP: 0.5,         // each ignored unprompted line after the first raises the bar...
+  IGNORED_MAX: 1.0,          // ...up to this much
+  LAUGHED: -0.3,             // two recent unprompted lines got laughs: the room is with it
 } as const;
+
+/** Measured room signals (signals.ts) that move the bar for unprompted lines. */
+export interface Room {
+  dyn?: Dynamics;
+  rec?: Reception[];
+}
+
+const LAUGHING = /[😂🤣💀😭😹]/u;
+
+/** How the room moves the bar, with short notes for the live feed. */
+export function roomShift(room: Room): { delta: number; notes: string[] } {
+  let delta = 0;
+  const notes: string[] = [];
+  const add = (d: number, note: string) => { delta += d; notes.push(`${note} ${d > 0 ? '+' : ''}${d}`); };
+  if (room.dyn?.privatePair) add(POLICY.PRIVATE_PAIR, 'pair talking');
+  if (room.dyn?.storyteller) add(POLICY.STORYTELLER, 'mid-story');
+  if (room.dyn?.hangingQuestion) add(POLICY.HANGING_QUESTION, 'open question');
+  const streak = ignoredStreak(room.rec ?? []);
+  if (streak >= 2) add(Math.min(POLICY.IGNORED_MAX, POLICY.IGNORED_STEP * (streak - 1)), `${streak} ignored`);
+  else if ((room.rec ?? []).filter(r => r === 'laughed').length >= 2) add(POLICY.LAUGHED, 'landing');
+  return { delta: Math.round(delta * 10) / 10, notes };
+}
 
 export type FinalDecision = 'RESPOND' | 'WAIT' | 'IGNORE' | 'REACT';
 
@@ -28,6 +56,8 @@ export interface PolicyResult {
   /** a strong thought that came at the wrong moment: offer it again when the chat pauses */
   saveThought: boolean;
   why: string;
+  /** what moved the bar (for the live feed), e.g. "pair talking +0.8" */
+  room?: string[];
 }
 
 export function motivation(s: GateV2Out['scores']): number {
@@ -48,17 +78,21 @@ export function threshold(p: Participation, vibe: GateV2Out['scene']['vibe'], sh
   return Math.round(t * 10) / 10;
 }
 
-export function decide(out: GateV2Out, p: Participation, forceDecide: boolean, shift = 0): PolicyResult {
+export function decide(out: GateV2Out, p: Participation, forceDecide: boolean, shift = 0, room: Room = {}): PolicyResult {
   const m = out.thought ? Math.round(motivation(out.scores) * 10) / 10 : 0;
-  const t = threshold(p, out.scene.vibe, shift);
+  // bad news spotted in code counts as a serious moment even if the model read it as banter
+  const vibe = room.dyn?.serious ? 'serious' : out.scene.vibe;
+  const adj = roomShift(room);
+  const t = Math.round((threshold(p, vibe, shift) + adj.delta) * 10) / 10;
   // talk-share cap (Time to Talk, arXiv 2506.05309): past it, only answer when addressed
   // and on-topic-but-flat is not enough: it has to be funny or add something new
   const spark = Math.max(out.scores.humor, out.scores.novelty) >= POLICY.MIN_SPARK;
   const strong = !!out.thought && m >= t && spark && p.botShare < POLICY.HARD_SHARE_CAP;
   const saveThought = !!out.thought && out.scores.timing < 6
     && out.scores.relevance >= POLICY.SAVE_MIN_RELEVANCE && out.scores.humor >= POLICY.SAVE_MIN_HUMOR;
-  const react = out.react && out.react.target_message_id && out.react.emoji;
-  const base = { motivation: m, threshold: t };
+  // never a laughing reaction in a serious moment
+  const react = out.react && out.react.target_message_id && out.react.emoji && !(vibe === 'serious' && LAUGHING.test(out.react.emoji));
+  const base = { motivation: m, threshold: t, room: adj.notes };
 
   if (out.addressed) {
     // talked to: answer (or keep waiting if they are clearly still typing)
@@ -78,7 +112,7 @@ export function decide(out: GateV2Out, p: Participation, forceDecide: boolean, s
       return { ...base, decision: react ? 'REACT' : 'IGNORE', saveThought, why: 'unprompted line not strong enough' };
     case 'REACT':
       if (react) return { ...base, decision: 'REACT', saveThought, why: 'a reaction is enough' };
-      return { ...base, decision: 'IGNORE', saveThought, why: 'react without a target' };
+      return { ...base, decision: 'IGNORE', saveThought, why: vibe === 'serious' ? 'no laughing reaction in a serious moment' : 'react without a target' };
     case 'IGNORE':
     default:
       if (strong && m >= t + POLICY.UPGRADE_MARGIN && out.scores.timing >= 6) {

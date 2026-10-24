@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { downloadMediaMessage, type WAMessage } from 'baileys';
-import { INTRO_MESSAGE, DATA_DIR, DEFAULT_DAILY_BUDGET_USD, DEFAULT_MSG_PREFIX, DEFAULT_MSG_SUFFIX, DEMO_MODE, ELEVENLABS, GEMINI_TTS, IMAGE_DIR, IMAGE_GEN, INITIATIVE, applyMentions } from './config.js';
+import { INTRO_MESSAGE, BRAIN_V2, DATA_DIR, DEFAULT_DAILY_BUDGET_USD, DEFAULT_MSG_PREFIX, DEFAULT_MSG_SUFFIX, DEMO_MODE, ELEVENLABS, GEMINI_TTS, IMAGE_DIR, IMAGE_GEN, INITIATIVE, applyMentions } from './config.js';
 import { logger, waLogger } from './logger.js';
 import { openDb } from './memory/db.js';
 import { Repo } from './memory/repo.js';
@@ -26,6 +26,7 @@ import { AiClient } from './ai/client.js';
 import { PromptBuilder } from './ai/prompts.js';
 import { Gatekeeper } from './ai/gatekeeper.js';
 import { Generator } from './ai/generator.js';
+import { actualAfter, pickReplayCuts } from './ai/v2/replay.js';
 import { BrainV2 } from './ai/v2/brain.js';
 import { Arbiter } from './arbiter/arbiter.js';
 import { StickerLearning } from './stickers/learning.js';
@@ -789,7 +790,7 @@ export class App {
         note: p1?.note ?? '',
       },
       v2: {
-        gate: g2 ? `${g2.policy.decision}: ${g2.out.reason} (${g2.policy.why}; urge ${g2.policy.motivation} vs bar ${g2.policy.threshold})` : '(gatekeeper failed)',
+        gate: g2 ? `${g2.policy.decision}: ${g2.out.reason} (${g2.policy.why}; urge ${g2.policy.motivation} vs bar ${g2.policy.threshold}${g2.policy.room?.length ? `, ${g2.policy.room.join(', ')}` : ''})` : '(gatekeeper failed)',
         thought: g2?.out.thought?.text ?? null,
         scene: g2 ? `${g2.out.scene.topic} / ${g2.out.scene.vibe}${g2.out.scene.running_bit ? ` / bit: ${g2.out.scene.running_bit}` : ''}` : null,
         read: p2 ? `${p2.out.read.happening} Subtext: ${p2.out.read.subtext}` : null,
@@ -798,6 +799,38 @@ export class App {
         fixes: p2 ? [...p2.lint.dropped, ...(p2.rewritten ? [`rewrote ${p2.rewritten} message(s) to remove AI tells`] : [])] : [],
       },
     };
+  }
+
+  /**
+   * Dashboard "Replay with v2": walks through the last few hours of this group and asks the v2
+   * thinking stage what it would have done at up to REPLAY_POINTS moments (the end of each burst of
+   * messages), next to what really happened. Dry run: nothing is sent or saved. One cheap call per point.
+   */
+  async replayV2(jid: string): Promise<ReplayResult> {
+    const now = Date.now();
+    const rows = (this.repo.getRecentMessages(jid, 200) as any[]).filter(r => r.ts >= now - BRAIN_V2.REPLAY_HOURS * 3_600_000);
+    const cuts = pickReplayCuts(rows, BRAIN_V2.REPLAY_POINTS) as any[];
+    if (cuts.length < 3) return { error: `Not enough chat in the last ${BRAIN_V2.REPLAY_HOURS} hours to replay.` };
+
+    const at = async (cut: any, i: number): Promise<ReplayPoint> => {
+      const prev = i > 0 ? cuts[i - 1].ts : cut.ts - 5 * 60_000;
+      const res = await this.brainV2.gate(jid, prev, false, { dryRun: true, untilTs: cut.ts });
+      const actual = actualAfter(rows, cut.ts, i + 1 < cuts.length ? cuts[i + 1].ts : now);
+      const base = { ts: cut.ts, upTo: cut.short_id, who: cut.sender_name ?? '?', text: String(cut.text ?? '').slice(0, 140), actual };
+      if (!res) return { ...base, decision: 'FAILED', why: 'thinking stage failed', urge: 0, bar: 0, thought: null, react: null };
+      return {
+        ...base,
+        decision: res.policy.decision,
+        why: [res.policy.why, ...(res.policy.room ?? [])].join(', '),
+        urge: res.policy.motivation,
+        bar: res.policy.threshold,
+        thought: res.out.thought?.text ?? null,
+        react: res.policy.decision === 'REACT' && res.out.react ? res.out.react.emoji : null,
+      };
+    };
+    const points: ReplayPoint[] = [];
+    for (let i = 0; i < cuts.length; i += 3) points.push(...await Promise.all(cuts.slice(i, i + 3).map((c, k) => at(c, i + k))));
+    return { points, hours: BRAIN_V2.REPLAY_HOURS };
   }
 
   /** Switch a group between brain v1 (default) and v2. Takes effect on the next decision. */
@@ -955,6 +988,24 @@ export type BrainPreview =
     v1: { gate: string; actions: string[]; note: string };
     v2: { gate: string; thought: string | null; scene: string | null; read: string | null; angles: string[]; actions: string[]; fixes: string[] };
   };
+
+export interface ReplayPoint {
+  ts: number;
+  upTo: string;
+  who: string;
+  text: string;
+  /** what v2 would have done: RESPOND, WAIT, REACT, IGNORE (or FAILED) */
+  decision: string;
+  why: string;
+  urge: number;
+  bar: number;
+  thought: string | null;
+  react: string | null;
+  /** what the live bot really did right after that moment */
+  actual: string;
+}
+
+export type ReplayResult = { error: string } | { points: ReplayPoint[]; hours: number };
 
 /** One action as a readable line for the dashboard preview. */
 function describeAction(a: BotAction): string {

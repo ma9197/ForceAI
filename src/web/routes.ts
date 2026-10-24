@@ -92,7 +92,28 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
   fastify.get<{ Querystring: { jid?: string } }>('/api/brain/stats', async (req, reply) => {
     const jid = req.query.jid;
     if (!jid) return reply.code(400).send({ error: 'jid required' });
-    return app.repo.brainV2Stats(jid, Date.now() - 24 * 3_600_000);
+    return { ...app.repo.brainV2Stats(jid, Date.now() - 24 * 3_600_000), chattiness: app.repo.getConfig(`v2_chattiness_${jid}`) ?? 'default' };
+  });
+
+  // brain v2 chattiness for one group ('default' = follow Settings). Demo: harmless config flip.
+  fastify.post<{ Body: { jid?: string; value?: string } }>('/api/brain/chattiness', async (req, reply) => {
+    const { jid, value } = req.body ?? {};
+    if (!jid || (value !== 'quiet' && value !== 'balanced' && value !== 'chatty' && value !== 'default')) {
+      return reply.code(400).send({ error: 'jid and value (quiet, balanced, chatty or default) required' });
+    }
+    app.repo.setV2Chattiness(jid, value);
+    return { ok: true };
+  });
+
+  // "Replay with v2": what v2 would have done at a few moments of the last hours, next to what really
+  // happened. Nothing is sent or saved (one cheap thinking call per moment).
+  fastify.post<{ Body: { jid?: string } }>('/api/brain/replay', async (req, reply) => {
+    if (DEMO_MODE) return { error: 'Not available in the demo: it needs a real chat and an API key.' };
+    if (app.needsSetup) return reply.code(409).send({ error: 'Add your Anthropic API key first.' });
+    if (app.ai.isOverBudget()) return reply.code(409).send({ error: "Today's AI budget is used up." });
+    const jid = req.body?.jid;
+    if (!jid) return reply.code(400).send({ error: 'jid required' });
+    return app.replayV2(jid);
   });
 
   // "Compare v1 / v2": both brains answer the latest messages, nothing is sent or saved (4 AI calls)

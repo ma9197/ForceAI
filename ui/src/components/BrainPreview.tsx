@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from '../api';
+import { api, post } from '../api';
 
 type Preview =
   | { error: string }
@@ -8,17 +8,48 @@ type Preview =
     v2: { gate: string; thought: string | null; scene: string | null; read: string | null; angles: string[]; actions: string[]; fixes: string[] };
   };
 
-/** "Compare v1 / v2": what each brain would say right now. Nothing is sent to the group. */
-interface Stats { spoke: number; unprompted: number; pauses: number; reacted: number; quiet: number; vetoed: number; rewrites: number }
+interface Stats { spoke: number; unprompted: number; pauses: number; reacted: number; quiet: number; vetoed: number; rewrites: number; chattiness?: string }
 
+interface ReplayPoint { ts: number; upTo: string; who: string; text: string; decision: string; why: string; urge: number; bar: number; thought: string | null; react: string | null; actual: string }
+type Replay = { error: string } | { points: ReplayPoint[]; hours: number };
+
+const DECISION_LABEL: Record<string, string> = {
+  RESPOND: '💬 would speak', REACT: '😀 would react', WAIT: '⏳ would wait', IGNORE: '🤐 would stay quiet', FAILED: '✗ failed',
+};
+
+/** "Compare v1 / v2": what each brain would say right now, plus a replay of the last hours. Nothing is sent to the group. */
 export function BrainPreview({ jid, onClose }: { jid: string; onClose: () => void }) {
   const [data, setData] = useState<Preview | null>(null);
   const [busy, setBusy] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [replay, setReplay] = useState<Replay | null>(null);
+  const [replaying, setReplaying] = useState(false);
+  const [chattiness, setChattiness] = useState('default');
 
   useEffect(() => {
-    api<Stats>(`/api/brain/stats?jid=${encodeURIComponent(jid)}`).then(s => setStats(s && 'spoke' in s ? s : null)).catch(() => setStats(null));
+    api<Stats>(`/api/brain/stats?jid=${encodeURIComponent(jid)}`).then(s => {
+      setStats(s && 'spoke' in s ? s : null);
+      setChattiness(s?.chattiness ?? 'default');
+    }).catch(() => setStats(null));
   }, [jid]);
+
+  const changeChattiness = (value: string) => {
+    const before = chattiness;
+    setChattiness(value);
+    void post('/api/brain/chattiness', { jid, value }).catch(() => setChattiness(before));
+  };
+
+  const runReplay = async () => {
+    setReplaying(true);
+    try {
+      const res = await api<Replay & { demo?: boolean }>('/api/brain/replay', { method: 'POST', body: JSON.stringify({ jid }) });
+      setReplay(res.demo ? { error: 'Not available in the demo.' } : res);
+    } catch (err) {
+      setReplay({ error: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setReplaying(false);
+    }
+  };
 
   const run = async () => {
     setBusy(true);
@@ -45,7 +76,40 @@ export function BrainPreview({ jid, onClose }: { jid: string; onClose: () => voi
           reacted {stats.reacted}, stayed quiet {stats.quiet}. Second opinion said skip {stats.vetoed}, rewrote {stats.rewrites}.
         </div>
       )}
-      <button className="primary" disabled={busy} onClick={() => void run()}>{busy ? 'Thinking…' : data ? 'Run again' : 'Run comparison'}</button>
+      <label className="hint brain-chat">
+        v2 chattiness in this group:{' '}
+        <select value={chattiness} onChange={e => changeChattiness(e.target.value)}>
+          <option value="default">Same as Settings</option>
+          <option value="quiet">Quiet</option>
+          <option value="balanced">Balanced</option>
+          <option value="chatty">Chatty</option>
+        </select>
+      </label>
+      <div className="brain-buttons">
+        <button className="primary" disabled={busy} onClick={() => void run()}>{busy ? 'Thinking…' : data ? 'Run again' : 'Run comparison'}</button>
+        <button disabled={replaying} onClick={() => void runReplay()} title="What v2 would have done at a few moments of the last hours, next to what really happened. About 6 small AI calls. Nothing is sent.">
+          {replaying ? 'Replaying…' : 'Replay last hours with v2'}
+        </button>
+      </div>
+      {replay && 'error' in replay && <div className="hint" style={{ color: 'var(--danger)' }}>✗ {replay.error}</div>}
+      {replay && 'points' in replay && (
+        <div className="brain-replay">
+          <div className="brain-title">Replay: last {replay.hours} hours</div>
+          {replay.points.map(p => (
+            <div key={p.ts} className="brain-msg">
+              <div className="hint">
+                {new Date(p.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} #{p.upTo} {p.who}: {p.text}
+              </div>
+              <div>
+                <b>{DECISION_LABEL[p.decision] ?? p.decision}{p.react ? ` ${p.react}` : ''}</b>
+                {p.decision !== 'FAILED' && <span className="muted"> (urge {p.urge} vs bar {p.bar}; {p.why})</span>}
+              </div>
+              {p.thought && <div>Thought: {p.thought}</div>}
+              <div className="muted">Really: {p.actual}</div>
+            </div>
+          ))}
+        </div>
+      )}
       {data && 'error' in data && <div className="hint" style={{ color: 'var(--danger)' }}>✗ {data.error}</div>}
       {data && !('error' in data) && (
         <div className="brain-cols">

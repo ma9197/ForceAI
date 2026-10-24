@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
-import { ARBITER, BRAIN_V2, DEFAULT_MSG_PREFIX, DEFAULT_MSG_SUFFIX, VISION, formatCityTimes } from '../../config.js';
+import { ARBITER, BOT_NAME, BRAIN_V2, DEFAULT_MSG_PREFIX, DEFAULT_MSG_SUFFIX, VISION, formatCityTimes } from '../../config.js';
 import { logger } from '../../logger.js';
 import type { Repo } from '../../memory/repo.js';
 import type { ActionPlan, BotAction } from '../../types.js';
@@ -12,8 +12,9 @@ import { CHATTINESS_SHIFT, decide, type PolicyResult } from './policy.js';
 import { CRITIC_SYSTEM, GATEKEEPER_V2_SYSTEM, REWRITE_SYSTEM } from './prompts.js';
 import { CriticSchema, GateV2Schema, PlanV2Schema, RewriteSchema, type GateV2Out, type PlanV2Out } from './schemas.js';
 import {
-  botTargets, botTics, callbackKeywords, formatDecisionFeedback, formatCallbacks, formatLanded, formatParticipation, formatStyleStats,
-  formatTargets, formatTaste, formatTics, landedLines, participation, stripMarker, styleStats, type MsgRow,
+  botTargets, botTics, callbackKeywords, dynamics, formatDecisionFeedback, formatCallbacks, formatDynamics, formatGroupLaughs, formatLanded,
+  formatParticipation, formatStyleStats, formatTargets, formatTaste, formatTics, groupLaughs, landedLines, participation, reception,
+  stripMarker, styleStats, type Dynamics, type MsgRow,
 } from './signals.js';
 
 export interface GateV2Result {
@@ -110,16 +111,26 @@ export class BrainV2 {
     return text;
   }
 
-  /** T1: read the chat, form a thought, score it; the policy turns that into a decision. */
-  async gate(chatJid: string, consumedUpToTs: number, forceDecide: boolean, opts: { dryRun?: boolean } = {}): Promise<GateV2Result | null> {
-    const rows = this.repo.getRecentMessages(chatJid, BRAIN_V2.GATE_LINES) as MsgRow[];
+  /**
+   * T1: read the chat, form a thought, score it; the policy turns that into a decision.
+   * `untilTs` (replay) reads the chat as it was at that moment; it implies a dry run.
+   */
+  async gate(chatJid: string, consumedUpToTs: number, forceDecide: boolean, opts: { dryRun?: boolean; untilTs?: number } = {}): Promise<GateV2Result | null> {
+    const replay = opts.untilTs !== undefined;
+    const now = opts.untilTs ?? Date.now();
+    const recent = (n: number) => (replay ? this.repo.getRecentMessagesBefore(chatJid, now, n) : this.repo.getRecentMessages(chatJid, n)) as MsgRow[];
+    const rows = recent(BRAIN_V2.GATE_LINES);
+    const history = recent(BRAIN_V2.SIGNAL_LINES);
     const transcript = this.prompts.formatTranscript(rows, consumedUpToTs);
-    const part = participation(rows);
-    const lastScene = this.scenes.get(chatJid);
+    const part = participation(rows, now);
+    const dyn = dynamics(rows, BOT_NAME, now);
+    const rec = reception(history, BOT_NAME, now);
+    const lastScene = replay ? undefined : this.scenes.get(chatJid);
     const content = [
       transcript || '(chat is empty so far)',
-      formatCityTimes(this.repo.getClockCities()),
+      replay ? '' : formatCityTimes(this.repo.getClockCities()),
       formatParticipation(part),
+      formatDynamics(dyn, rec) ?? '',
       part.secondsSinceBot !== null && part.secondsSinceBot < 60 ? `(You last spoke ${part.secondsSinceBot}s ago.)` : '',
       lastScene ? `Your previous read of the scene: ${lastScene.topic} / ${lastScene.vibe}${lastScene.running_bit ? ` / bit: ${lastScene.running_bit}` : ''}` : '',
       forceDecide ? 'You have already waited the maximum amount of time. Decide RESPOND, REACT or IGNORE now: WAIT is not allowed.' : '',
@@ -143,8 +154,8 @@ export class BrainV2 {
         logger.warn({ stop: response.stop_reason }, 'brain v2 gatekeeper returned unparseable output');
         return null;
       }
-      const policy = decide(out, part, forceDecide, CHATTINESS_SHIFT[this.repo.getConfig('v2_chattiness') ?? 'balanced'] ?? 0);
-      if (!opts.dryRun) {
+      const policy = decide(out, part, forceDecide, CHATTINESS_SHIFT[this.repo.getV2Chattiness(chatJid)] ?? 0, { dyn, rec });
+      if (!opts.dryRun && !replay) {
         this.scenes.set(chatJid, out.scene);
         if (policy.saveThought && out.thought) this.thoughts.set(chatJid, { text: out.thought.text, at: Date.now() });
         if (policy.decision === 'RESPOND') this.thoughts.delete(chatJid);
@@ -157,7 +168,7 @@ export class BrainV2 {
   }
 
   /** The measured context block for the generator: scene, style numbers, own tics, share, callbacks. */
-  private signalsBlock(chatJid: string, rows: MsgRow[], consumedUpToTs: number | null): { text: string; medianLen: number; lowercaseShare: number; botTexts: string[]; humanTexts: string[] } {
+  private signalsBlock(chatJid: string, rows: MsgRow[], consumedUpToTs: number | null): { text: string; medianLen: number; lowercaseShare: number; botTexts: string[]; humanTexts: string[]; dyn: Dynamics } {
     const marker = this.marker();
     const history = this.repo.getRecentMessages(chatJid, BRAIN_V2.SIGNAL_LINES) as MsgRow[];
     const botTexts = history.filter(r => r.is_bot && r.type === 'text').map(r => stripMarker(r.text ?? '', marker.prefix, marker.suffix));
@@ -166,6 +177,7 @@ export class BrainV2 {
     const tics = botTics(botTexts.slice(-BRAIN_V2.TICS_WINDOW));
     const part = participation(history);
     const scene = this.scenes.get(chatJid);
+    const dyn = dynamics(rows, BOT_NAME);
 
     const newRows = consumedUpToTs === null ? rows.slice(-6) : rows.filter(r => r.ts > consumedUpToTs);
     const oldest = rows.length ? rows[0].ts : Date.now();
@@ -175,7 +187,9 @@ export class BrainV2 {
       scene ? `SCENE RIGHT NOW: ${scene.topic}. ${scene.threads}. vibe: ${scene.vibe}.${scene.running_bit ? ` running bit: ${scene.running_bit}${scene.bit_played_out ? ' (played out, let it go)' : ''}.` : ''}` : '',
       style ? formatStyleStats(style) : '',
       tics ? formatTics(tics) : '',
+      formatDynamics(dyn, []) ?? '',
       formatLanded(landedLines(history, t => stripMarker(t, marker.prefix, marker.suffix))) ?? '',
+      formatGroupLaughs(groupLaughs(history)) ?? '',
       formatTaste(
         this.repo.getFeedbackLines(1, BRAIN_V2.TASTE_LINES).map(t => stripMarker(t, marker.prefix, marker.suffix)),
         this.repo.getFeedbackLines(-1, BRAIN_V2.TASTE_LINES).map(t => stripMarker(t, marker.prefix, marker.suffix)),
@@ -184,7 +198,7 @@ export class BrainV2 {
       formatParticipation(part),
       callbacks ?? '',
     ].filter(Boolean);
-    return { text: parts.join('\n\n'), medianLen: style?.medianLen ?? 0, lowercaseShare: style?.lowercaseShare ?? 0, botTexts, humanTexts };
+    return { text: parts.join('\n\n'), medianLen: style?.medianLen ?? 0, lowercaseShare: style?.lowercaseShare ?? 0, botTexts, humanTexts, dyn };
   }
 
   /** T2: read, consider angles, write; then lint and (only if needed) one cheap rewrite. */
@@ -246,8 +260,13 @@ export class BrainV2 {
       }
 
       let actions = (out.actions as BotAction[]).slice(0, ARBITER.MAX_ACTIONS);
-      const serious = out.read.sincere || out.read.vibe === 'serious';
-      const lintCtx = { medianLen: signals.medianLen, lowercaseShare: signals.lowercaseShare, serious, marker: this.marker() };
+      // the model's read, or bad news spotted in code
+      const serious = out.read.sincere || out.read.vibe === 'serious' || !!signals.dyn.serious;
+      const lintCtx = {
+        medianLen: signals.medianLen, lowercaseShare: signals.lowercaseShare, serious, marker: this.marker(),
+        textOf: (id: string) => (this.repo.getMessageByShortId(id)?.text as string | undefined) ?? null,
+        lastHumanTexts: rows.filter(r => !r.is_bot && r.type === 'text').map(r => r.text ?? ''),
+      };
       let lint = lintPlan(actions, { ...lintCtx, recentBotTexts: signals.botTexts.slice(-30), recentHumanTexts: signals.humanTexts.slice(-40) });
       let rewritten = 0;
       if (lint.issues.length > 0) {
