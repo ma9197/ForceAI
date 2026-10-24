@@ -61,4 +61,5 @@ A WhatsApp group-chat AI that acts like one of the friends (banter, roasts, foot
 - `post()` in `ui/src/api.ts` must always send a JSON body, or Fastify returns 400.
 - Never put an emoji that carries U+FE0F (like ⚰️ or ❤️) inside a regex character class `[...]`: the selector then matches every ❤️ and ✔️. Use alternation (`/😂|🤣|⚰/u`).
 - Arbiter: after an awaited AI call, consume only the buffer you had before the call (`consumeBuffer(ts)`). Messages that arrived meanwhile can be direct mentions and must stay buffered.
+- Arbiter: Sleep, Pause and shutdown bump `holdEpoch`; a cycle checks `held(hold)` after each awaited AI call and drops its result. Only `runGeneration` may take over the lock: `evaluate()` releases it only if `cycle` is unchanged (a queued Influence runs inside the cycle's `postCycle`).
 - Railway: the domain targets port 8080; after attaching a volume you must click Deploy or it never mounts.

@@ -836,36 +836,49 @@ export class Repo {
     spoke: number; unprompted: number; pauses: number; reacted: number; quiet: number; vetoed: number; rewrites: number;
     shadow: { spoke: number; reacted: number; quiet: number; waited: number; wrote: number }; v1Spoke: number;
   } {
-    const rows = this.db.prepare("SELECT tier, decision, reason, ts FROM decisions WHERE chat_jid = ? AND ts >= ? AND tier IN ('T1v2', 'T2v2', 'S1v2', 'S2v2', 'T1') ORDER BY ts").all(chatJid, sinceTs) as { tier: string; decision: string; reason: string; ts: number }[];
+    const rows = this.db.prepare("SELECT tier, decision, reason, ts FROM decisions WHERE chat_jid = ? AND ts >= ? AND tier IN ('T1v2', 'T2v2', 'S1v2', 'S2v2', 'T1') ORDER BY ts, id").all(chatJid, sinceTs) as { tier: string; decision: string; reason: string; ts: number }[];
     const s = { spoke: 0, unprompted: 0, pauses: 0, reacted: 0, quiet: 0, vetoed: 0, rewrites: 0, shadow: { spoke: 0, reacted: 0, quiet: 0, waited: 0, wrote: 0 }, v1Spoke: 0 };
-    // v1's own "speak" calls in the same moments the shadow saw (each shadow row pairs with one v1 T1 row)
-    const shadowFrom = rows.find(r => r.tier === 'S1v2')?.ts ?? Infinity;
+    // v1's own "speak" calls in the same moments the shadow saw: each shadow row is paired with the v1 row
+    // of its moment (both calls run at once, so either can be logged first: nearest in time, then in order)
+    const used = new Set<number>();
+    rows.forEach((r, i) => {
+      if (r.tier !== 'S1v2') return;
+      let best = -1;
+      rows.forEach((t, j) => {
+        if (t.tier !== 'T1' || used.has(j) || Math.abs(t.ts - r.ts) > 60_000) return;
+        const better = best < 0 || Math.abs(t.ts - r.ts) < Math.abs(rows[best].ts - r.ts)
+          || (Math.abs(t.ts - r.ts) === Math.abs(rows[best].ts - r.ts) && Math.abs(j - i) < Math.abs(best - i));
+        if (better) best = j;
+      });
+      if (best < 0) return;
+      used.add(best);
+      if (r.decision !== 'FAILED' && rows[best].decision === 'RESPOND') s.v1Spoke += 1;
+    });
+    // what started the writer: a T2v2 row is the result of the T1v2 row before it (one cycle at a time)
+    let started: 'asked' | 'unprompted' | 'pause' | null = null;
     for (const r of rows) {
       if (r.tier === 'S2v2') {
         if (r.decision === 'WOULD_SAY') s.shadow.wrote += 1;
-        continue;
-      }
-      if (r.tier === 'S1v2') {
+      } else if (r.tier === 'S1v2') {
         if (r.decision === 'RESPOND') s.shadow.spoke += 1;
         else if (r.decision === 'REACT') s.shadow.reacted += 1;
         else if (r.decision === 'WAIT') s.shadow.waited += 1;
-        else s.shadow.quiet += 1;
-        continue;
-      }
-      if (r.tier === 'T1') {
-        if (r.decision === 'RESPOND' && r.ts >= shadowFrom) s.v1Spoke += 1;
-        continue;
-      }
-      if (r.tier === 'T1v2') {
-        if (r.decision === 'RESPOND') {
-          s.spoke += 1;
-          if (!/\| addressed/.test(r.reason)) s.unprompted += 1;
-        } else if (r.decision === 'PAUSE') s.pauses += 1;
+        else if (r.decision !== 'FAILED') s.shadow.quiet += 1;
+      } else if (r.tier === 'T1v2') {
+        if (r.decision === 'RESPOND') started = /\| addressed/.test(r.reason) ? 'asked' : 'unprompted';
+        else if (r.decision === 'PAUSE') started = 'pause';
         else if (r.decision === 'REACT') s.reacted += 1;
         else if (r.decision === 'IGNORE') s.quiet += 1;
-      } else {
+      } else if (r.tier === 'T2v2') {
+        // "spoke" = what was really sent: direct answers too (they skip T1v2), not lines the second opinion stopped
+        if (r.decision === 'SEND') {
+          s.spoke += 1;
+          if (started === 'unprompted') s.unprompted += 1;
+          if (started === 'pause') s.pauses += 1;
+        }
         if (r.reason.includes('second opinion said skip')) s.vetoed += 1;
         if (/rewrote \d/.test(r.reason)) s.rewrites += 1;
+        started = null;
       }
     }
     return s;

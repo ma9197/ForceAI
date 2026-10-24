@@ -81,6 +81,11 @@ export class BrainV2 {
     this.thoughts.delete(chatJid);
   }
 
+  /** The owner rated something or new house rules came in: rebuild this group's gate context (only v2's, only this group). */
+  invalidate(chatJid: string): void {
+    this.contextCache.delete(chatJid);
+  }
+
   /** A saved thought that is still fresh, taken (so it is offered once). */
   takeThought(chatJid: string): SavedThought | null {
     const t = this.thoughts.get(chatJid) ?? null;
@@ -100,10 +105,15 @@ export class BrainV2 {
     };
   }
 
-  /** Compact, slow-changing group context for the gatekeeper (who is here, what is going on lately). */
-  private gateContext(chatJid: string): string {
+  /**
+   * Compact, slow-changing group context for the gatekeeper (who is here, what is going on lately). A
+   * replay (untilTs) gets it as it was then: no owner calls (their reasons quote later chat), no house
+   * rules learned later, phrases counted up to that moment. Never cached.
+   */
+  private gateContext(chatJid: string, untilTs?: number): string {
+    const replay = untilTs !== undefined;
     const cached = this.contextCache.get(chatJid);
-    if (cached && cached.version === this.prompts.memoryVersion && Date.now() - cached.at < 5 * 60_000) return cached.text;
+    if (!replay && cached && cached.version === this.prompts.memoryVersion && Date.now() - cached.at < 5 * 60_000) return cached.text;
     const members = this.repo.getMembersForChat(chatJid);
     const who = members.map(m => {
       const name = m.display_name ?? m.jid.split('@')[0];
@@ -115,20 +125,20 @@ export class BrainV2 {
     const jokes = this.repo.getVoiceItems(chatJid).filter(i => i.category === 'joke' || i.category === 'reference').slice(0, 15);
     const bits = jokes.map(i => `- ${i.content}`).join('\n');
     const summary = this.repo.getSummary(chatJid)?.summary;
-    const calls = formatDecisionFeedback(this.repo.getDecisionFeedback(chatJid, BRAIN_V2.DECISION_EXAMPLES));
+    const calls = replay ? null : formatDecisionFeedback(this.repo.getDecisionFeedback(chatJid, BRAIN_V2.DECISION_EXAMPLES));
     // measured phrases the running-jokes list does not already cover
     const jokeText = jokes.map(i => i.content.toLowerCase()).join(' | ');
-    const phrases = formatBits(this.bits(chatJid).filter(b => !jokeText.includes(b.phrase)).slice(0, 4));
+    const phrases = formatBits(this.bits(chatJid, untilTs).filter(b => !jokeText.includes(b.phrase)).slice(0, 4), untilTs);
     const text = [
       `PEOPLE IN THIS CHAT:\n${who || '(nobody known yet)'}`,
       protectedPeople ? `PROTECTED PEOPLE (owner's absolute boundaries; never plan a joke that crosses them):\n${protectedPeople}` : '',
       bits ? `RUNNING JOKES AND REFERENCES OF THIS GROUP:\n${bits}` : '',
       summary ? `WHAT HAS BEEN GOING ON LATELY:\n${summary}` : '',
       phrases ?? '',
-      formatTasteRules(readTasteRules(this.repo, chatJid)) ?? '',
+      formatTasteRules(this.tasteRules(chatJid, untilTs)) ?? '',
       calls ?? '',
     ].filter(Boolean).join('\n\n');
-    this.contextCache.set(chatJid, { text, version: this.prompts.memoryVersion, at: Date.now() });
+    if (!replay) this.contextCache.set(chatJid, { text, version: this.prompts.memoryVersion, at: Date.now() });
     return text;
   }
 
@@ -163,7 +173,7 @@ export class BrainV2 {
         max_tokens,
         system: [
           { type: 'text', text: GATEKEEPER_V2_SYSTEM, cache_control: { type: 'ephemeral', ttl: '1h' } },
-          { type: 'text', text: replay ? this.withoutLaterSummary([{ type: 'text', text: this.gateContext(chatJid) }], chatJid, now)[0].text : this.gateContext(chatJid), cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: replay ? this.withoutLaterSummary([{ type: 'text', text: this.gateContext(chatJid, now) }], chatJid, now)[0].text : this.gateContext(chatJid), cache_control: { type: 'ephemeral' } },
         ] as any,
         messages: [{ role: 'user', content }],
         output_config: { format: zodOutputFormat(GateV2Schema), ...(effort ? { effort } : {}) },
@@ -209,8 +219,18 @@ export class BrainV2 {
     return later ? blocks.map(b => ({ ...b, text: b.text.split(later).join('(left out in a replay: it describes later events)') })) : blocks;
   }
 
-  /** The group's running phrases over the last days (a heavier query, so cached per group). */
-  private bits(chatJid: string): Bit[] {
+  /** House rules, minus ones learned after a replayed moment. */
+  private tasteRules(chatJid: string, untilTs?: number): string[] {
+    if (untilTs !== undefined && Number(this.repo.getConfig(`v2_taste_at_${chatJid}`) ?? 0) > untilTs) return [];
+    return readTasteRules(this.repo, chatJid);
+  }
+
+  /** The group's running phrases over the last days (a heavier query, so cached per group; a replay counts them as they were then). */
+  private bits(chatJid: string, untilTs?: number): Bit[] {
+    if (untilTs !== undefined) {
+      const rows = (this.repo.getTextMessagesSince(chatJid, untilTs - BRAIN_V2.BITS_DAYS * 86_400_000, BRAIN_V2.BITS_MAX_ROWS, false) as MsgRow[]).filter(r => r.ts <= untilTs);
+      return runningBits(rows, BOT_NAME);
+    }
     const cached = this.bitsCache.get(chatJid);
     if (cached && Date.now() - cached.at < BRAIN_V2.BITS_CACHE_MS) return cached.bits;
     const rows = this.repo.getTextMessagesSince(chatJid, Date.now() - BRAIN_V2.BITS_DAYS * 86_400_000, BRAIN_V2.BITS_MAX_ROWS, false) as MsgRow[];
@@ -250,14 +270,14 @@ export class BrainV2 {
     const easyFirst = easyOn.map(n => n.trim().split(/\s+/)[0].toLowerCase());
     // the group's phrases, minus a bit the scene calls played out and phrases about someone to go easy on
     const playedOut = scene?.bit_played_out && scene.running_bit ? scene.running_bit.toLowerCase() : '';
-    const phrases = this.bits(chatJid).filter(b => !(playedOut && playedOut.includes(b.phrase)) && !easyFirst.some(n => b.phrase.split(' ').includes(n)));
+    const phrases = this.bits(chatJid, untilTs).filter(b => !(playedOut && playedOut.includes(b.phrase)) && !easyFirst.some(n => b.phrase.split(' ').includes(n)));
 
     const parts = [
       scene ? `SCENE RIGHT NOW: ${scene.topic}. ${scene.threads}. vibe: ${scene.vibe}.${scene.running_bit ? ` running bit: ${scene.running_bit}${scene.bit_played_out ? ' (played out, let it go)' : ''}.` : ''}` : '',
       style ? formatStyleStats(style) : '',
       tics ? formatTics(tics) : '',
       formatRoomNow({ dyn, part, asked, map: roomMap(rows, names, BOT_NAME, now), cues: ironyCues(history, now) }, 'writer') ?? '',
-      formatTasteRules(readTasteRules(this.repo, chatJid)) ?? '',
+      formatTasteRules(this.tasteRules(chatJid, untilTs)) ?? '',
       formatLinesThatWorked(
         this.repo.getFeedbackLines(chatJid, 1, BRAIN_V2.TASTE_LINES, now).map(strip), // a replay never sees lines liked later
         landedLines(history, strip).filter(l => notDisliked(l.text)),
@@ -266,7 +286,7 @@ export class BrainV2 {
       ) ?? '',
       formatTeasing(targets, teaseReception(history, names), BRAIN_V2.TARGET_MIN, BRAIN_V2.TARGET_WINDOW) ?? '',
       callbacks ?? '',
-      formatBits(phrases) ?? '',
+      formatBits(phrases, now) ?? '',
       formatTakes(ownTakes((this.repo.getTextMessagesSince(chatJid, now - 7 * 86_400_000, 200, true) as MsgRow[]).filter(r => r.ts <= now), strip, now).filter(x => notDisliked(x.text)), now) ?? '',
     ].filter(Boolean);
     return { text: parts.join('\n\n'), medianLen: style?.medianLen ?? 0, lowercaseShare: style?.lowercaseShare ?? 0, botTexts, humanTexts, dyn, style, disliked };

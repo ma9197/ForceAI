@@ -635,6 +635,7 @@ assert.equal(calls.length, 2, 'answers when addressed never get a second opinion
 
 // owner's calls on v2 decisions reach the v2 gatekeeper as examples of when to talk
 const d1 = repo.insertDecision(G, 'T1v2', 'RESPOND', 'r | strong thought | urge 7 vs bar 6.5 | thought: roast kanan again');
+repo.insertDecision(G, 'T2v2', 'SEND', 'v2 line');
 const d2 = repo.insertDecision(G, 'T1v2', 'IGNORE', 'r | nothing worth adding | urge 4 vs bar 6.5 | thought: ask about the match');
 const d3 = repo.insertDecision(G, 'T2', 'SEND', 'v1 line');
 assert.equal(repo.setDecisionFeedback(d1, 'bad'), true);
@@ -661,6 +662,21 @@ assert.equal(sb.spoke, 1, 'RESPOND counted');
 assert.equal(sb.unprompted, 1, 'not addressed: unprompted');
 assert.equal(sb.quiet, 1);
 assert.ok(sb.rewrites >= 1 || sb.vetoed >= 0);
+// the scoreboard counts what was really sent: direct answers too, never a line the second opinion stopped
+{
+  const GX = 'stats@g.us';
+  repo.insertDecision(GX, 'T2v2', 'SEND', 'answered a mention (no T1v2 row)');
+  repo.insertDecision(GX, 'T1v2', 'RESPOND', 'r | strong thought | urge 7 vs bar 6.5');
+  repo.insertDecision(GX, 'T2v2', 'NOTHING', 'second opinion said skip: too try-hard');
+  repo.insertDecision(GX, 'T1v2', 'PAUSE', 'chat paused, offering a saved thought: x');
+  repo.insertDecision(GX, 'T2v2', 'SEND', 'v2 line');
+  repo.insertDecision(GX, 'T1v2', 'RESPOND', 'r | addressed: direct trigger on m4 | urge 0 vs bar 6.5');
+  repo.insertDecision(GX, 'T2v2', 'SEND', 'v2 answer');
+  repo.insertDecision(GX, 'T1v2', 'FAILED', 'gatekeeper failed or unparseable');
+  repo.insertDecision(GX, 'T1v2', 'DROPPED', 'put to sleep or paused while thinking: nothing sent');
+  const st = repo.brainV2Stats(GX, 0);
+  assert.deepEqual([st.spoke, st.unprompted, st.pauses, st.vetoed, st.quiet], [3, 0, 1, 1, 0], JSON.stringify(st));
+}
 assert.equal(repo.setDecisionFeedback(d1, null), true);
 assert.equal(repo.getDecisionFeedback(G, 8).length, 1);
 
@@ -682,6 +698,22 @@ prompts.memoryVersion += 1;
 calls.length = 0;
 await brain.gate(G, cutRow.ts - 30_000, false, { untilTs: cutRow.ts });
 assert.ok(!calls[0].system[1].text.includes('Murad got fired'), 'the gate in a replay never sees a summary of later events');
+// owner calls (their reasons quote later chat) and house rules learned after the moment stay out of a replay
+repo.setConfig(`v2_taste_rules_${G}`, JSON.stringify(['keep jump-ins to one line']));
+repo.setConfig(`v2_taste_at_${G}`, String(Date.now()));
+brain.invalidate(G);
+calls.length = 0;
+await brain.gate(G, Date.now() - 60_000, false, { dryRun: true });
+assert.ok(calls[0].system[1].text.includes("YOUR OWNER'S CALLS") && calls[0].system[1].text.includes('keep jump-ins to one line'), 'live: both are there');
+calls.length = 0;
+await brain.gate(G, cutRow.ts - 30_000, false, { untilTs: cutRow.ts });
+assert.ok(!calls[0].system[1].text.includes("YOUR OWNER'S CALLS") && !calls[0].system[1].text.includes('keep jump-ins to one line'), calls[0].system[1].text);
+repo.setConfig(`v2_taste_at_${G}`, String(cutRow.ts - 1000)); // rules learned before the moment are fine
+calls.length = 0;
+await brain.gate(G, cutRow.ts - 30_000, false, { untilTs: cutRow.ts });
+assert.ok(calls[0].system[1].text.includes('keep jump-ins to one line'));
+repo.setConfig(`v2_taste_rules_${G}`, '[]');
+brain.invalidate(G);
 calls.length = 0;
 const obsBefore = (db.prepare('SELECT COUNT(*) AS n FROM member_observations').get() as any).n;
 genAnswer = { ...genAnswer, actions: [{ type: 'message', text: 'that was a weird pass' }], observation: { note: 'Murad seems tired', about_message_id: 'm50' } };
@@ -735,9 +767,14 @@ const sd = repo.insertDecision(GS, 'S1v2', 'RESPOND', 'banter | strong thought |
 repo.insertDecision(GS, 'T1', 'RESPOND', 'v1 spoke');
 repo.insertDecision(GS, 'S1v2', 'IGNORE', 'r | nothing worth adding | urge 3 vs bar 6.5');
 repo.insertDecision(GS, 'T1', 'IGNORE', 'v1 quiet');
+await new Promise(r => setTimeout(r, 5));
+repo.insertDecision(GS, 'T1', 'RESPOND', 'v1 spoke, its shadow failed');
+repo.insertDecision(GS, 'S1v2', 'FAILED', 'thinking stage failed or unparseable');
+await new Promise(r => setTimeout(r, 5));
+repo.insertDecision(GS, 'T1', 'RESPOND', 'v1 spoke, no shadow row at all (over budget)');
 assert.equal(repo.setDecisionFeedback(sd, 'good'), true, 'shadow calls teach the gatekeeper too');
 const sst = repo.brainV2Stats(GS, 0);
-assert.deepEqual([sst.shadow.spoke, sst.shadow.quiet, sst.v1Spoke], [1, 1, 1], 'v1 counted only in the moments the shadow saw');
+assert.deepEqual([sst.shadow.spoke, sst.shadow.quiet, sst.v1Spoke], [1, 1, 1], 'v1 counted only in the moments the shadow saw (and did not fail)');
 repo.addBrainAb(G, 'v2'); repo.addBrainAb(G, 'v2'); repo.addBrainAb(G, 'tie');
 assert.deepEqual(repo.getBrainAb(G), { v1: 0, v2: 2, tie: 1 });
 assert.deepEqual(repo.getBrainAb('other@g.us'), { v1: 0, v2: 0, tie: 0 });

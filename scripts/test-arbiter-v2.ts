@@ -16,6 +16,8 @@ Object.assign(BRAIN_V2 as any, { LULL_MS: 1200, LULL_MIN_HUMAN_MSGS: 3 });
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forceai-arb-'));
 const repo = new Repo(openDb(path.join(dir, 'forceai.db')));
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+repo.setConfig('rate_per_min', '100'); // many replies in a short test: the rate limit is not what is tested here
+repo.setConfig('rate_per_hour', '1000');
 
 let n = 0;
 function msg(chatJid: string, who: string, text: string) {
@@ -33,6 +35,15 @@ let genDelay = 0;
 let gateFail = false;
 let v1Decision = 'RESPOND';
 let genFail = false;
+let v1GateDelay = 0;
+let v1GenDelay = 0;
+let inFlight = 0;
+let maxInFlight = 0;
+const track = async <T>(f: () => Promise<T>): Promise<T> => {
+  inFlight += 1;
+  maxInFlight = Math.max(maxInFlight, inFlight);
+  try { return await f(); } finally { inFlight -= 1; }
+};
 function harness(chatJid: string) {
   const sent: any[] = [];
   const fakeBrain: any = {
@@ -45,7 +56,7 @@ function harness(chatJid: string) {
         reason: 'r', address_message_ids: ['m1'], wait_ms: null, ...v2Gate };
       return { out, policy: { decision: v2Gate.decision, motivation: 7, threshold: 6.5, saveThought: true, why: 'test' } };
     },
-    generate: async (input: any) => {
+    generate: async (input: any) => track(async () => {
       log.push(`v2gen:${chatJid}:${input.thought ?? ''}`);
       log.push(`unprompted:${!!input.unprompted}:${input.thoughtWhen ?? ''}`);
       log.push(`ids:${(input.addressIds ?? []).join(',')}`);
@@ -53,15 +64,15 @@ function harness(chatJid: string) {
       if (genDelay) await sleep(genDelay);
       if (genFail) return null;
       return { plan: { actions: [{ type: 'message', text: 'v2 says hi' }], note: 'v2' } };
-    },
+    }),
     hasThought: () => true,
     takeThought: () => ({ text: 'saved line', at: Date.now() }),
   };
   const arb = new Arbiter(
     chatJid, repo,
     { isOverBudget: () => false } as any,
-    { decide: async () => { log.push(`v1gate:${chatJid}`); return { decision: v1Decision, reason: 'v1', address_message_ids: [], heat: 'low', wait_ms: 150 }; } } as any,
-    { generate: async () => { log.push(`v1gen:${chatJid}`); return { actions: [{ type: 'message', text: 'v1 says hi' }], note: 'v1' }; } } as any,
+    { decide: async () => { log.push(`v1gate:${chatJid}`); if (v1GateDelay) await sleep(v1GateDelay); return { decision: v1Decision, reason: 'v1', address_message_ids: [], heat: 'low', wait_ms: 150 }; } } as any,
+    { generate: async () => track(async () => { log.push(`v1gen:${chatJid}`); if (v1GenDelay) await sleep(v1GenDelay); return { actions: [{ type: 'message', text: 'v1 says hi' }], note: 'v1' }; }) } as any,
     { abortCurrentPlan: false, executePlan: async (_jid: string, actions: any[], onSent: any) => { for (const a of actions) { sent.push(a); onSent?.({ action: a }); } } } as any,
     { isOwnJid: () => false } as any,
     { onDecision: (tier: string, d: string) => log.push(`${tier}:${d}`), onAction: () => undefined, onPhase: () => undefined },
@@ -300,6 +311,93 @@ log.length = 0;
 shadow.arb.onMessage(msg(VS, 'a', 'back to plain v1'));
 await sleep(600);
 assert.ok(!log.some(l => l.startsWith(`v2gate:${VS}`)), 'plain v1: no shadow calls');
+
+// the shadow's thinking stage fails: the feed says so (a broken v2 must not just look quiet)
+log.length = 0;
+repo.setBrainVersion(VS, 'shadow');
+gateFail = true;
+shadow.arb.onMessage(msg(VS, 'a', 'shadow, are you there'));
+await sleep(700);
+gateFail = false;
+assert.ok(log.includes('S1v2:FAILED') && log.includes(`v1gen:${VS}`), log.join(' '));
+repo.setBrainVersion(VS, 'v1');
+
+// Influence pressed while a reply is being written: it runs right after, under the same lock. A message
+// that comes in meanwhile waits for it (before the fix: two replies at once and one message answered twice)
+{
+  const VI = 'vi@g.us';
+  const h = harness(VI);
+  log.length = 0;
+  v1GenDelay = 600;
+  maxInFlight = 0;
+  h.arb.onMessage(msg(VI, 'a', 'who is playing tonight')); // judged at ~300 ms (shortest debounce), reply written until ~900
+  await sleep(450);
+  h.arb.forceGenerate('say hi to everyone'); // queued behind the reply; runs ~900 to ~1500
+  await sleep(550);
+  h.arb.onMessage(msg(VI, 'b', 'and what time')); // arrives while the Influence reply is being written
+  await sleep(2000);
+  v1GenDelay = 0;
+  assert.equal(maxInFlight, 1, 'never two replies at once');
+  assert.equal(h.sent.length, 3, `reply, Influence, reply to the later message: ${log.join(' ')}`);
+  assert.equal(log.filter(l => l === 'T1:RESPOND').length, 2, 'each message is judged once');
+}
+
+// Sleep pressed while v1's gatekeeper is thinking: nothing is sent and it stays asleep. Then a wake
+// ("ForceAI") still works, and Influence while asleep still sends (as before).
+{
+  const VP = 'vp@g.us';
+  const h = harness(VP);
+  log.length = 0;
+  v1GateDelay = 300;
+  h.arb.onMessage(msg(VP, 'a', 'kanan is cooked')); // gate runs ~300 to ~600 ms
+  await sleep(450);
+  h.arb.sleep();
+  await sleep(600);
+  v1GateDelay = 0;
+  assert.equal(h.sent.length, 0, log.join(' '));
+  assert.ok(h.arb.asleep && log.includes('T1:DROPPED'), log.join(' '));
+  h.arb.onMessage(msg(VP, 'b', 'ForceAI wake up'));
+  await sleep(700);
+  assert.ok(!h.arb.asleep && h.sent.length === 1, log.join(' '));
+  h.arb.sleep();
+  h.arb.forceGenerate('tell them you are back');
+  await sleep(300);
+  assert.equal(h.sent.length, 2, 'Influence while asleep still sends');
+}
+
+// Sleep pressed while the reply is being written (v1): not sent, and the reply does not wake it back up
+{
+  const VQ = 'vq@g.us';
+  const h = harness(VQ);
+  log.length = 0;
+  v1GenDelay = 300;
+  h.arb.onMessage(msg(VQ, 'a', 'who won')); // reply written ~300 to ~600 ms
+  await sleep(450);
+  h.arb.sleep();
+  await sleep(500);
+  v1GenDelay = 0;
+  assert.ok(h.sent.length === 0 && h.arb.asleep && log.includes('T2:DROPPED'), log.join(' '));
+}
+
+// Pause pressed while the v2 gate is thinking: its reaction is not tapped
+{
+  const VR = 'vr@g.us';
+  repo.setBrainVersion(VR, 'v2');
+  const h = harness(VR);
+  log.length = 0;
+  v2Gate.decision = 'REACT';
+  v2Gate.react = { target_message_id: 'm1', emoji: '😂' };
+  gateDelay = 300;
+  h.arb.onMessage(msg(VR, 'a', 'HE MISSED AGAIN')); // gate runs ~300 to ~600 ms
+  await sleep(450);
+  h.arb.setPaused(true);
+  await sleep(600);
+  gateDelay = 0;
+  v2Gate.decision = 'IGNORE';
+  v2Gate.react = null;
+  assert.ok(h.sent.length === 0 && log.includes('T1v2:DROPPED'), log.join(' '));
+  h.arb.setPaused(false);
+}
 
 fs.rmSync(dir, { recursive: true, force: true });
 console.log('arbiter routing: all checks passed');
