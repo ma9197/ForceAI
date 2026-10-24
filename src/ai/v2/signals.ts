@@ -471,7 +471,8 @@ export function dynamics(rows: MsgRow[], botName: string, now = Date.now()): Dyn
       if (q.short_id && now - q.ts < 5 * 60_000) rhetorical = { shortId: q.short_id, who: q.sender_name ?? '?' };
       break;
     }
-    const answered = recent.slice(i + 1).some(r => r.sender_jid !== q.sender_jid) || rows.some(r => r.is_bot && r.ts > q.ts);
+    // answered by someone else or the bot, or taken back by the asker ("nvm found it", "забей", "boş ver")
+    const answered = recent.slice(i + 1).some(r => r.sender_jid !== q.sender_jid || RETRACT.test((r.text ?? '').trim())) || rows.some(r => r.is_bot && r.ts > q.ts);
     if (!answered && q.short_id) hangingQuestion = { shortId: q.short_id, who: q.sender_name ?? '?' };
     break;
   }
@@ -917,6 +918,12 @@ export function ironyCues(rows: MsgRow[], now = Date.now(), max = 3): IronyCue[]
   const found: (IronyCue & { strength: number; ts: number })[] = [];
   for (const r of recent) {
     const raw = r.text ?? '';
+    // "jk" / "шучу" / "zarafat edirəm" right after their own line: that line was the joke
+    if (JK.test(raw.trim())) {
+      const prev = human.filter(x => x.sender_jid === r.sender_jid && x.ts < r.ts && r.ts - x.ts <= 2 * 60_000).pop();
+      if (prev?.short_id) found.push({ shortId: prev.short_id, who: prev.sender_name ?? '?', cue: `"${raw.trim().slice(0, 30)}" right after it: they were joking`, strength: 3, ts: prev.ts });
+      continue;
+    }
     const t = `${raw}\n${raw.toLocaleLowerCase('tr')}`; // Turkish İ / I lowercase properly
     let cue: string | null = null;
     let strength = 0;
@@ -940,9 +947,23 @@ export function ironyCues(rows: MsgRow[], now = Date.now(), max = 3): IronyCue[]
     }
     if (cue && r.short_id) found.push({ shortId: r.short_id, who: r.sender_name ?? '?', cue, strength, ts: r.ts });
   }
-  return found.sort((a, b) => b.strength - a.strength || b.ts - a.ts).slice(0, max)
+  // one cue per message (the strongest), strongest first, then shown in chat order
+  const best = [...new Map(found.sort((a, b) => a.strength - b.strength).map(c => [c.shortId, c])).values()];
+  return best.sort((a, b) => b.strength - a.strength || b.ts - a.ts).slice(0, max)
     .sort((a, b) => a.ts - b.ts).map(({ strength: _s, ts: _t, ...c }) => c);
 }
+
+/** "jk" and friends as the whole message (a laugh or wink may follow). "no kidding" is not one. */
+const JK = new RegExp('^(?:' + [
+  'jk', 'j/k', 'just kidding', 'kidding', 'шучу', 'я шучу', 'прикалываюсь', 'shuchu',
+  ...['şaka şaka', 'şaka yapıyorum', 'şakaydı', 'zarafat edirəm', 'zarafatdı', 'zarafat elədim'].map(loose),
+].join('|') + ')(?:\\s|!|\\.|\\)|😂|🤣|😅|😜|😉)*$', 'iu');
+
+/** Taking a question back ("nvm found it", "забей", "boş ver"), with at most a few words after. */
+const RETRACT = new RegExp('^(?:' + [
+  'nvm', 'never ?mind', 'forget it', 'ignore (?:that|it|me)', 'неважно', 'забей', 'проехали', 'nevazhno', 'zabey',
+  ...['boş ver', 'boşver', 'unut gitsin', 'fərqi yoxdur', 'unut getsin'].map(loose),
+].join('|') + ')(?:[\\s!.,]+[\\p{L}\\p{N}\']+){0,4}[\\s!.,]*$', 'iu'); // separators and words never overlap: no slow backtracking
 
 /** Same rule as the linter's scriptOf, kept local so signals stay independent of lint. */
 function scriptOfText(text: string): 'cyrillic' | 'latin' | null {

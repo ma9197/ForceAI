@@ -268,6 +268,12 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
   const q = [r('Murad', 'yo', 150), r('Kanan', 'who is playing tonight?', 160)];
   assert.equal(dynamics(q, 'ForceAI', now).hangingQuestion?.shortId, q[1].short_id);
   assert.equal(dynamics([...q, r('Murad', 'barca', 170)], 'ForceAI', now).hangingQuestion, null, 'answered');
+  // round 23: the asker took it back
+  for (const t of ['nvm found it', 'забей, нашел', 'boş ver', 'never mind lol']) assert.equal(dynamics([...q, r('Kanan', t, 170)], 'ForceAI', now).hangingQuestion, null, t);
+  assert.ok(dynamics([...q, r('Kanan', 'nvm i will just ask my brother later because he always has it', 170)], 'ForceAI', now).hangingQuestion, 'a long message is not a "nvm"');
+  const longT0 = performance.now();
+  dynamics([...q, r('Kanan', 'nvm ' + 'a'.repeat(50_000) + '!', 170)], 'ForceAI', now);
+  assert.ok(performance.now() - longT0 < 100, 'no slow backtracking');
   assert.equal(dynamics([r('Said', 'who is playing tonight?', 160, { is_owner: 1 })], 'ForceAI', now).hangingQuestion, null, "owner's questions are never a cue");
   // round 19: a rhetorical question is not an open question (no lower bar, and the room is told)
   const rq = [r('Murad', 'yo', 150), r('Kanan', 'who even watches the conference league?', 160)];
@@ -622,6 +628,16 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
     ({ id: `i${++k}`, short_id: `m${k}`, sender_jid: who, sender_name: who, text, type: 'text', is_bot: 0, is_owner: 0, ts: T + at * 1000, ...extra });
   const now = T + 120_000;
   const cueOf = (text: string) => ironyCues([r('Kanan', text, 60)], now)[0]?.cue ?? null;
+  // round 23: "jk" / "шучу" / "zarafat edirəm" right after their own line marks that line as the joke
+  for (const jk of ['jk 😂', 'шучу', 'just kidding!', 'zarafat edirəm', 'şaka şaka']) {
+    const said = r('Kanan', 'madrid is the best club in history', 50);
+    const c = ironyCues([said, r('Kanan', jk, 55)], now);
+    assert.ok(c.length === 1 && c[0].shortId === said.short_id && c[0].cue.includes('they were joking'), `${jk}: ${JSON.stringify(c)}`);
+  }
+  assert.deepEqual(ironyCues([r('Kanan', 'madrid won', 50), r('Kanan', 'no kidding', 55)], now), [], '"no kidding" is not "jk"');
+  assert.deepEqual(ironyCues([r('Murad', 'madrid won', 50), r('Kanan', 'jk', 55)], now), [], "someone else's line");
+  const both = ironyCues([r('Kanan', 'yeah right he scored', 50), r('Kanan', 'jk', 55)], now);
+  assert.equal(both.length, 1, 'one cue per message');
   // sarcasm that should be flagged, in each language, typed either way
   for (const [line, cue] of [
     ['yeah right, he totally scored', '"yeah right"'], ['ага, конечно', '"ага, конечно"'], ['ага щас', '"ага щас"'],
