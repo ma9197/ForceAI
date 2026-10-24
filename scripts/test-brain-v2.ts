@@ -274,15 +274,33 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
   const rd = dynamics(rq, 'ForceAI', now);
   assert.ok(rd.hangingQuestion === null && rd.rhetorical?.shortId === rq[1].short_id, JSON.stringify(rd));
   assert.ok(!roomShift({ dyn: rd }).notes.some(x => x.startsWith('open question')));
-  assert.ok(formatRoomNow({ dyn: rd, map: roomMap(rq, [], 'ForceAI', now), cues: [] }, 'gate')!.includes(`- rhetorical: #${rq[1].short_id} (Kanan) is venting or being sarcastic`));
-  for (const t of ['what is wrong with him?', 'кто вообще так играет?', 'ты серьёзно?', 'ne alaka?', 'ciddi misin?', 'bu nədi belə?', 'he missed AGAIN???', 'NE ALAKA?']) assert.ok(rhetoricalText(t), t);
-  for (const t of ['who is playing tonight?', 'what time is the match?', 'кто играет сегодня?', 'saat kaçta?', 'nə vaxt gəlirsən?', 'what was the score?', 'how is your mom?']) assert.equal(rhetoricalText(t), false, t);
+  assert.ok(formatRoomNow({ dyn: rd, map: roomMap(rq, [], 'ForceAI', now), cues: [] }, 'gate')!.includes(`- rhetorical (likely): #${rq[1].short_id} (Kanan) sounds like venting or sarcasm`));
+  for (const t of ['what is wrong with him?', 'кто вообще так играет?', 'ты серьёзно?', 'ne alaka?', 'ciddi misin?', 'bu nədi belə?', 'NE ALAKA?', 'how is that not a penalty?', 'is the ref blind?',
+    'что он творит?', 'ты издеваешься?', 'olacak iş mi?', 'kim izliyor ki?', 'nə danışırsan?', 'bro what?', 'he did WHAT!?']) assert.ok(rhetoricalText(t), t);
+  for (const t of ['who is playing tonight?', 'what time is the match?', 'кто играет сегодня?', 'saat kaçta?', 'nə vaxt gəlirsən?', 'what was the score?', 'how is your mom?',
+    // review: honest questions that look like venting
+    'bro what time is the match?', 'bro what channel is it on?', 'what was that song called?', 'wtf happened? just got here', 'wtf is the score?', 'who tf scored?',
+    'guys what time is the match???', 'where are you guys???', 'who scored???', 'а кто вообще играет сегодня?', 'кто вообще идёт завтра?', 'olar belə edək?', 'who even is that guy?'])
+    assert.equal(rhetoricalText(t), false, t);
+  const slowT0 = performance.now();
+  rhetoricalText('?'.repeat(60_000) + 'x?');
+  assert.ok(performance.now() - slowT0 < 100, 'a long run of "?" is not re-scanned');
   // round 20: a hype moment (2+ people shouting in 90 s): the room is told, and a long line gets the rewrite
   const goal = [r('Murad', 'GOOOOOL', 190), r('Kanan', 'LETS GOOO!!', 192), r('Murad', 'messi you beauty!!', 195)];
   assert.deepEqual(dynamics(goal, 'ForceAI', now).hype, ['Murad', 'Kanan']);
   assert.equal(dynamics([r('Murad', 'what a goal by messi', 190), r('Kanan', 'his goal was offside', 192), r('Murad', 'no it was fine', 195)], 'ForceAI', now).hype, null, 'calm goal talk');
   assert.equal(dynamics([r('Murad', 'GOOOOOL', 190), r('Murad', 'LETS GOOO!!', 192), r('Murad', 'YESSS!!', 195)], 'ForceAI', now).hype, null, 'one person');
   assert.equal(dynamics(goal, 'ForceAI', now + 300_000).hype, null, 'over after 90 s');
+  // review: caps laughter and loud goodbyes are not shouting; more goal spellings; a shared shout is not a private pair
+  assert.equal(dynamics([r('Murad', 'HAHAHAHAHA', 190), r('Kanan', 'LMAOOOOO', 192), r('Aysel', 'ХАХАХАХАХ', 195)], 'ForceAI', now).hype, null, 'laughing');
+  assert.equal(dynamics([r('Murad', 'gn guys!!', 190), r('Kanan', 'night!!', 192), r('Aysel', 'byee!!', 195)], 'ForceAI', now).hype, null, 'goodbyes');
+  for (const g of ['goaaal', 'GOAAAAL', 'gollll', 'ГОЛЛЛ', 'golazo']) assert.ok(dynamics([r('Murad', g, 190), r('Kanan', g, 192), r('Murad', g, 195)], 'ForceAI', now).hype, g);
+  for (const t of ['google it', 'cool goal', 'gol attı mı', 'qolları ağrıyır', 'гол был?']) assert.equal(dynamics([r('Murad', t, 190), r('Kanan', t, 192), r('Murad', t, 195)], 'ForceAI', now).hype, null, t);
+  const pairShout = [r('Murad', 'GOOOOL', 189), r('Kanan', 'YESSSS!!', 190), r('Murad', 'MESSI!!', 191), r('Kanan', 'THE GOAT!!', 192), r('Murad', 'LETS GOOO', 193), r('Kanan', 'WHAT A GOAL!!', 194)];
+  const ps = dynamics(pairShout, 'ForceAI', now);
+  assert.ok(ps.hype && ps.privatePair === null, JSON.stringify(ps));
+  const hypeRoom = formatRoomNow({ dyn: ps, map: roomMap(pairShout, [], 'ForceAI', now), cues: [] }, 'gate')!;
+  assert.ok(!/- people: [^\n]*loud/.test(hypeRoom), `the hype line already says who is shouting: ${hypeRoom}`);
   assert.ok(formatRoomNow({ dyn: dynamics(goal, 'ForceAI', now), map: roomMap(goal, [], 'ForceAI', now), cues: [] }, 'writer')!.includes('- hype: Murad, Kanan shouting'));
   const hypeLint = (hype: boolean, text: string) => lintPlan([{ type: 'message', text }], { recentBotTexts: [], recentHumanTexts: [], medianLen: 12, marker, hype, p80Len: 30 }).issues.map(i => i.problem).join(' | ');
   assert.ok(hypeLint(true, 'messi just reminded everyone why they call him the goat, kanan in shambles').includes('too long for a hype moment'));

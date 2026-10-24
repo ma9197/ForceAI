@@ -20,7 +20,7 @@ const PIECES = [
   'кто играет', 'умер', 'сумерки', 'ахахах', 'çox pis', 'İndi gəlirəm', 'vəfat', 'başın sağolsun', 'not just a game, but a religion',
   'great question', 'as an AI', ';', '—', '–', '3–1', '?', '!!!', '...', '"quoted"', '#hashtag', 'forceai', 'ForceAI', '@123456',
   'passed away', 'in the hospital', 'gn', 'пока', 'gecən xeyrə', 'iyi geceler', 'bye', 'will win', 'trust me', '2-1', '\n', '\t', '   ', '', '‍', '️', '🇦🇿', 'a'.repeat(50),
-  'ha'.repeat(40), '!'.repeat(30), '?'.repeat(30), 'not '.repeat(20), 'is not about x, it is', '(jk)', 'http://x.y/z?q=1', 'thoughts?', 'plot twist', 'lol', 'ахахах', 'yox qardas', 'kanka çok', 'geliyorum', 'gedirəm', 'cringe', 'хватит', 'who even', '???', 'ne alaka',
+  'ha'.repeat(40), '!'.repeat(30), '?'.repeat(30), 'not '.repeat(20), 'is not about x, it is', '(jk)', 'http://x.y/z?q=1', 'thoughts?', 'plot twist', 'lol', 'ахахах', 'yox qardas', 'kanka çok', 'geliyorum', 'gedirəm', 'cringe', 'хватит', 'who even', '???', 'ne alaka', 'GOOOOL', 'ГОЛЛЛ', 'gollll', 'HAHAHAHA',
 ] as const;
 const text = () => Array.from({ length: 1 + Math.floor(rnd() * 8) }, () => pick(PIECES)).join(pick([' ', '', ', ', '. ', '? ']));
 const huge = () => Array.from({ length: 400 }, () => pick(PIECES)).join(' '); // ~5k chars
@@ -97,7 +97,7 @@ for (let round = 0; round < ROUNDS; round++) {
   const lint = timed('lintPlan', () => lintPlan(actions, {
     recentBotTexts: botTexts, recentHumanTexts: humanTexts, medianLen: Math.floor(rnd() * 40), marker, lowercaseShare: rnd(),
     serious: rnd() < 0.2, unprompted: rnd() < 0.5, avoidTexts: botTexts.slice(0, 3), textOf: () => pick([text(), null]),
-    lastHumanTexts: humanTexts, replyShare: rnd(), newestShortId: 'm2', burstiness: 1 + rnd(), p80Len: Math.floor(rnd() * 80), laughEndShare: rnd() < 0.5 ? rnd() * 0.2 : undefined,
+    lastHumanTexts: humanTexts, replyShare: rnd(), newestShortId: 'm2', burstiness: 1 + rnd(), p80Len: Math.floor(rnd() * 80), laughEndShare: rnd() < 0.5 ? rnd() * 0.2 : undefined, hype: rnd() < 0.3,
   }));
   assert.ok(lint.actions.filter(a => a.type === 'message' || a.type === 'reply').length <= 2, 'never more than two texts');
   assert.ok(lint.issues.every(i => i.index >= 0 && i.index < lint.actions.length), 'issue indexes point at kept actions');
