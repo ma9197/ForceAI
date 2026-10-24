@@ -51,6 +51,11 @@ export class VoiceProfiler {
     return this.running;
   }
 
+  /** After a voice wipe: learn only from messages after `ts`. */
+  resetCheckpoint(ts: number): void {
+    this.advance(ts);
+  }
+
   /** Drop a pending idle-triggered run (fresh start: nothing new may start). */
   cancelPending(): void {
     if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }

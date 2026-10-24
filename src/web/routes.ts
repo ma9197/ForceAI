@@ -6,7 +6,7 @@ import type { App } from '../app.js';
 import { CLAUDE_CHOICES, DATA_DIR, DEMO_MODE, GEMINI_TTS, resolveStickerPath, applyMentions, CITY_CATALOG, cityNow, type ClockCity } from '../config.js';
 import { logger } from '../logger.js';
 import { FREQ_LEVELS, PERSONA_PRESETS } from '../ai/prompts.js';
-import { CONFIRM_PHRASE } from '../memory/freshStart.js';
+import { CONFIRM_PHRASE, VOICE_WIPE_PHRASE } from '../memory/freshStart.js';
 import { createBackupArchive } from '../memory/backup.js';
 
 /** Owner-only actions (backup download, fresh start) refuse a dashboard that is open to the network
@@ -455,6 +455,19 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     const res = app.startFreshStart(); // runs in the background; Settings polls GET for progress
     if (res.status !== 'ok') return reply.code(409).send({ error: res.message });
     return { ok: true, started: true };
+  });
+
+  // ---- wipe every learned voice item + overview, in all groups ----
+  fastify.post<{ Body: { confirm?: string } }>('/api/admin/wipe-voice', async (req, reply) => {
+    if (DEMO_MODE) return { ok: true, demo: true };
+    const blocked = ownerOnlyBlocked();
+    if (blocked) return reply.code(403).send({ error: blocked });
+    if ((req.body?.confirm ?? '').trim().toUpperCase() !== VOICE_WIPE_PHRASE) {
+      return reply.code(400).send({ error: `Type ${VOICE_WIPE_PHRASE} to confirm.` });
+    }
+    const res = await app.wipeAllVoice();
+    if (res.status !== 'ok') return reply.code(409).send({ error: res.message });
+    return { ok: true, items: res.items, backup: res.backup };
   });
 
   fastify.get('/api/settings', async () => settingsPayload(app));

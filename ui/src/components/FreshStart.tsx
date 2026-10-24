@@ -15,6 +15,7 @@ interface Preview {
   backup_downloaded_at: number | null;
   backup_fresh: boolean;
   confirm_phrase: string;
+  voice_wipe_phrase: string;
 }
 
 type Phase = 'idle' | 'open' | 'working' | 'done';
@@ -176,6 +177,69 @@ export function FreshStart() {
               </div>
             </>
           )}
+        </div>
+      )}
+      <WipeVoice preview={preview} unavailable={unavailable} onDone={() => void load()} />
+    </>
+  );
+}
+
+/** Separate button: delete every learned voice item and the voice overview, in all groups. */
+function WipeVoice({ preview, unavailable, onDone }: { preview: Preview; unavailable: string | null; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+  const phraseOk = typed.trim().toUpperCase() === preview.voice_wipe_phrase;
+
+  const run = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await api<{ demo?: boolean; items?: number; backup?: string }>(
+        '/api/admin/wipe-voice',
+        { method: 'POST', body: JSON.stringify({ confirm: typed }) },
+      );
+      if (res.demo) { setError('Not available in the demo.'); return; }
+      setDone(`Deleted ${n(res.items)} voice items. Safety copy: ${res.backup}.`);
+      setOpen(false);
+      setTyped('');
+      onDone();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="settings-row">
+        <div>
+          <label>Wipe all voice</label>
+          <div className="hint">
+            Deletes everything in the Voice tab, in every group: {n(preview.counts.voice_all)} items (slang, phrases,
+            jokes, references, patterns, how friends text) and the voice overview. Stickers and settings stay.
+            ForceAI starts learning the voice again from new messages.
+            {done && <><br /><span style={{ color: 'var(--accent)' }}>✓ {done}</span></>}
+          </div>
+        </div>
+        {!open && (
+          <button className="danger" disabled={!!unavailable || preview.running} onClick={() => { setOpen(true); setDone(null); }}>
+            Wipe voice…
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8, borderColor: 'var(--danger)' }}>
+          <div className="hint">A safety copy of the database is saved on the server first. This can't be undone from the dashboard.</div>
+          {error && <div className="hint" style={{ color: 'var(--danger)' }}>✗ {error}</div>}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <input value={typed} placeholder={`Type ${preview.voice_wipe_phrase}`} disabled={busy} onChange={e => setTyped(e.target.value)} style={{ width: 170 }} />
+            <button className="danger" disabled={!phraseOk || busy} onClick={() => void run()}>{busy ? 'Wiping…' : 'Wipe voice now'}</button>
+            <button disabled={busy} onClick={() => { setOpen(false); setTyped(''); setError(null); }}>Cancel</button>
+          </div>
         </div>
       )}
     </>

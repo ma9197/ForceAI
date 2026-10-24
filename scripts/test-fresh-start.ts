@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { openDb } from '../src/memory/db.js';
 import { Repo } from '../src/memory/repo.js';
 import {
-  anonymizeVoiceItems, backupDb, clearImages, swapKnownNames, countImages, countRows, estimateRewriteCostUsd, getKeptVoiceItems, getKnownNames, wipeMemory,
+  anonymizeVoiceItems, backupDb, clearImages, swapKnownNames, countImages, countRows, estimateRewriteCostUsd, wipeVoice, getKeptVoiceItems, getKnownNames, wipeMemory,
 } from '../src/memory/freshStart.js';
 import { createBackupArchive } from '../src/memory/backup.js';
 
@@ -213,6 +213,17 @@ execFileSync('tar', ['-xzf', tgz, '-C', restored]);
 const back = openDb(path.join(restored, 'forceai.db'));
 assert.equal(countRows(back).voice_kept, 5, 'restored DB matches');
 back.close();
+
+// ---- voice wipe: every voice item and overview, all groups; checkpoints move to now ----
+repo.insertVoiceItem(G2, 'member_style', 'someone: lots of caps', null, null);
+repo.setVoiceOverview(G1, 'loud group');
+const vNow = Date.now();
+const vw = wipeVoice(db, vNow);
+assert.equal(vw.items, res.after.voice_kept + 1);
+assert.equal(vw.overviews, 1);
+assert.equal(countRows(db).voice_all, 0);
+assert.equal(repo.getConfig(`voice_ts_${G2}`), String(vNow));
+assert.equal(countRows(db).stickers, 1, 'stickers stay');
 
 db.close();
 fs.rmSync(dir, { recursive: true, force: true });
