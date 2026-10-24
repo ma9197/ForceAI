@@ -834,7 +834,7 @@ export class App {
         written += 1;
         const gen = await this.brainV2.generate({
           chatJid: jid, consumedUpToTs: prev, addressIds: res.out.address_message_ids, gatekeeperReason: res.out.reason,
-          thought: res.out.thought?.text ?? null, thoughtWhen: 'now', unprompted: !res.out.addressed, dryRun: true, untilTs: cut.ts,
+          thought: res.out.thought?.text ?? null, thoughtWhen: 'now', unprompted: !res.out.addressed, dryRun: true, untilTs: cut.ts, scene: res.out.scene,
         });
         const acts = gen?.plan.actions.filter(a => a.type !== 'nothing') ?? [];
         lines = gen ? (acts.length ? acts.map(describeAction) : [gen.vetoed ? `(would end up quiet: second opinion said skip)` : '(would end up quiet)']) : ['(the reply writer failed)'];

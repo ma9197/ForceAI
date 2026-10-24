@@ -3,7 +3,7 @@
 READ:
 - Every group runs **brain v1** until you change it. Nothing changes by itself.
 - **Morning test (10 min), in one active group:**
-  1. Under the chat: **Compare v1 / v2**, then **Replay last hours with v2**. You see what v2 would have done at 6 moments, next to what really happened, and the exact line it would have sent for up to 2 of them. Nothing is sent.
+  1. Under the chat: **Compare v1 / v2**, then **Replay last hours with v2**. You see what v2 would have done at 6 moments, next to what really happened, and the exact line it would have sent for up to 2 of them (it only knows what had happened by then). Nothing is sent.
   2. Top bar: **v1 + v2 shadow (watch only)**. v1 keeps answering; grey "v2 shadow would ..." rows show v2's calls all day, and "v2 shadow would say" rows show the exact line it would have sent.
   3. Now and then: **Blind test** in the Compare panel. Pick A or B; it tracks which brain wins.
   4. If v2 wins: top bar, **Brain v2 (beta)**. Switch back the same way any time.
