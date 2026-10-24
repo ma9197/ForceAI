@@ -10,7 +10,7 @@ READ:
 - **Teach it**: tap 👍 / 👎 on its lines and on its `T1v2` / shadow rows. Every 8 ratings it learns a few "house rules" for that group (Compare panel: see, relearn, clear).
 - **Too loud or too quiet**: chattiness in the Compare panel (this group) or Settings (all groups).
 - **Safety net**: if v2 keeps failing, that group answers with v1 for 30 minutes ("on v1 until ..." in the top bar). Direct questions are always answered.
-- **Cost**: a bit more per message than v1; shadow adds one cheap call per decision. Use Haiku 5.5 for the thinking stage.
+- **Cost**: a bit more per message than v1. Shadow adds one cheap call per decision, plus 2 to 3 calls when it would speak (it writes the line; Settings, "Brain v2 shadow: write its lines"). Use Haiku 5.5 for the thinking stage.
 
 ## What v2 does differently
 

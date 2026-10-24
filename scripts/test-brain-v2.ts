@@ -7,6 +7,7 @@ import { Repo } from '../src/memory/repo.js';
 import { PromptBuilder } from '../src/ai/prompts.js';
 import { BrainV2 } from '../src/ai/v2/brain.js';
 import { laughEndShare, lintPlan, phoneStyle, autoFix, overlap, scriptOf, splitInTwo } from '../src/ai/v2/lint.js';
+import { azOrTr } from '../src/ai/v2/language.js';
 import { CHATTINESS_SHIFT, decide, roomShift, threshold } from '../src/ai/v2/policy.js';
 import { actualAfter, pickReplayCuts } from '../src/ai/v2/replay.js';
 import { TasteLearner, readTasteRules } from '../src/ai/v2/taste.js';
@@ -161,6 +162,10 @@ assert.equal(lintPlan([{ type: 'message', text: 'not bad, but he still missed th
   assert.equal(own('kanan predicted 3-0 again lol', 1), 'kanan predicted 3-0 again lol', 'a group that laughs at its own lines: kept');
   assert.equal(own('kanan predicted 3-0 again lol', undefined), 'kanan predicted 3-0 again lol', 'unknown: kept');
 }
+// round 18: Azerbaijani or Turkish (models drift from Azerbaijani into Turkish), typed with or without the letters
+for (const t of ['mən bilmirəm ki', 'yox ee bu cox pisdi', 'qardas sen neynirsen', 'bu gun gedirem', 'axi niye bele edirsen', 'cox yaxsi oyun idi', 'hardasan qardas']) assert.equal(azOrTr(t), 'az', t);
+for (const t of ['ben bilmiyorum ya', 'yok ya bu çok kötü', 'kanka ne yapıyorsun', 'nasılsın abi', 'ne diyorsun sen', 'öyle değil abi', 'gelecek misin']) assert.equal(azOrTr(t), 'tr', t);
+for (const t of ['the match was crazy lol', 'madrid wins 2-1', 'ok', 'max taxi next quick', 'sabah ora gedek?', 'ne olur ne olmaz']) assert.equal(azOrTr(t), null, t);
 const long = lintPlan([{ type: 'message', text: 'x'.repeat(300) }], { recentBotTexts: [], recentHumanTexts: [], medianLen: 20, marker });
 assert.ok(long.issues[0].problem.startsWith('too long'));
 
