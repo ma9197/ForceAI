@@ -132,6 +132,7 @@ export const BRAIN_V2 = {
   SIGNAL_LINES: 150,              // history used for style numbers, tics and participation
   TICS_WINDOW: 25,                // the bot's own last N messages checked for repeated habits
   CALLBACKS: 4,                   // older matching moments offered for callback jokes
+  CALLBACK_DAYS: 90,              // how far back the callback search looks (bounds the text scan in a big chat)
   GEN_MAX_TOKENS: 2600,           // the read + angles fields need room on top of the actions
   THOUGHT_TTL_MS: 4 * 60_000,     // a saved thought goes stale after this
   LULL_MS: 60_000,                // pause after the last message before a saved thought is offered

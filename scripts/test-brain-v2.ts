@@ -815,6 +815,9 @@ assert.ok(userText.includes('OLDER MOMENTS'), 'callback candidates found');
   assert.equal(repo.getRepliesTo(G, ['cb1']).length, 1);
   assert.equal(repo.getRepliesTo(G, ['cb1'], 4_000).length, 0, 'not after the replayed moment');
   assert.equal(repo.getRepliesTo('other@g.us', ['cb1']).length, 0, 'groups never share memory');
+  // the callback search can be bounded in time (the brain looks back BRAIN_V2.CALLBACK_DAYS)
+  assert.equal(repo.searchOlderMessages(G, 2_000, ['crying', 'rain'], 4).length, 1);
+  assert.equal(repo.searchOlderMessages(G, 2_000, ['crying', 'rain'], 4, 1_500).length, 0, 'older than the window');
   const plan = (db.prepare("EXPLAIN QUERY PLAN SELECT id FROM messages WHERE quoted_id IN (?) AND +chat_jid = ? AND +ts <= ?").all('cb1', G, 9e15) as any[]).map(r => r.detail).join(' ');
   assert.ok(plan.includes('idx_msg_quoted'), `uses the quoted_id index, never a chat scan: ${plan}`);
 }
