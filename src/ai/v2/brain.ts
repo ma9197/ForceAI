@@ -185,13 +185,18 @@ export class BrainV2 {
   }
 
   /** The measured context block for the generator: scene, style numbers, own tics, share, callbacks. */
-  private signalsBlock(chatJid: string, rows: MsgRow[], consumedUpToTs: number | null): { text: string; medianLen: number; lowercaseShare: number; botTexts: string[]; humanTexts: string[]; dyn: Dynamics; style: StyleStats | null } {
+  private signalsBlock(chatJid: string, rows: MsgRow[], consumedUpToTs: number | null, asked: boolean): { text: string; medianLen: number; lowercaseShare: number; botTexts: string[]; humanTexts: string[]; dyn: Dynamics; style: StyleStats | null; disliked: string[] } {
     const marker = this.marker();
+    const strip = (t: string) => stripMarker(t, marker.prefix, marker.suffix);
+    const names = this.repo.getMembersForChat(chatJid).map(m => m.display_name ?? '').filter(Boolean);
+    // the owner's 👎 lines: kept out of what it learns from, and close copies are blocked by the linter
+    const disliked = this.repo.getFeedbackLines(chatJid, -1, BRAIN_V2.TASTE_LINES * 4).map(strip);
+    const notDisliked = (t: string) => !disliked.includes(t);
     const history = this.repo.getRecentMessages(chatJid, BRAIN_V2.SIGNAL_LINES) as MsgRow[];
     const botTexts = history.filter(r => r.is_bot && r.type === 'text').map(r => stripMarker(r.text ?? '', marker.prefix, marker.suffix));
     const humanTexts = history.filter(r => !r.is_bot && r.type === 'text').map(r => r.text ?? '');
     const style = styleStats(history);
-    const tics = botTics(botTexts.slice(-BRAIN_V2.TICS_WINDOW));
+    const tics = botTics(botTexts.slice(-BRAIN_V2.TICS_WINDOW), names);
     const part = participation(history);
     const scene = this.scenes.get(chatJid);
     const dyn = dynamics(rows, BOT_NAME);
@@ -199,39 +204,44 @@ export class BrainV2 {
     const newRows = consumedUpToTs === null ? rows.slice(-6) : rows.filter(r => r.ts > consumedUpToTs);
     const oldest = rows.length ? rows[0].ts : Date.now();
     const callbacks = formatCallbacks((this.repo.searchOlderMessages(chatJid, oldest, callbackKeywords(newRows), BRAIN_V2.CALLBACKS) as MsgRow[])
-      .map(r => (r.is_bot ? { ...r, text: stripMarker(r.text ?? '', marker.prefix, marker.suffix) } : r)));
+      .map(r => (r.is_bot ? { ...r, text: strip(r.text ?? '') } : r))
+      .filter(r => !r.is_bot || notDisliked(r.text ?? '')));
 
     const parts = [
       scene ? `SCENE RIGHT NOW: ${scene.topic}. ${scene.threads}. vibe: ${scene.vibe}.${scene.running_bit ? ` running bit: ${scene.running_bit}${scene.bit_played_out ? ' (played out, let it go)' : ''}.` : ''}` : '',
       style ? formatStyleStats(style) : '',
       tics ? formatTics(tics) : '',
       formatDynamics(dyn, []) ?? '',
-      formatLanded(landedLines(history, t => stripMarker(t, marker.prefix, marker.suffix))) ?? '',
+      formatLanded(landedLines(history, strip).filter(l => notDisliked(l.text))) ?? '',
       formatGroupLaughs(groupLaughs(history)) ?? '',
-      formatTaste(
-        this.repo.getFeedbackLines(chatJid, 1, BRAIN_V2.TASTE_LINES).map(t => stripMarker(t, marker.prefix, marker.suffix)),
-        this.repo.getFeedbackLines(chatJid, -1, BRAIN_V2.TASTE_LINES).map(t => stripMarker(t, marker.prefix, marker.suffix)),
-      ) ?? '',
-      formatTargets(botTargets(history.filter(r => r.is_bot).slice(-BRAIN_V2.TARGET_WINDOW), this.repo.getMembersForChat(chatJid).map(m => m.display_name ?? '').filter(Boolean), id => this.repo.getMessageById(id)?.sender_name ?? null)) ?? '',
-      formatParticipation(part),
+      formatTaste(this.repo.getFeedbackLines(chatJid, 1, BRAIN_V2.TASTE_LINES).map(strip)) ?? '',
+      formatTargets(botTargets(history.filter(r => r.is_bot).slice(-BRAIN_V2.TARGET_WINDOW), names, id => this.repo.getMessageById(id)?.sender_name ?? null)) ?? '',
+      formatParticipation(part, asked),
       callbacks ?? '',
       formatBits(this.bits(chatJid)) ?? '',
-      formatTakes(ownTakes(this.repo.getTextMessagesSince(chatJid, Date.now() - 7 * 86_400_000, 200, true) as MsgRow[], t => stripMarker(t, marker.prefix, marker.suffix))) ?? '',
+      formatTakes(ownTakes(this.repo.getTextMessagesSince(chatJid, Date.now() - 7 * 86_400_000, 200, true) as MsgRow[], strip).filter(x => notDisliked(x.text))) ?? '',
     ].filter(Boolean);
-    return { text: parts.join('\n\n'), medianLen: style?.medianLen ?? 0, lowercaseShare: style?.lowercaseShare ?? 0, botTexts, humanTexts, dyn, style };
+    return { text: parts.join('\n\n'), medianLen: style?.medianLen ?? 0, lowercaseShare: style?.lowercaseShare ?? 0, botTexts, humanTexts, dyn, style, disliked };
   }
 
   /** T2: read, consider angles, write; then lint and (only if needed) one cheap rewrite. */
   async generate(input: GenerateV2Input): Promise<GenerateV2Result | null> {
     const rows = this.repo.getRecentMessages(input.chatJid, input.transcriptLines ?? ARBITER.TRANSCRIPT_LINES) as MsgRow[];
     const transcript = this.prompts.formatTranscript(rows, input.consumedUpToTs);
-    const signals = this.signalsBlock(input.chatJid, rows, input.consumedUpToTs);
+    // someone talked to it (a mention, a reply, an owner instruction): it answers, no second opinion
+    const asked = !input.unprompted || !!input.operatorInstruction;
+    const signals = this.signalsBlock(input.chatJid, rows, input.consumedUpToTs, asked);
 
     const parts: string[] = [`Current group chat transcript:`, transcript || '(chat is empty so far)', signals.text];
     if (input.addressIds?.length) {
       parts.push(`HINT: address ${input.addressIds.map(i => '#' + i).join(', ')}${input.gatekeeperReason ? ` (${input.gatekeeperReason})` : ''}`);
     }
-    if (input.thought && input.thoughtWhen === 'now') {
+    if (asked && !input.operatorInstruction) {
+      parts.push('Someone talked to you: answer them (if they only laughed at your line, a reaction is enough). "nothing" is not an option here.');
+    }
+    if (input.thought && input.thoughtWhen === 'now' && asked) {
+      parts.push(`AN IDEA YOU HAD WHILE READING: "${input.thought}". Use it only if it fits your answer.`);
+    } else if (input.thought && input.thoughtWhen === 'now') {
       parts.push(`YOUR INNER THOUGHT WHILE READING (why you are speaking now): "${input.thought}". It is a rough idea, not the final text: keep it if it is the best angle, sharpen it, or beat it.`);
     } else if (input.thought) {
       parts.push(`A THOUGHT YOU HAD A MOMENT AGO (the chat has just paused): "${input.thought}". If it still lands, say it now in your own words, like it just came to you. If the moment has passed, send nothing.`);
@@ -283,7 +293,8 @@ export class BrainV2 {
       // the model's read, or bad news spotted in code
       const serious = out.read.sincere || out.read.vibe === 'serious' || !!signals.dyn.serious;
       const lintCtx = {
-        medianLen: signals.medianLen, lowercaseShare: signals.lowercaseShare, serious, marker: this.marker(), unprompted: !!input.unprompted,
+        medianLen: signals.medianLen, lowercaseShare: signals.lowercaseShare, serious, marker: this.marker(), unprompted: !asked,
+        avoidTexts: signals.disliked,
         textOf: (id: string) => (this.repo.getMessageByShortId(id)?.text as string | undefined) ?? null,
         lastHumanTexts: rows.filter(r => !r.is_bot && r.type === 'text').map(r => r.text ?? ''),
         replyShare: signals.style?.replyShare,
@@ -304,7 +315,7 @@ export class BrainV2 {
 
       // second opinion: an unprompted text has to convince a sharp friend, or the bot stays quiet
       let vetoed: string | undefined;
-      if (input.unprompted && this.repo.getConfig('v2_second_opinion') !== '0' && actions.some(a => a.type === 'message' || a.type === 'reply' || a.type === 'voice')) {
+      if (!asked && this.repo.getConfig('v2_second_opinion') !== '0' && actions.some(a => a.type === 'message' || a.type === 'reply' || a.type === 'voice')) {
         const verdict = await this.critic(input.chatJid, rows, actions);
         if (verdict && verdict.verdict === 'skip') {
           vetoed = verdict.reason;
@@ -331,7 +342,8 @@ export class BrainV2 {
 
   /** "Would a sharp friend send this right now?" One small call; null (= send) if it fails. */
   private async critic(chatJid: string, rows: MsgRow[], actions: BotAction[]): Promise<{ verdict: 'send' | 'skip'; reason: string } | null> {
-    const transcript = this.prompts.formatTranscript(rows.slice(-BRAIN_V2.CRITIC_LINES), null);
+    // the critic plays a member of the group, so the bot's lines are labelled by name, not "(you)"
+    const transcript = this.prompts.formatTranscript(rows.slice(-BRAIN_V2.CRITIC_LINES), null).split(`${BOT_NAME} (you)`).join(BOT_NAME);
     const draft = actions.map(a => ('text' in a ? `${a.type}: ${a.text}` : a.type)).join('\n');
     try {
       const model = this.ai.gatekeeperModel;

@@ -97,6 +97,8 @@ export interface LintContext {
   serious?: boolean;
   /** nobody asked: a repeat is dropped. When answering someone, a repeat is rewritten instead (never left unanswered) */
   unprompted?: boolean;
+  /** lines the owner disliked: a close copy is treated like a repeat */
+  avoidTexts?: string[];
   /** text of a message by short id (to check a reply is in the language of the message it answers) */
   textOf?: (shortId: string) => string | null;
   /** the last few human texts, newest last (the language the room is in right now) */
@@ -159,6 +161,8 @@ export function lintPlan(actions: BotAction[], ctx: LintContext): LintResult {
   const dropped: string[] = [];
   const botSeen = new Set(ctx.recentBotTexts.map(normalize).filter(s => s.length > 3));
   const botWords = ctx.recentBotTexts.map(contentWords);
+  const avoidSeen = new Set((ctx.avoidTexts ?? []).map(normalize).filter(s => s.length > 3));
+  const avoidWords = (ctx.avoidTexts ?? []).map(contentWords);
   const humanSeen = new Set(ctx.recentHumanTexts.map(normalize).filter(s => s.length > 8));
   const out: BotAction[] = [];
 
@@ -180,7 +184,8 @@ export function lintPlan(actions: BotAction[], ctx: LintContext): LintResult {
     // the same joke in new words is still a repeat (LLMs recycle jokes, arXiv 2306.04563)
     const mine = contentWords(fixed);
     const repeat = norm && botSeen.has(norm) ? 'repeats something you already said'
-      : botWords.some(w => overlap(mine, w) >= 0.6) ? 'too close to something you already said' : null;
+      : botWords.some(w => overlap(mine, w) >= 0.6) ? 'too close to something you already said'
+        : (norm && avoidSeen.has(norm)) || avoidWords.some(w => overlap(mine, w) >= 0.6) ? 'too close to a line your owner disliked' : null;
     if (repeat && ctx.unprompted) { dropped.push(`${repeat}: "${fixed.slice(0, 60)}"`); continue; }
     if (norm && humanSeen.has(norm)) { dropped.push(`parrots a member word for word: "${fixed.slice(0, 60)}"`); continue; }
 

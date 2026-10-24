@@ -140,8 +140,10 @@ export interface Tics {
 }
 
 /** The bot's own repetitive habits over its recent messages (what makes a bot feel like a bot). */
-export function botTics(botTexts: string[]): Tics | null {
+export function botTics(botTexts: string[], names: string[] = []): Tics | null {
   const texts = botTexts.map(t => t.trim()).filter(Boolean);
+  // a friend's name is not a tic (it is who it talks to); "easy on" covers picking on one person
+  const nameWords = new Set(names.flatMap(n => n.toLowerCase().split(/\s+/)).filter(w => w.length >= 2));
   if (texts.length < 6) return null;
 
   const emojiCount = new Map<string, number>();
@@ -152,7 +154,7 @@ export function botTics(botTexts: string[]): Tics | null {
     const em = new Set(t.match(EMOJI) ?? []);
     for (const e of em) emojiCount.set(e, (emojiCount.get(e) ?? 0) + 1);
     const w = words(t);
-    if (w[0]) openerCount.set(w[0], (openerCount.get(w[0]) ?? 0) + 1);
+    if (w[0] && !nameWords.has(w[0])) openerCount.set(w[0], (openerCount.get(w[0]) ?? 0) + 1);
     if (QUESTION_END.test(t)) questionEndings += 1;
     const seen = new Set<string>();
     for (let n = 1; n <= 3; n++) {
@@ -160,6 +162,7 @@ export function botTics(botTexts: string[]): Tics | null {
         const gram = w.slice(i, i + n);
         if (n === 1 && (STOP.has(gram[0]) || gram[0].length < 4)) continue;
         if (n > 1 && gram.every(g => STOP.has(g))) continue;
+        if (gram.some(g => nameWords.has(g))) continue;
         seen.add(gram.join(' '));
       }
     }
@@ -183,14 +186,18 @@ export function botTics(botTexts: string[]): Tics | null {
   };
 }
 
+/**
+ * Phrased as what to do. Emojis are named (a single character plants little); openers and phrases are
+ * only counted, never quoted back, so the prompt does not plant them (the linter blocks recycled lines).
+ */
 export function formatTics(t: Tics): string | null {
   const lines: string[] = [];
-  for (const e of t.emojis) lines.push(`- ${e.emoji} in ${e.count} of your last ${t.sample} messages`);
-  for (const o of t.openers) lines.push(`- starting with "${o.word}" (${o.count}x)`);
-  for (const p of t.phrases) lines.push(`- "${p.phrase}" (${p.count}x)`);
-  if (t.questionEndings >= Math.max(3, Math.ceil(t.sample * 0.25))) lines.push(`- ending on a question (${t.questionEndings}x): stop fishing for replies`);
+  for (const e of t.emojis) lines.push(`- ${e.emoji} is in ${e.count} of your last ${t.sample} messages: pick a different emoji or none this time`);
+  if (t.openers.length) lines.push(`- ${t.openers.reduce((a, o) => a + o.count, 0)} of your last ${t.sample} messages open the same few ways: start this one differently`);
+  if (t.phrases.length) lines.push(`- you have been reusing ${t.phrases.length} pet phrase${t.phrases.length > 1 ? 's' : ''}: use fresh words`);
+  if (t.questionEndings >= Math.max(3, Math.ceil(t.sample * 0.25))) lines.push(`- ${t.questionEndings} of them end on a question: end on a statement`);
   if (lines.length === 0) return null;
-  return `YOUR OWN RECENT TICS (you have been leaning on these; skip them this time, a real person varies):\n${lines.join('\n')}`;
+  return `VARY YOURSELF (measured on your own recent messages; a real person varies):\n${lines.join('\n')}`;
 }
 
 export interface Participation {
@@ -220,13 +227,15 @@ export function participation(rows: MsgRow[], now = Date.now()): Participation {
   };
 }
 
-export function formatParticipation(p: Participation): string {
+export function formatParticipation(p: Participation, asked = false): string {
   const share = Math.round(p.botShare * 100);
-  const tone = share >= 35
-    ? 'that is a LOT: you are dominating, so say less and only if it is really good'
-    : share >= 20
-      ? 'that is plenty: keep it tight'
-      : 'you have room to talk';
+  const tone = asked
+    ? (share >= 20 ? 'you have talked a lot: answer, and keep it short' : 'answer naturally')
+    : share >= 35
+      ? 'that is a LOT: you are dominating, so say less and only if it is really good'
+      : share >= 20
+        ? 'that is plenty: keep it tight'
+        : 'you have room to talk';
   return `YOUR SHARE OF THE CHAT: ${share}% of the last ${p.window} messages are yours (${tone}). ${p.humansSinceBot} human messages since you last spoke.`;
 }
 
@@ -332,15 +341,14 @@ export function formatLanded(lines: { text: string; laughs: number }[]): string 
 }
 
 /** The owner's thumbs up / down from the dashboard: their taste, shown as examples. */
-export function formatTaste(liked: string[], disliked: string[]): string | null {
+/**
+ * The owner's liked lines, as examples to aim for. Disliked lines are NOT shown (showing them can plant
+ * them): the code keeps them out of "what landed" and "own takes", and the linter blocks close copies.
+ */
+export function formatTaste(liked: string[]): string | null {
   const l = liked.filter(Boolean).map(t => `- "${t.slice(0, 140)}"`);
-  const d = disliked.filter(Boolean).map(t => `- "${t.slice(0, 140)}"`);
-  if (l.length === 0 && d.length === 0) return null;
-  return [
-    "YOUR OWNER'S TASTE (they rated some of your lines; aim for the spirit of the liked ones, steer away from the style of the disliked ones, never repeat any):",
-    l.length ? `liked:\n${l.join('\n')}` : '',
-    d.length ? `disliked:\n${d.join('\n')}` : '',
-  ].filter(Boolean).join('\n');
+  if (l.length === 0) return null;
+  return `YOUR OWNER'S TASTE (lines of yours they liked: aim for that spirit, in new words, never repeat them):\n${l.join('\n')}`;
 }
 
 /**
@@ -377,7 +385,13 @@ export function formatDecisionFeedback(rows: { decision: string; reason: string;
   if (rows.length === 0) return null;
   const spoke = (d: string) => d === 'RESPOND' || d === 'PAUSE';
   const lines = rows.map(r => {
-    const what = r.reason.slice(0, 200);
+    // the stored line is "reason | policy why | urge vs bar | thought: ..."; the gatekeeper only knows
+    // its own reason and thought, not the code's numbers
+    const parts = r.reason.split(' | ');
+    const thought = parts.find(p => p.startsWith('thought: '));
+    const what = [parts[0], thought].filter(Boolean).join(' / ').slice(0, 200);
+    const addressed = parts.some(p => p.startsWith('addressed'));
+    if (spoke(r.decision) && addressed) return r.verdict === 'good' ? `- your answer was RIGHT here: ${what}` : `- your answer MISSED here (answering was right, the line was not): ${what}`;
     if (spoke(r.decision)) return r.verdict === 'good' ? `- speaking was RIGHT here: ${what}` : `- should have STAYED QUIET here: ${what}`;
     if (r.decision === 'REACT') return r.verdict === 'good' ? `- a reaction was RIGHT here: ${what}` : `- should NOT have reacted here: ${what}`;
     return r.verdict === 'good' ? `- staying quiet was RIGHT here: ${what}` : `- should have SPOKEN here: ${what}`;
@@ -596,7 +610,7 @@ export function formatBits(bits: Bit[], now = Date.now()): string | null {
 }
 
 /** Words that mark a take: a prediction, a verdict, a bet. */
-const TAKE = /\b(will|won'?t|gonna|going to|by \d|mark my words|trust me|calling it|i predict|i bet|no way|wins?|loses?|best|worst|overrated|underrated|goat|washed|finished|done for)\b|\b\d+\s*[-:]\s*\d+\b|будет|выиграет|проиграет|лучший|худший|qalib|uduzacaq|udacaq|kazanacak|kaybedecek|ən yaxşı|en iyi/iu;
+const TAKE = /\b(will|won'?t|gonna|going to|by \d|mark my words|trust me|calling it|i predict|i bet|no way|wins?|loses?|best|worst|overrated|underrated|goat|washed|finished|done for)\b|будет|выиграет|проиграет|лучший|худший|qalib|uduzacaq|udacaq|kazanacak|kaybedecek|ən yaxşı|en iyi/iu;
 
 /**
  * The bot's own takes from the last days (predictions, verdicts), so it stays consistent instead of
