@@ -11,7 +11,7 @@ type Preview =
 interface Ab { v1: number; v2: number; tie: number }
 interface Stats {
   spoke: number; unprompted: number; pauses: number; reacted: number; quiet: number; vetoed: number; rewrites: number; chattiness?: string;
-  shadow?: { spoke: number; reacted: number; quiet: number; waited: number }; v1Sent?: number; ab?: Ab;
+  shadow?: { spoke: number; reacted: number; quiet: number; waited: number }; v1Spoke?: number; ab?: Ab;
 }
 /** Blind test: the two answers shown as A and B; `flip` = A is v2. Revealed after the owner picks. */
 interface Blind { flip: boolean; picked: 'A' | 'B' | 'tie' | null }
@@ -60,6 +60,7 @@ export function BrainPreview({ jid, onClose }: { jid: string; onClose: () => voi
 
   const run = async (blindTest = false) => {
     setBusy(true);
+    setData(null); // never show (or vote on) the previous answers while the new ones load
     setBlind(blindTest ? { flip: Math.random() < 0.5, picked: null } : null);
     try {
       const res = await api<Preview & { demo?: boolean }>('/api/brain/preview', { method: 'POST', body: JSON.stringify({ jid }) });
@@ -96,7 +97,7 @@ export function BrainPreview({ jid, onClose }: { jid: string; onClose: () => voi
       {stats?.shadow && (stats.shadow.spoke + stats.shadow.reacted + stats.shadow.quiet + stats.shadow.waited) > 0 && (
         <div className="hint">
           v2 shadow, last 24 hours: would have spoken {stats.shadow.spoke} times, reacted {stats.shadow.reacted}, stayed quiet {stats.shadow.quiet}.
-          v1 really sent {stats.v1Sent ?? 0} replies.
+          In the same moments v1 chose to speak {stats.v1Spoke ?? 0} times.
         </div>
       )}
       {stats?.ab && (stats.ab.v1 + stats.ab.v2 + stats.ab.tie) > 0 && (
@@ -131,7 +132,10 @@ export function BrainPreview({ jid, onClose }: { jid: string; onClose: () => voi
         </div>
       )}
       {data && 'error' in data && <div className="hint" style={{ color: 'var(--danger)' }}>✗ {data.error}</div>}
-      {data && !('error' in data) && blind && blind.picked === null && (
+      {data && !('error' in data) && blind && blind.picked === null && [...data.v1.actions, ...data.v2.actions].some(a => a.includes('(generation failed)')) && (
+        <div className="hint" style={{ color: 'var(--danger)' }}>✗ One brain failed this time, so there is nothing fair to pick. Run the blind test again.</div>
+      )}
+      {data && !('error' in data) && blind && blind.picked === null && ![...data.v1.actions, ...data.v2.actions].some(a => a.includes('(generation failed)')) && (
         <div className="brain-replay">
           <div className="brain-title">Which would you rather see in the chat?</div>
           <div className="brain-cols">
@@ -148,7 +152,7 @@ export function BrainPreview({ jid, onClose }: { jid: string; onClose: () => voi
           </div>
           <div className="brain-ab-pick">
             {(['A', 'B', 'tie'] as const).map(pick => (
-              <button key={pick} onClick={() => {
+              <button key={pick} disabled={busy} onClick={() => {
                 const winner = pick === 'tie' ? 'tie' : (pick === 'A') === blind.flip ? 'v2' : 'v1';
                 setBlind({ ...blind, picked: pick });
                 void api<{ ok: boolean; ab?: Ab }>('/api/brain/ab', { method: 'POST', body: JSON.stringify({ jid, winner }) })

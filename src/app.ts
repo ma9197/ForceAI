@@ -837,6 +837,7 @@ export class App {
   setBrainVersion(jid: string, version: 'v1' | 'v2' | 'shadow'): void {
     this.repo.setBrainVersion(jid, version);
     this.arbiters.get(jid)?.resetBrainFallback();
+    this.brainV2.forget(jid);
     const label = version === 'shadow' ? 'v1, with brain v2 thinking along in shadow' : `brain ${version}`;
     const id = this.repo.insertDecision(jid, 'T0', 'BRAIN', `switched to ${label}`);
     this.bus.publish({ kind: 'decision', chatJid: jid, ts: Date.now(), tier: 'T0', decision: 'BRAIN', reason: `switched to ${label}`, id });

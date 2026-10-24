@@ -51,6 +51,8 @@ export class Arbiter {
   /** brain v2 safety net: failed calls in a row per stage, and until when this group runs on v1 instead */
   private v2Failures = { gate: 0, writer: 0 };
   private v2FallbackUntil = 0;
+  /** shadow-mode v2 calls still running (fresh start waits for them too) */
+  private shadowInFlight = 0;
 
   constructor(
     private chatJid: string,
@@ -72,22 +74,24 @@ export class Arbiter {
     }));
   }
 
-  /** This group answers with brain v2 (opt-in per group in the dashboard; v1 is the default). */
   /**
    * Shadow mode (v1 + v2 shadow): v1 acts as always; brain v2's thinking stage runs alongside on the
    * same messages as a dry run and logs what it WOULD have done (tier S1v2). Never awaited, never sends,
-   * never touches the buffer or v2's saved state, so v1's timing and behavior are unchanged.
+   * never touches the buffer or v2's saved thoughts, so v1's behavior is unchanged. Started right after
+   * v1's gatekeeper call, so v1 never waits for v2's setup work. Counted in `working` (fresh start waits).
    */
-  private shadowV2(forceDecide: boolean): void {
-    if (!this.brainV2 || this.repo.getBrainMode(this.chatJid) !== 'shadow' || this.ai.isOverBudget()) return;
-    void this.brainV2.gate(this.chatJid, this.consumedUpToTs, forceDecide, { dryRun: true }).then(res => {
-      if (!res) return;
+  private shadowV2(forceDecide: boolean, consumedUpToTs: number): void {
+    if (!this.brainV2 || this.suspended || this.repo.getBrainMode(this.chatJid) !== 'shadow' || this.ai.isOverBudget()) return;
+    this.shadowInFlight += 1;
+    void this.brainV2.gate(this.chatJid, consumedUpToTs, forceDecide, { dryRun: true, shadow: true }).then(res => {
+      if (!res || this.suspended) return; // shut down meanwhile (e.g. a fresh start): log nothing
       const { out, policy } = res;
       const room = policy.room?.length ? ` (${policy.room.join(', ')})` : '';
       const thought = out.thought ? ` | thought: ${out.thought.text.slice(0, 90)}` : '';
       const react = policy.decision === 'REACT' && out.react ? ` ${out.react.emoji}` : '';
       this.decision('S1v2', policy.decision, `${out.reason}${react} | ${policy.why} | urge ${policy.motivation} vs bar ${policy.threshold}${room}${thought}`);
-    }).catch(err => logger.warn({ err }, 'brain v2 shadow call failed'));
+    }).catch(err => logger.warn({ err }, 'brain v2 shadow call failed'))
+      .finally(() => { this.shadowInFlight -= 1; });
   }
 
   /** When v2 is on but failing, until when this group runs on v1 (null = not falling back). */
@@ -95,6 +99,7 @@ export class Arbiter {
     return this.v2FallbackUntil > Date.now() ? this.v2FallbackUntil : null;
   }
 
+  /** This group answers with brain v2 (opt-in per group in the dashboard; v1 is the default). */
   private isV2(): boolean {
     return !!this.brainV2 && this.repo.getBrainVersion(this.chatJid) === 'v2' && Date.now() >= this.v2FallbackUntil;
   }
@@ -130,7 +135,7 @@ export class Arbiter {
 
   /** True while a gatekeeper/generation cycle is in flight (fresh start waits for it). */
   get working(): boolean {
-    return this.busy;
+    return this.busy || this.shadowInFlight > 0;
   }
 
   /** True while sleeping — App uses this to also pause fact extraction (no token spend asleep). */
@@ -370,8 +375,10 @@ export class Arbiter {
         return;
       }
       const sinceBot = this.lastBotActionTs ? (Date.now() - this.lastBotActionTs) / 1000 : null;
-      this.shadowV2(forceDecide); // v1 + v2 shadow groups only; runs alongside, never awaited
-      const gate = await this.gatekeeper.decide(this.chatJid, this.consumedUpToTs, sinceBot, forceDecide);
+      const upTo = this.consumedUpToTs;
+      const v1Gate = this.gatekeeper.decide(this.chatJid, upTo, sinceBot, forceDecide);
+      setImmediate(() => this.shadowV2(forceDecide, upTo)); // v1 + v2 shadow groups only; never awaited
+      const gate = await v1Gate;
       this.decision('T1', gate.decision, gate.reason);
 
       if (gate.decision === 'IGNORE') {

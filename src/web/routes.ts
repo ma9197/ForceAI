@@ -99,6 +99,7 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
   fastify.post<{ Body: { jid?: string; winner?: string } }>('/api/brain/ab', async (req, reply) => {
     const { jid, winner } = req.body ?? {};
     if (!jid || (winner !== 'v1' && winner !== 'v2' && winner !== 'tie')) return reply.code(400).send({ error: 'jid and winner (v1, v2 or tie) required' });
+    if (DEMO_MODE) return { ok: true, demo: true };
     app.repo.addBrainAb(jid, winner);
     return { ok: true, ab: app.repo.getBrainAb(jid) };
   });
