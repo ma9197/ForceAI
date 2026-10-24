@@ -272,7 +272,7 @@ export default function App() {
                   <span className="gclose" style={{ marginLeft: 'auto', cursor: 'pointer' }} onClick={() => setReplyTarget(null)}>✕</span>
                 </div>
               )}
-              {showCompare && selectedJid && <BrainPreview jid={selectedJid} onClose={() => setShowCompare(false)} />}
+              {showCompare && selectedJid && <BrainPreview key={selectedJid} jid={selectedJid} onClose={() => setShowCompare(false)} />}
               <div className="controls">
                 {!hideInfluence && (
                   <div className="influence-box">

@@ -20,6 +20,8 @@ export interface MsgRow {
 }
 
 const EMOJI = /\p{Extended_Pictographic}/gu;
+/** Ends with "?", maybe followed by emoji (with skin tones, ZWJ sequences, variation selectors). */
+const QUESTION_END = /\?[\s\p{Extended_Pictographic}\u{1F3FB}-\u{1F3FF}\u200d\ufe0f]*$/u;
 const AZ_ONLY = /[əƏ]/;
 const TR_AZ = /[ğışçöüĞİŞÇÖÜ]/;
 const CYRILLIC = /[Ѐ-ӿ]/;
@@ -151,7 +153,7 @@ export function botTics(botTexts: string[]): Tics | null {
     for (const e of em) emojiCount.set(e, (emojiCount.get(e) ?? 0) + 1);
     const w = words(t);
     if (w[0]) openerCount.set(w[0], (openerCount.get(w[0]) ?? 0) + 1);
-    if (/\?\s*(\p{Extended_Pictographic}|\s)*$/u.test(t)) questionEndings += 1;
+    if (QUESTION_END.test(t)) questionEndings += 1;
     const seen = new Set<string>();
     for (let n = 1; n <= 3; n++) {
       for (let i = 0; i + n <= w.length; i++) {
@@ -206,8 +208,9 @@ export function participation(rows: MsgRow[], now = Date.now()): Participation {
   let lastBotTs: number | null = null;
   for (let i = rows.length - 1; i >= 0; i--) {
     const r = rows[i];
+    if (r.type === 'reaction') continue; // a tap is not talking, its own or anyone's
     if (r.is_bot) { lastBotTs = r.ts; break; }
-    if (!r.is_owner && r.type !== 'reaction') humansSinceBot += 1;
+    if (!r.is_owner) humansSinceBot += 1;
   }
   return {
     window: recent.length,
@@ -251,7 +254,8 @@ export function formatCallbacks(rows: MsgRow[]): string | null {
   return `OLDER MOMENTS FROM THIS CHAT (matched on today's topic; a callback to one of these can be the funniest move, but only if it genuinely connects. never force it):\n${lines.join('\n')}`;
 }
 
-const LAUGH_EMOJI = /[😂🤣💀😭⚰️]/u;
+// alternation, not a character class: "⚰️" carries U+FE0F, which in a class would match ❤️ and ✔️ too
+const LAUGH_EMOJI = /😂|🤣|💀|😭|⚰/u;
 const LAUGH_TEXT = /(ha){2,}|\bxd+\b|\blmf?ao+\b|\blo+l\b|(ах){2,}|(хa){2,}|(ха){2,}|😂|🤣|💀|😭/iu;
 
 /** A short message that is only a laugh ("hahaha", "💀💀", "lmao"), not a line of its own. */
@@ -375,6 +379,7 @@ export function formatDecisionFeedback(rows: { decision: string; reason: string;
   const lines = rows.map(r => {
     const what = r.reason.slice(0, 200);
     if (spoke(r.decision)) return r.verdict === 'good' ? `- speaking was RIGHT here: ${what}` : `- should have STAYED QUIET here: ${what}`;
+    if (r.decision === 'REACT') return r.verdict === 'good' ? `- a reaction was RIGHT here: ${what}` : `- should NOT have reacted here: ${what}`;
     return r.verdict === 'good' ? `- staying quiet was RIGHT here: ${what}` : `- should have SPOKEN here: ${what}`;
   });
   return `YOUR OWNER'S CALLS ON YOUR PAST DECISIONS (learn when to talk from these):\n${lines.join('\n')}`;
@@ -390,9 +395,8 @@ const SERIOUS = new RegExp([
   String.raw`\bdiagnos(ed|is)\b`, String.raw`\bpanic attacks?\b`, String.raw`\bdepress(ed|ion)\b`, String.raw`\bcar (crash|accident)\b`,
   String.raw`\bmy (mom|mum|dad|mother|father|grandma|grandpa|grandmother|grandfather|brother|sister|uncle|aunt) (died|passed)\b`,
   String.raw`\b(got|been) (fired|laid off)\b`, String.raw`\bbroke up with\b`, String.raw`\brest in peace\b`,
-  'умер', 'скончал', 'похорон', 'соболезн', 'больниц', 'реанимац', 'диагноз', 'авари', 'уволили', 'депресс',
-  'vəfat', 'rəhmətə get', 'dəfn', 'başsağlığı', 'xəstəxana', 'xərçəng', 'qəza',
-  'vefat', 'cenaze', 'hastane', 'kanser', 'başın sağ', 'kaza geçir',
+  // stems: they must start a word ("умер" yes, "сумерки" no)
+  String.raw`(?<!\p{L})(?:умер(?:ла|ли|ло)?(?!\p{L})|скончал|похорон|соболезн|больниц|реанимац|диагноз|авари|уволили|депресс|vəfat|rəhmətə get|dəfn|başsağlığı|xəstəxana|xərçəng|qəza|vefat|cenaze|hastane|kanser|başın sağ|kaza geçir)`,
 ].join('|'), 'iu');
 
 export function seriousHit(text: string): string | null {
@@ -455,7 +459,7 @@ export function dynamics(rows: MsgRow[], botName: string, now = Date.now()): Dyn
   for (let i = recent.length - 1; i >= Math.max(0, recent.length - 3); i--) {
     const q = recent[i];
     if (q.type !== 'text' || q.is_owner || q.quoted_id || mentionsBot(q)) continue;
-    if (!/\?\s*(\p{Extended_Pictographic}|\s)*$/u.test(q.text ?? '')) continue;
+    if (!QUESTION_END.test(q.text ?? '')) continue;
     const answered = recent.slice(i + 1).some(r => r.sender_jid !== q.sender_jid) || rows.some(r => r.is_bot && r.ts > q.ts);
     if (!answered && q.short_id) hangingQuestion = { shortId: q.short_id, who: q.sender_name ?? '?' };
     break;
@@ -615,4 +619,15 @@ export function formatTakes(takes: { text: string; ts: number }[], now = Date.no
     return h < 24 ? `${h}h ago` : `${Math.round(h / 24)} days ago`;
   };
   return `YOUR OWN TAKES FROM THE LAST DAYS (stay consistent: double down, own a miss with style, or say you called it. never contradict one by accident):\n${takes.map(t => `- ${ago(t.ts)}: "${t.text.slice(0, 140)}"`).join('\n')}`;
+}
+
+/** The bot's recent emoji reactions: tapping the same one every time is a bot tell. */
+export function formatReactionHabit(rows: MsgRow[]): string | null {
+  const mine = rows.filter(r => r.is_bot && r.type === 'reaction' && r.text).map(r => r.text!).slice(-6);
+  if (mine.length < 3) return null;
+  const counts = new Map<string, number>();
+  for (const e of mine) counts.set(e, (counts.get(e) ?? 0) + 1);
+  const [top, n] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+  if (n < 3) return null;
+  return `Your last reactions: ${mine.join(' ')}. If you react, pick one that fits this message, not ${top} again by habit.`;
 }

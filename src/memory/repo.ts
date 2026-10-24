@@ -59,8 +59,9 @@ export class Repo {
   }
 
   /** The owner's latest rated lines across all groups (their taste is the same everywhere). */
-  getFeedbackLines(rating: 1 | -1, limit: number): string[] {
-    return (this.db.prepare('SELECT text FROM bot_feedback WHERE rating = ? ORDER BY ts DESC LIMIT ?').all(rating, limit) as { text: string }[]).map(r => r.text);
+  /** The owner's latest liked / disliked lines in ONE group (groups never share memory: lines can name people). */
+  getFeedbackLines(chatJid: string, rating: 1 | -1, limit: number): string[] {
+    return (this.db.prepare('SELECT text FROM bot_feedback WHERE chat_jid = ? AND rating = ? ORDER BY ts DESC LIMIT ?').all(chatJid, rating, limit) as { text: string }[]).map(r => r.text);
   }
 
   // ---- API keys (entered in the dashboard, stored in config; env is the fallback) ----
@@ -841,9 +842,9 @@ export class Repo {
     return new Map(rows.map(r => [r.decision_id, r.verdict]));
   }
 
-  /** The owner's latest calls on v2 decisions (all groups: when to talk is the owner's taste too). */
-  getDecisionFeedback(limit: number): { decision: string; reason: string; verdict: string }[] {
-    return this.db.prepare('SELECT decision, reason, verdict FROM decision_feedback ORDER BY ts DESC LIMIT ?').all(limit) as { decision: string; reason: string; verdict: string }[];
+  /** The owner's latest calls on v2 decisions in ONE group (reasons quote the chat, so they stay in it). */
+  getDecisionFeedback(chatJid: string, limit: number): { decision: string; reason: string; verdict: string }[] {
+    return this.db.prepare('SELECT decision, reason, verdict FROM decision_feedback WHERE chat_jid = ? ORDER BY ts DESC LIMIT ?').all(chatJid, limit) as { decision: string; reason: string; verdict: string }[];
   }
 
   getRecentDecisions(limit: number, chatJid?: string | null): any[] {

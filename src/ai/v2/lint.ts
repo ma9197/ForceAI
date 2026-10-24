@@ -28,6 +28,7 @@ const AI_TELLS: { re: RegExp; label: string }[] = [
 ];
 
 const EMOJI = /\p{Extended_Pictographic}/gu;
+const LAUGHING = /😂|🤣|💀|😭|😹/u;
 
 function textOf(a: BotAction): string | null {
   switch (a.type) {
@@ -48,12 +49,27 @@ export function normalize(t: string): string {
   return t.toLowerCase().replace(EMOJI, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 }
 
+/** The content words of a text (3+ letters), for near-repeat checks. */
+function contentWords(t: string): Set<string> {
+  return new Set(normalize(t).split(' ').filter(w => w.length >= 3));
+}
+
+/** Share of words two texts have in common (Jaccard). Only counted when both have 4+ content words. */
+export function overlap(a: Set<string>, b: Set<string>): number {
+  if (a.size < 4 || b.size < 4) return 0;
+  let common = 0;
+  for (const w of a) if (b.has(w)) common += 1;
+  return common / (a.size + b.size - common);
+}
+
 /** Small tells fixed in place. */
 export function autoFix(text: string, marker: { prefix: string; suffix: string }): string {
   let t = text.trim();
   if (marker.prefix.trim() && t.startsWith(marker.prefix.trim())) t = t.slice(marker.prefix.trim().length).trim();
   if (marker.suffix.trim() && t.endsWith(marker.suffix.trim())) t = t.slice(0, t.length - marker.suffix.trim().length).trim();
-  // the em/en dash is the most recognised AI punctuation tell (and the owner bans it everywhere)
+  // the em/en dash is the most recognised AI punctuation tell (and the owner bans it everywhere);
+  // between numbers it is a score or a range ("3–1"), which keeps a plain hyphen
+  t = t.replace(/(\d)\s*[\u2014\u2013]\s*(?=\d)/g, '$1-');
   t = t.replace(/\s*[\u2014\u2013]\s*/g, ', ').replace(/,\s*,/g, ',').replace(/^,\s*/, '');
   // a whole message wrapped in quotes reads like a script line
   if (/^["“].+["”]$/s.test(t) && !t.slice(1, -1).includes('"')) t = t.slice(1, -1).trim();
@@ -77,8 +93,10 @@ export interface LintContext {
   marker: { prefix: string; suffix: string };
   /** share of human messages that start lowercase; above 0.7 the bot's texts are lowercased too */
   lowercaseShare?: number;
-  /** a genuinely serious moment: stickers, voice notes, polls and images are held back */
+  /** a genuinely serious moment: stickers, voice notes, polls, images and laughing reactions are held back */
   serious?: boolean;
+  /** nobody asked: a repeat is dropped. When answering someone, a repeat is rewritten instead (never left unanswered) */
+  unprompted?: boolean;
   /** text of a message by short id (to check a reply is in the language of the message it answers) */
   textOf?: (shortId: string) => string | null;
   /** the last few human texts, newest last (the language the room is in right now) */
@@ -100,7 +118,8 @@ export interface LintContext {
 export function phoneStyle(text: string): string {
   let t = text;
   const first = t.match(/^\p{Lu}(?!\p{Lu})/u); // a capital not followed by another one (keep "LMAO", "UCL")
-  if (first) t = t.charAt(0).toLowerCase() + t.slice(1);
+  // Turkish / Azerbaijani dotted "İ" lowercases to "i" (plain toLowerCase adds a combining dot)
+  if (first) t = (t[0] === 'İ' ? 'i' : t.charAt(0).toLowerCase()) + t.slice(1);
   if (/[^.]\.$/.test(t)) t = t.slice(0, -1);
   return t;
 }
@@ -139,6 +158,7 @@ export function lintPlan(actions: BotAction[], ctx: LintContext): LintResult {
   const issues: { index: number; problem: string }[] = [];
   const dropped: string[] = [];
   const botSeen = new Set(ctx.recentBotTexts.map(normalize).filter(s => s.length > 3));
+  const botWords = ctx.recentBotTexts.map(contentWords);
   const humanSeen = new Set(ctx.recentHumanTexts.map(normalize).filter(s => s.length > 8));
   const out: BotAction[] = [];
 
@@ -147,17 +167,26 @@ export function lintPlan(actions: BotAction[], ctx: LintContext): LintResult {
       dropped.push(`${a.type} held back in a serious moment`);
       continue;
     }
+    if (ctx.serious && a.type === 'reaction' && LAUGHING.test(a.emoji)) {
+      dropped.push(`${a.emoji} held back in a serious moment`);
+      continue;
+    }
     const raw = textOf(a);
     if (raw === null) { out.push(a); continue; }
     let fixed = autoFix(raw, ctx.marker);
     if (a.type !== 'voice' && (ctx.lowercaseShare ?? 0) > 0.7) fixed = phoneStyle(fixed);
     const norm = normalize(fixed);
     if (!norm && a.type !== 'voice' && !(fixed.match(EMOJI) ?? []).length) { dropped.push('empty text'); continue; }
-    if (norm && botSeen.has(norm)) { dropped.push(`repeats something you already said: "${fixed.slice(0, 60)}"`); continue; }
+    // the same joke in new words is still a repeat (LLMs recycle jokes, arXiv 2306.04563)
+    const mine = contentWords(fixed);
+    const repeat = norm && botSeen.has(norm) ? 'repeats something you already said'
+      : botWords.some(w => overlap(mine, w) >= 0.6) ? 'too close to something you already said' : null;
+    if (repeat && ctx.unprompted) { dropped.push(`${repeat}: "${fixed.slice(0, 60)}"`); continue; }
     if (norm && humanSeen.has(norm)) { dropped.push(`parrots a member word for word: "${fixed.slice(0, 60)}"`); continue; }
 
     const index = out.length;
     out.push(withText(a, fixed));
+    if (repeat) issues.push({ index, problem: `${repeat}: say it in new words` });
     for (const tell of AI_TELLS) if (tell.re.test(fixed)) issues.push({ index, problem: tell.label });
     const limit = Math.max(220, ctx.medianLen * 6);
     if (a.type !== 'voice' && fixed.length > limit) {

@@ -35,8 +35,11 @@ The owner will tell the friends that ForceAI restarted from scratch. It keeps le
 ## Brain v2 (built 2026-10-24 night, owner's /goal)
 
 - Owner asked for a smarter, more human, less cringe brain that also jumps in unprompted, as "version 2", testable per group while every group stays on v1.
-- Built and deployed: see `docs/brain-v2.md` (research, design, testing plan). v1 parity proven with `scripts/v1-request-dump.ts`.
-- Next: the owner tests v2 in one group (Compare v1 / v2 first), rates lines with 👍 / 👎, then reports. Tune `POLICY` in `src/ai/v2/policy.ts` and the prompts in `src/ai/v2/prompts.ts` from real feedback.
+- Built and deployed in four PRs (#5 base, #6 second opinion + owner calls + scoreboard, #7 room check + reception + replay, #8 running bits + own takes + natural texting): see `docs/brain-v2.md` (research, design, testing plan). v1 parity proven with `scripts/v1-request-dump.ts` before every merge.
+- Not yet run against real Claude: the cloud has no API key. The first real test is the owner's.
+- Owner's morning test: open one active group, Compare v1 / v2, click "Replay last hours with v2" (6 small calls), then "Run comparison" during live chat. If it looks good, switch that group to Brain v2 (beta). Rate lines and `T1v2` decisions with 👍 / 👎.
+- What to watch in the feed: `T1v2` lines show urge vs bar and what moved the bar (`pair talking +0.8`, `2 ignored +0.5`). `T2v2` notes show the angle, rewrites, `split in 2`, and "second opinion said skip".
+- Tuning knobs: `POLICY` in `src/ai/v2/policy.ts` (bar and room weights), `BRAIN_V2` in `src/config.ts`, prompts in `src/ai/v2/prompts.ts`, per-group chattiness in the Compare panel. Tune from real feedback, one change at a time.
 
 ## Task 2: refactor backlog (found by a full read on 2026-10-23, not yet confirmed by running)
 

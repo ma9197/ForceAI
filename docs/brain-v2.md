@@ -5,7 +5,7 @@ READ:
 - To try v2 in a group: open the group, top bar, choose **Brain v2 (beta)**. Switch back the same way.
 - To compare before switching: **Compare v1 / v2** under the chat. It shows what each brain would send right now. Nothing is sent.
 - v2's goal: talk less but better, get irony, sound like a friend, jump in only when it has something good.
-- Teach it your taste: tap 👍 or 👎 on the bot's lines in the live feed. v2 reads your latest likes and dislikes.
+- Teach it your taste: tap 👍 or 👎 on the bot's lines in the live feed. v2 reads your latest likes and dislikes in that group.
 - Too chatty or too quiet: Settings, **Brain v2 chattiness** (quiet, balanced, chatty). One group only: the Compare panel has its own chattiness box.
 - Judge its calls: on `T1v2` lines in the live feed, tap 👍 (good call) or 👎 (bad call). v2's thinking stage reads your latest calls.
 - Scoreboard: the Compare panel shows what v2 did in that group in the last 24 hours.
@@ -24,10 +24,11 @@ READ:
 | Read the room first | Before writing, it states what was literally said, what is meant, and whether those clash (sarcasm, bait, a bit). It also flags sincere moments. | SarcasmCue chain of contradiction (AAAI 2025), SimToM |
 | Several angles, pick one | It lists 2-3 different moves with a named joke type (callback, deadpan, escalation, fake agreement...) and picks the best, instead of the first obvious joke. | Joke-generation studies (2024-2025): brainstorming beats first draft |
 | Measured style card | Real numbers from the chat: typical length, lowercase share, emoji rate, languages. It writes inside those numbers. | Computational Turing Test (2025), Jones and Bergen (2025): style decides "human or bot" |
-| Its own tics | It sees the emojis, openers and phrases it overuses (like 💀 in 14 of 25 messages) and avoids them. | ChatGPT repeats the same jokes (2023) |
+| Its own tics | It sees the emojis, openers and phrases it overuses (like 💀 in 14 of 25 messages) and avoids them. Same for reactions: if it tapped 😂 three of the last six times, it is told to vary. | ChatGPT repeats the same jokes (2023) |
+| No recycled jokes | A line that shares most of its words with something it said lately is dropped, not only exact copies. | ChatGPT repeats the same jokes (arXiv 2306.04563) |
 | What landed | Its recent lines that got laughs (😂 reactions, "hahaha" replies), so it learns this group's humor. | HUMA reflection step |
 | Callbacks | Older messages from this chat that match today's topic, for callback jokes. | Generative Agents memory retrieval (2023) |
-| Your taste (👍 / 👎) | Your latest liked and disliked lines (all groups) are shown as examples of what to aim for and avoid. | Research brief #1: owner-labelled examples instead of training |
+| Your taste (👍 / 👎) | Your latest liked and disliked lines in that group are shown as examples of what to aim for and avoid (per group: groups never share memory). | Research brief #1: owner-labelled examples instead of training |
 | Easy on one person | If it aimed at the same friend in 4 of its last 15 lines, it is told to give them a break. | Research brief #7: roast budget |
 | Thought seeds the reply | When it jumps in because of its inner thought, the reply writer gets that thought, so the jump-in keeps its reason. | Inner Thoughts |
 | Second opinion | Before an unprompted line goes out, a second quick call plays a sharp friend and says send or skip. Skip means silence. Settings toggle, on by default. | Research brief: pairwise judge beats single scoring (arXiv 2603.12520) |
