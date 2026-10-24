@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import type { App } from '../app.js';
-import { DATA_DIR, DEMO_MODE, resolveStickerPath, applyMentions, CITY_CATALOG, cityNow, type ClockCity } from '../config.js';
+import { CLAUDE_CHOICES, DATA_DIR, DEMO_MODE, GEMINI_TTS, resolveStickerPath, applyMentions, CITY_CATALOG, cityNow, type ClockCity } from '../config.js';
 import { logger } from '../logger.js';
 import { FREQ_LEVELS, PERSONA_PRESETS } from '../ai/prompts.js';
 import { CONFIRM_PHRASE } from '../memory/freshStart.js';
@@ -19,10 +19,21 @@ function ownerOnlyBlocked(): string | null {
     : null;
 }
 
+/** Settings dropdown for the thinking stage and reply writing ($ per million tokens in / out). */
+const MODEL_OPTIONS: { value: keyof typeof CLAUDE_CHOICES; label: string }[] = [
+  { value: 'opus55', label: 'Opus 5.5 (smartest, $4 / $20)' },
+  { value: 'sonnet55', label: 'Sonnet 5.5 ($2 / $10)' },
+  { value: 'haiku55', label: 'Haiku 5.5 (fastest, $0.10 / $0.50)' },
+  { value: 'sonnet', label: 'Sonnet 4.6 (old, $3 / $15)' },
+  { value: 'haiku', label: 'Haiku 4.5 (old, $1 / $5)' },
+];
+
 function settingsPayload(app: App) {
   return {
     ...app.getSettings(),
     persona_presets: Object.entries(PERSONA_PRESETS).map(([value, p]) => ({ value, label: p.label })),
+    model_options: MODEL_OPTIONS,
+    gemini_voices: Object.entries(GEMINI_TTS.VOICES).map(([value, vibe]) => ({ value, label: `${value} (${vibe})` })),
   };
 }
 
@@ -441,9 +452,9 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     if ((req.body?.confirm ?? '').trim().toUpperCase() !== CONFIRM_PHRASE) {
       return reply.code(400).send({ error: `Type ${CONFIRM_PHRASE} to confirm.` });
     }
-    const res = await app.freshStart();
-    if (res.status !== 'ok') return reply.code(res.status === 'busy' ? 409 : 500).send({ error: res.message });
-    return { ok: true, ...res };
+    const res = app.startFreshStart(); // runs in the background; Settings polls GET for progress
+    if (res.status !== 'ok') return reply.code(409).send({ error: res.message });
+    return { ok: true, started: true };
   });
 
   fastify.get('/api/settings', async () => settingsPayload(app));
@@ -451,6 +462,7 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
   fastify.post<{ Body: {
     gatekeeper_model?: string; generation_model?: string; effort?: string; daily_budget_usd?: number;
     msg_prefix?: string; msg_suffix?: string; voice_enabled?: boolean; voice_id?: string;
+    voice_provider?: string; gemini_voice?: string; voice_style?: string;
     persona_mode?: string; persona_custom?: string;
     sticker_freq?: string; voice_freq?: string; emoji_freq?: string;
     intro_message?: string; intro_enabled?: boolean; rate_per_min?: number; rate_per_hour?: number;
@@ -470,10 +482,10 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
         app.ai.reload();              // hot-swap the Anthropic client to the new key
         if (b.anthropic_api_key.trim()) app.completeSetup(); // leave needs-setup mode + start WhatsApp
       }
-      if (b.gatekeeper_model && ['sonnet', 'haiku'].includes(b.gatekeeper_model)) {
+      if (b.gatekeeper_model && b.gatekeeper_model in CLAUDE_CHOICES) {
         app.repo.setConfig('gatekeeper_model', b.gatekeeper_model);
       }
-      if (b.generation_model && ['sonnet', 'haiku'].includes(b.generation_model)) {
+      if (b.generation_model && b.generation_model in CLAUDE_CHOICES) {
         app.repo.setConfig('generation_model', b.generation_model);
       }
       if (b.effort && ['low', 'medium', 'high'].includes(b.effort)) {
@@ -491,6 +503,12 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
       if (b.voice_id !== undefined && b.voice_id.trim()) {
         app.repo.setConfig('voice_id', b.voice_id.trim());
       }
+      if (b.voice_provider === 'gemini' || b.voice_provider === 'elevenlabs') {
+        app.repo.setConfig('voice_provider', b.voice_provider);
+        app.prompts.memoryVersion += 1; // voice language rule lives in Block B
+      }
+      if (b.gemini_voice && b.gemini_voice in GEMINI_TTS.VOICES) app.repo.setConfig('gemini_voice', b.gemini_voice);
+      if (b.voice_style !== undefined) app.repo.setConfig('voice_style', b.voice_style.trim().slice(0, 300));
       if (b.persona_mode !== undefined) {
         app.repo.setConfig('persona_mode', b.persona_mode);
         app.prompts.memoryVersion += 1;

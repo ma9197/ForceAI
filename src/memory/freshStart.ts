@@ -63,6 +63,41 @@ export function getKnownNames(db: Database.Database): string[] {
 }
 
 const REWRITE_CHUNK = 60;
+const REWRITE_PARALLEL = 4; // chunks in flight at once: months of voice items are many chunks
+
+/** One-time automatic fresh start on boot (owner asked on 2026-10-24 after the button failed). It runs
+ *  only where a backup was downloaded inside the window and no fresh start finished since, and the
+ *  trigger expires by itself. */
+export const AUTO_FRESH_START = {
+  BACKUP_AFTER: Date.parse('2026-10-24T00:00:00Z'),
+  EXPIRES: Date.parse('2026-10-31T00:00:00Z'),
+};
+
+/** Common words that are also names: the code fallback must not turn "he said" into "he someone". */
+const NOT_ONLY_NAMES = new Set(['said', 'will', 'may', 'mark', 'bill', 'rob', 'max', 'ray', 'hope', 'joy', 'grace', 'king', 'boss', 'bro', 'force']);
+
+/**
+ * Fallback when the AI pass can't run (no key, over budget, API error): replace every known name, and
+ * the first word of multi-word names, with "someone". Cruder than the AI (misses nicknames), never fails.
+ */
+export function swapKnownNames(items: KeptVoiceItem[], names: string[]): VoiceRewrite[] {
+  const tokens = new Set<string>();
+  for (const name of names) {
+    for (const t of [name.trim(), name.trim().split(/\s+/)[0]]) {
+      if (t && t.length >= 3 && !NOT_ONLY_NAMES.has(t.toLowerCase())) tokens.add(t);
+    }
+  }
+  if (tokens.size === 0) return [];
+  const alts = [...tokens].sort((a, b) => b.length - a.length).map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const re = new RegExp(`(?<![\\p{L}\\p{N}])(?:${alts.join('|')})(?![\\p{L}\\p{N}])`, 'giu');
+  const out: VoiceRewrite[] = [];
+  for (const it of items) {
+    const content = it.content.replace(re, 'someone');
+    const example = it.example?.replace(re, 'someone') ?? null;
+    if (content !== it.content || example !== it.example) out.push({ id: it.id, content, example });
+  }
+  return out;
+}
 
 /** Rough cost of the AI pass in USD, shown before the owner confirms. */
 export function estimateRewriteCostUsd(items: KeptVoiceItem[]): number {
@@ -74,43 +109,70 @@ export function estimateRewriteCostUsd(items: KeptVoiceItem[]): number {
   return (inTok * p.in + outTok * p.out) / 1_000_000;
 }
 
+export interface AnonymizeResult { rewrites: VoiceRewrite[]; aiChunks: number; swapChunks: number }
+
 /**
- * AI pass: rewrites kept items that name or point to a person. Returns only real changes.
- * Throws on any failure so the caller aborts before touching the DB.
+ * AI pass: rewrites kept items that name or point to a person. Returns only real changes. Chunks run
+ * REWRITE_PARALLEL at a time; a chunk whose AI call fails falls back to swapKnownNames, so this never
+ * throws and the fresh start always goes through.
  */
-export async function anonymizeVoiceItems(ai: AiClient, items: KeptVoiceItem[], names: string[]): Promise<VoiceRewrite[]> {
-  const out: VoiceRewrite[] = [];
-  const nameList = names.length ? names.map(n => `- ${n}`).join('\n') : '(none saved; still look for names and nicknames)';
-  for (let i = 0; i < items.length; i += REWRITE_CHUNK) {
-    const chunk = items.slice(i, i + REWRITE_CHUNK);
-    const byId = new Map(chunk.map(it => [it.id, it]));
-    const list = chunk.map(it => `[id ${it.id}] (${it.category}) ${it.content}${it.example ? ` | example: ${it.example}` : ''}`).join('\n');
-
-    const response = await ai.client.messages.parse({
-      model: VOICE_PROFILE_MODEL,
-      max_tokens: VOICE_PROFILE.MAX_OUTPUT_TOKENS,
-      system: VOICE_ANONYMIZER_SYSTEM,
-      messages: [{
-        role: 'user',
-        content: `PEOPLE'S NAMES (remove these and any nickname for them):\n${nameList}\n\nITEMS:\n${list}`,
-      }],
-      output_config: { format: zodOutputFormat(VoiceAnonymizeSchema) },
-    });
-    ai.recordUsage(VOICE_PROFILE_MODEL, response.usage, 'voice');
-    if (response.stop_reason === 'max_tokens') throw new Error('the AI answer was cut off');
-    const parsed = response.parsed_output;
-    if (!parsed) throw new Error('the AI returned no usable answer');
-
-    for (const r of parsed.items) {
-      const orig = byId.get(r.id);
-      const content = r.content?.trim();
-      if (!orig || !content) continue; // unknown id or empty text: keep the original
-      const example = r.example?.trim() || null;
-      if (content === orig.content && example === orig.example) continue;
-      out.push({ id: r.id, content, example });
+export async function anonymizeVoiceItems(
+  ai: AiClient, items: KeptVoiceItem[], names: string[], onProgress?: (done: number, total: number) => void,
+): Promise<AnonymizeResult> {
+  const chunks: KeptVoiceItem[][] = [];
+  for (let i = 0; i < items.length; i += REWRITE_CHUNK) chunks.push(items.slice(i, i + REWRITE_CHUNK));
+  const result: AnonymizeResult = { rewrites: [], aiChunks: 0, swapChunks: 0 };
+  let next = 0;
+  let done = 0;
+  const worker = async () => {
+    while (next < chunks.length) {
+      const chunk = chunks[next++];
+      try {
+        result.rewrites.push(...await anonymizeChunk(ai, chunk, names));
+        result.aiChunks += 1;
+      } catch (err) {
+        logger.warn({ err: String((err as Error)?.message ?? err) }, 'fresh start: AI name check failed for a chunk, swapping known names instead');
+        result.rewrites.push(...swapKnownNames(chunk, names));
+        result.swapChunks += 1;
+      }
+      onProgress?.(++done, chunks.length);
     }
-    logger.info({ chunk: chunk.length, changed: out.length }, 'fresh start: voice items checked for names');
+  };
+  await Promise.all(Array.from({ length: Math.min(REWRITE_PARALLEL, chunks.length) }, worker));
+  return result;
+}
+
+/** One AI call for one chunk. Throws on any failure. */
+async function anonymizeChunk(ai: AiClient, chunk: KeptVoiceItem[], names: string[]): Promise<VoiceRewrite[]> {
+  const nameList = names.length ? names.map(n => `- ${n}`).join('\n') : '(none saved; still look for names and nicknames)';
+  const byId = new Map(chunk.map(it => [it.id, it]));
+  const list = chunk.map(it => `[id ${it.id}] (${it.category}) ${it.content}${it.example ? ` | example: ${it.example}` : ''}`).join('\n');
+
+  const response = await ai.client.messages.parse({
+    model: VOICE_PROFILE_MODEL,
+    max_tokens: VOICE_PROFILE.MAX_OUTPUT_TOKENS,
+    system: VOICE_ANONYMIZER_SYSTEM,
+    messages: [{
+      role: 'user',
+      content: `PEOPLE'S NAMES (remove these and any nickname for them):\n${nameList}\n\nITEMS:\n${list}`,
+    }],
+    output_config: { format: zodOutputFormat(VoiceAnonymizeSchema) },
+  });
+  ai.recordUsage(VOICE_PROFILE_MODEL, response.usage, 'voice');
+  if (response.stop_reason === 'max_tokens') throw new Error('the AI answer was cut off');
+  const parsed = response.parsed_output;
+  if (!parsed) throw new Error('the AI returned no usable answer');
+
+  const out: VoiceRewrite[] = [];
+  for (const r of parsed.items) {
+    const orig = byId.get(r.id);
+    const content = r.content?.trim();
+    if (!orig || !content) continue; // unknown id or empty text: keep the original
+    const example = r.example?.trim() || null;
+    if (content === orig.content && example === orig.example) continue;
+    out.push({ id: r.id, content, example });
   }
+  logger.info({ chunk: chunk.length, changed: out.length }, 'fresh start: voice items checked for names');
   return out;
 }
 
@@ -133,8 +195,9 @@ export function freeBytes(dir: string): number | null {
 
 /** Consistent copy of the live DB (WAL included) next to it. Returns the new file's path. */
 export function backupDb(db: Database.Database, dir: string, now: number): string {
-  const stamp = new Date(now).toISOString().slice(0, 16).replace(/[:T]/g, '-');
-  const file = path.join(dir, `forceai.db.pre-fresh-start-${stamp}`);
+  const stamp = new Date(now).toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  let file = path.join(dir, `forceai.db.pre-fresh-start-${stamp}`);
+  for (let n = 2; fs.existsSync(file); n++) file = path.join(dir, `forceai.db.pre-fresh-start-${stamp}-${n}`); // VACUUM INTO won't overwrite
   db.prepare('VACUUM INTO ?').run(file);
   return file;
 }

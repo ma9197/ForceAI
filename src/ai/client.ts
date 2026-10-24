@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { DEFAULT_DAILY_BUDGET_USD, GATEKEEPER_MODELS, GENERATION_MODEL, GENERATION_MODELS, PRICING, type GatekeeperChoice, type GenerationChoice } from '../config.js';
+import { DEFAULT_DAILY_BUDGET_USD, GATEKEEPER_MODELS, GENERATION_MODEL, GENERATION_MODELS, NO_EFFORT, PRICING, THINKING_HEADROOM_TOKENS, THINKS_BY_DEFAULT, type GatekeeperChoice, type GenerationChoice } from '../config.js';
 import { logger } from '../logger.js';
 import type { Repo } from '../memory/repo.js';
 
@@ -70,6 +70,17 @@ export class AiClient {
   get effort(): 'low' | 'medium' | 'high' {
     const e = this.repo.getConfig('effort') ?? 'low';
     return (['low', 'medium', 'high'].includes(e) ? e : 'low') as 'low' | 'medium' | 'high';
+  }
+
+  /**
+   * Per-model request settings. 'reply' keeps the owner's effort setting (as before). 'quick' (thinking
+   * stage, fact extraction) caps thinking at low effort on the 5.5 models, which think by default, and
+   * sends no effort to older models (unchanged from before). Haiku 4.5 never gets effort (it 400s).
+   */
+  tuning(model: string, maxTokens: number, role: 'reply' | 'quick'): { max_tokens: number; effort?: 'low' | 'medium' | 'high' } {
+    const thinks = THINKS_BY_DEFAULT.has(model);
+    const effort = NO_EFFORT.has(model) ? undefined : role === 'reply' ? this.effort : thinks ? 'low' as const : undefined;
+    return { max_tokens: thinks ? maxTokens + THINKING_HEADROOM_TOKENS : maxTokens, ...(effort ? { effort } : {}) };
   }
 
   get dailyBudgetUsd(): number {

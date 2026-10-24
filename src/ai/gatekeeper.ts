@@ -31,22 +31,23 @@ export class Gatekeeper {
       : '';
 
     try {
+      const { max_tokens, effort } = this.ai.tuning(this.ai.gatekeeperModel, 1500, 'quick');
       const response = await this.ai.client.messages.parse({
         model: this.ai.gatekeeperModel,
-        max_tokens: 1500,
+        max_tokens,
         system: GATEKEEPER_SYSTEM,
         messages: [{
           role: 'user',
           content: `${transcript}\n${formatCityTimes(this.repo.getClockCities())}${contextNote}${forceNote}`,
         }],
-        output_config: { format: zodOutputFormat(GateResultSchema) },
+        output_config: { format: zodOutputFormat(GateResultSchema), ...(effort ? { effort } : {}) },
       });
 
       this.ai.recordUsage(this.ai.gatekeeperModel, response.usage, 't1', chatJid);
 
       const parsed = response.parsed_output;
       if (!parsed) {
-        logger.warn('gatekeeper returned unparseable output — defaulting to IGNORE');
+        logger.warn({ stop: response.stop_reason }, 'gatekeeper returned unparseable output, defaulting to IGNORE');
         return { decision: 'IGNORE', reason: 'parse failure', address_message_ids: [], heat: 'low' };
       }
       if (forceDecide && parsed.decision === 'WAIT') {

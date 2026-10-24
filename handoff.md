@@ -30,6 +30,8 @@ The owner will tell the friends that ForceAI restarted from scratch. It keeps le
 - Fresh start is locked until a backup download has fully streamed in the last 24 hours (config `backup_downloaded_at`). Railway volume backups need the Pro plan, so this download is the real backup.
 - Owner steps: after deploy, Power off in the dashboard (keeps the bot quiet with its old memory), Settings, Download backup (keep it private: it holds the WhatsApp login and API keys), Fresh start and type FRESH START, Power on (scan the QR if WhatsApp logged it out), then review the highlighted items in the Voice tab.
 
+**Update 2026-10-24 (later):** the owner's button run failed (most likely the AI name pass ran inside the HTTP request and timed out). Fixed: the fresh start now runs as a background job with progress in Settings, the AI pass runs 4 chunks in parallel, and a failing chunk falls back to a code swap of known names. The owner then asked Claude to do it for them: `AUTO_FRESH_START` in `src/memory/freshStart.ts` runs it once on boot, before WhatsApp connects, where a backup was downloaded since 2026-10-24 and no fresh start finished after it. It expires on 2026-10-31; remove it after that.
+
 ## Task 2: refactor backlog (found by a full read on 2026-10-23, not yet confirmed by running)
 
 Fix first:

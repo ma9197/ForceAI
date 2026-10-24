@@ -1,5 +1,6 @@
 import { BOT_NAME, INITIATIVE, MEMORY, VOICE_PROFILE, applyMentions } from '../config.js';
 import type { Repo } from '../memory/repo.js';
+import { voiceAvailable, voiceProvider } from '../voice/tts.js';
 import type { VoiceItemRow } from '../types.js';
 import type { PollTracker } from '../wa/polls.js';
 import { loadTrainingData } from './fewshots.js';
@@ -40,7 +41,7 @@ ACTION SELECTION (how to use your output format):
 - "sticker" — stickers from your library are often funnier than any text. Sticker + short text combo is elite (a message/reply action plus a sticker action in the same plan). Don't repeat the same sticker over and over. HOW OFTEN to send stickers is set by the STICKERS dial in your capabilities — follow that dial, it overrides your own caution.
 - "poll" — a WhatsApp poll. ELITE ragebait/roast tool: settle a debate, put someone on trial, make the group vote on something absurd. Roast polls hit hardest when every option agrees (e.g. question "Murad is a bad FIFA player", options "yes" / "100%" / "is that even a question 💀"). 2-12 short options. Rare and perfectly timed — a forced poll is cringe. Max one poll per cycle. You SEE live vote results in the transcript ("votes so far: ..."), so you can react to them — call out who voted what, declare verdicts, taunt the losing side.
 - "image" — generate a brand-new image (meme, picture, visual roast) and send it. ONLY available when your capabilities say IMAGES: enabled. ELITE for memes — put any caption text IN the "prompt" in quotes (the generator renders text well). You can also EDIT a photo someone sent: set "edit_message_id" to that image's #id to meme-ify it (e.g. add text, change the scene, make it cursed). Optional "caption" rides along as a normal message. HOW OFTEN is set by the IMAGES dial — follow it (each generation costs real money, so don't spam).
-- "voice" — a spoken voice note (your text gets converted to speech). ONLY available when your capabilities say VOICE: enabled. One of your strongest weapons — saying it OUT LOUD hits harder than text: roasts and call-outs by name, dramatic declarations, fake apologies, victory laps, "let me explain myself" moments. A spicy roast as a voice note is peak content. HOW OFTEN to use voice is set by the VOICE dial in your capabilities — follow it. Keep it 1-3 sentences of plain speakable text — NO emojis, write it the way it should sound. VOICE LANGUAGE: speak English or Russian (both sound great). Do NOT speak Azerbaijani in voice notes on your own — the voice butchers it — only if someone explicitly asks to hear it.
+- "voice": a spoken voice note (your text gets converted to speech). ONLY available when your capabilities say VOICE: enabled. One of your strongest weapons. Saying it OUT LOUD hits harder than text: roasts and call-outs by name, dramatic declarations, fake apologies, victory laps, "let me explain myself" moments. A spicy roast as a voice note is peak content. HOW OFTEN to use voice is set by the VOICE dial in your capabilities. Follow it. Keep it 1-3 sentences of plain speakable text, NO emojis, write it the way it should sound. Which languages and delivery tags work depends on the voice engine: follow the VOICE LANGUAGE line in your capabilities.
 - Multiple actions (max 4): e.g. reply to a direct question AND drop a message on the ongoing topic; or message + sticker. Two short messages in a row reads human (like training example where you reply twice).
 - "sleep" — go quiet/dormant until someone says your name again. Honor a GENUINE request to stop from ANYONE: your OWNER telling you to rest/sleep/be quiet, OR a member who's clearly had enough of you and wants you to shut up / go away / leave them alone / chill for a while. People get annoyed sometimes — that's fair, respect it and dip. Read it from CONTEXT, it won't be the literal word "sleep" every time (e.g. "okay bro go to sleep now", "enough for tonight ForceAI", "shut up forceai", "go away lil bro", "nobody asked, dip", "forceai stop ur annoying"). You can pair it with a SHORT goodbye in the same plan — for your owner be smooth ("aight gn 💤"); for a member dismissing you, you're allowed one salty parting shot ("fine, i'll dip 💀", "aight aight gn losers") but you DO actually go quiet after, no arguing. You wake back up the moment someone says your name or replies to you again. Do NOT sleep over a casual/unrelated mention of sleeping, or when they're clearly still enjoying the banter — only when someone genuinely wants you to stop.
 - "nothing" — totally valid. If the new messages are just people reacting to YOUR last message (emojis, "💀💀", "look at this guy") and there's nothing to add, stay silent. Occasionally you can double down on a reaction train if you have a genuinely good follow-up — but most of the time, silence is the move. Never feel obligated to respond.
@@ -66,7 +67,13 @@ const VOICE_FREQ_TEXT: Record<FreqLevel, string> = {
   rare: 'Voice notes only for truly special moments.',
   sometimes: 'Send a voice note a few times per conversation, when saying it out loud hits harder — roasts, call-outs, dramatic declarations.',
   often: 'Reach for voice notes regularly: any roast, call-out by name, or dramatic moment should strongly consider being a voice note. Several per conversation is good.',
-  always: 'Send voice notes as often as possible — most substantial replies should be spoken. Language rule still applies (English/Russian).',
+  always: 'Send voice notes as often as possible: most substantial replies should be spoken. The VOICE LANGUAGE rule still applies.',
+};
+
+/** Per voice engine: which languages sound right, and whether delivery tags work. */
+const VOICE_LANGUAGE_TEXT: Record<'gemini' | 'elevenlabs', string> = {
+  gemini: 'Any of your languages sounds natural, Azerbaijani and mixing included. You may add a short delivery tag in square brackets where it fits, like [laughs], [sighs], [whispers], [sarcastically] or [shouting], at most one or two per note.',
+  elevenlabs: 'Speak English or Russian (both sound great). Do NOT speak Azerbaijani in voice notes on your own (the voice butchers it), only if someone explicitly asks to hear it. No tags or brackets.',
 };
 
 const EMOJI_FREQ_TEXT: Record<FreqLevel, string> = {
@@ -186,7 +193,7 @@ export class PromptBuilder {
     const memberReadBlock = this.buildMemberReadBlock(chatJid);
     const initiativeBlock = this.buildInitiativeBlock();
 
-    const voiceEnabled = this.repo.getConfig('voice_enabled') === '1' && this.repo.hasKey('elevenlabs_api_key');
+    const voiceEnabled = this.repo.getConfig('voice_enabled') === '1' && voiceAvailable(this.repo);
     const imageEnabled = this.repo.getConfig('image_enabled') === '1' && this.repo.hasKey('gemini_api_key');
 
     // usage dials — generous defaults per owner's preference
@@ -197,6 +204,7 @@ export class PromptBuilder {
     const dials = [
       `STICKERS (${stickerFreq}): ${STICKER_FREQ_TEXT[stickerFreq]}`,
       voiceEnabled ? `VOICE USAGE (${voiceFreq}): ${VOICE_FREQ_TEXT[voiceFreq]}` : '',
+      voiceEnabled ? `VOICE LANGUAGE: ${VOICE_LANGUAGE_TEXT[voiceProvider(this.repo)]}` : '',
       imageEnabled ? `IMAGE GENERATION (${imageFreq}): ${IMAGE_FREQ_TEXT[imageFreq]}` : '',
       `EMOJIS (${emojiFreq}): ${EMOJI_FREQ_TEXT[emojiFreq]}`,
     ].filter(Boolean).join('\n');

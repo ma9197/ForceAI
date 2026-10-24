@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 
+interface Job { state: 'idle' | 'running' | 'done' | 'error'; step: string; message: string | null }
+
 interface Preview {
   demo: boolean;
   running: boolean;
+  job: Job;
   blocked: string | null;
   counts: Record<string, number>;
   images: number;
@@ -36,8 +39,22 @@ export function FreshStart() {
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
 
-  const load = () => api<Preview>('/api/admin/fresh-start').then(setPreview).catch(() => undefined);
+  const load = () => api<Preview>('/api/admin/fresh-start').then((p) => { setPreview(p); return p; }).catch(() => null);
   useEffect(() => { void load(); }, []);
+
+  // the job runs on the server; follow it until it is done, failed, or the bot has restarted
+  useEffect(() => {
+    if (phase !== 'working') return;
+    let sawRestart = false;
+    const timer = setInterval(async () => {
+      const p = await load();
+      if (!p) { sawRestart = true; return; } // server restarting after the wipe
+      if (p.job.state === 'done') { setSummary(p.job.message); setPhase('done'); }
+      else if (p.job.state === 'error') { setError(p.job.message); setPhase('open'); }
+      else if (sawRestart && p.job.state === 'idle') { setPhase('done'); } // came back after the restart
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [phase]);
 
   // the server notes a finished download; re-check a few times so Fresh start unlocks by itself
   const download = () => {
@@ -55,13 +72,12 @@ export function FreshStart() {
     setPhase('working');
     setError(null);
     try {
-      const res = await api<{ demo?: boolean; rewritten?: number; images?: number; backup?: string }>(
+      const res = await api<{ demo?: boolean }>(
         '/api/admin/fresh-start',
         { method: 'POST', body: JSON.stringify({ confirm: typed }) },
       );
       if (res.demo) { setPhase('open'); setError('Not available in the demo.'); return; }
-      setSummary(`Names removed from ${n(res.rewritten)} items. ${n(res.images)} chat images deleted. Safety copy: ${res.backup ?? 'saved'}.`);
-      setPhase('done');
+      void load(); // progress is followed by the effect above
     } catch (err) {
       setError(errorText(err));
       setPhase('open');
@@ -93,6 +109,12 @@ export function FreshStart() {
             ForceAI forgets the people, its attitude and the old chats. It keeps the group's slang, jokes,
             stickers and all settings.
             {preview.last_fresh_start && <> Last fresh start: {new Date(preview.last_fresh_start).toLocaleString()}.</>}
+            {phase === 'idle' && preview.job.state === 'running' && (
+              <><br /><span style={{ color: 'var(--warn)' }}>Running now: {preview.job.step}…</span></>
+            )}
+            {phase === 'idle' && preview.job.state === 'error' && preview.job.message && (
+              <><br /><span style={{ color: 'var(--danger)' }}>Last try failed: {preview.job.message}</span></>
+            )}
             {!unavailable && !preview.backup_fresh && (
               <><br /><span style={{ color: 'var(--warn)' }}>Download a backup first. Fresh start unlocks for 24 hours after a download.</span></>
             )}
@@ -134,6 +156,11 @@ export function FreshStart() {
                 The bot restarts and is offline for about a minute. Items the AI changed show as new in the Voice tab, so you can check them.
               </div>
               {error && <div className="hint" style={{ color: 'var(--danger)' }}>✗ {error}</div>}
+              {phase === 'working' && (
+                <div className="hint" style={{ color: 'var(--warn)' }}>
+                  {preview.job.state === 'running' ? `${preview.job.step}…` : 'Restarting…'} This can take a few minutes. You can leave this page open.
+                </div>
+              )}
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 <input
                   value={typed}
@@ -143,7 +170,7 @@ export function FreshStart() {
                   style={{ width: 170 }}
                 />
                 <button className="danger" disabled={!phraseOk || phase === 'working'} onClick={() => void run()}>
-                  {phase === 'working' ? 'Working… (up to a minute)' : 'Wipe now'}
+                  {phase === 'working' ? 'Working…' : 'Wipe now'}
                 </button>
                 <button disabled={phase === 'working'} onClick={() => { setPhase('idle'); setTyped(''); setError(null); }}>Cancel</button>
               </div>

@@ -78,9 +78,10 @@ export class FactExtractor {
 
       const summary = this.repo.getSummary(this.chatJid)?.summary ?? '(none yet)';
 
+      const { max_tokens, effort } = this.ai.tuning(this.ai.utilityModel, 2000, 'quick');
       const response = await this.ai.client.messages.parse({
         model: this.ai.utilityModel,
-        max_tokens: 2000,
+        max_tokens,
         system: EXTRACTOR_SYSTEM,
         messages: [{
           role: 'user',
@@ -91,7 +92,7 @@ export class FactExtractor {
             `NEW TRANSCRIPT CHUNK:\n${transcript}`,
           ].join('\n\n'),
         }],
-        output_config: { format: zodOutputFormat(FactExtractionSchema) },
+        output_config: { format: zodOutputFormat(FactExtractionSchema), ...(effort ? { effort } : {}) },
       });
 
       this.ai.recordUsage(this.ai.utilityModel, response.usage, 'extract', this.chatJid);

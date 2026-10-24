@@ -21,6 +21,11 @@ interface Settings {
   voice_enabled: boolean;
   voice_available: boolean;
   voice_id: string;
+  voice_provider: 'gemini' | 'elevenlabs';
+  gemini_voice: string;
+  voice_style: string;
+  gemini_voices: { value: string; label: string }[];
+  model_options: { value: string; label: string }[];
   persona_mode: string;
   persona_custom: string;
   persona_presets: { value: string; label: string }[];
@@ -151,13 +156,13 @@ export function SettingsPanel({ onSaved }: { onSaved: () => void }) {
         onSave={v => update({ anthropic_api_key: v } as Partial<Settings>)}
       />
       <KeyRow
-        label="Google Gemini" hint="Optional — unlocks image generation (memes, visual roasts). Free tier available."
+        label="Google Gemini" hint="Optional. Unlocks image generation and free voice notes. Free tier available."
         link="https://aistudio.google.com/apikey"
         set={settings.gemini_key_set} last4={settings.gemini_key_last4} clearable
         onSave={v => update({ gemini_api_key: v } as Partial<Settings>)}
       />
       <KeyRow
-        label="ElevenLabs" hint="Optional — unlocks spoken voice notes."
+        label="ElevenLabs" hint="Optional. The paid voice engine (Gemini is the free one)."
         link="https://elevenlabs.io/app/settings/api-keys"
         set={settings.elevenlabs_key_set} last4={settings.elevenlabs_key_last4} clearable
         onSave={v => update({ elevenlabs_api_key: v } as Partial<Settings>)}
@@ -209,35 +214,33 @@ export function SettingsPanel({ onSaved }: { onSaved: () => void }) {
       <div className="settings-row">
         <div>
           <label>Thinking-stage model</label>
-          <div className="hint">Decides respond/wait/ignore. Sonnet = smarter, Haiku = faster + ~3x cheaper.</div>
+          <div className="hint">Decides respond/wait/ignore, and learns facts. It runs on almost every message, so a cheap fast model fits. Haiku 5.5 is the cheapest.</div>
         </div>
         <select
           value={settings.gatekeeper_model}
           onChange={e => update({ gatekeeper_model: e.target.value })}
         >
-          <option value="sonnet">Sonnet 4.6</option>
-          <option value="haiku">Haiku 4.5</option>
+          {settings.model_options.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
         </select>
       </div>
 
       <div className="settings-row">
         <div>
           <label>Reply-writing model</label>
-          <div className="hint">Writes the actual messages it sends. Sonnet = wittier &amp; on-voice, Haiku = faster + much cheaper.</div>
+          <div className="hint">Writes the actual messages it sends. Opus is the wittiest, Sonnet is the balance, Haiku is fastest and cheapest. Prices are $ per million tokens (in / out).</div>
         </div>
         <select
           value={settings.generation_model}
           onChange={e => update({ generation_model: e.target.value })}
         >
-          <option value="sonnet">Sonnet 4.6</option>
-          <option value="haiku">Haiku 4.5</option>
+          {settings.model_options.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
         </select>
       </div>
 
       <div className="settings-row">
         <div>
           <label>Reply effort</label>
-          <div className="hint">How hard Sonnet thinks when writing replies. Low = snappy banter (recommended).</div>
+          <div className="hint">How hard the reply model thinks. Low = snappy banter (recommended). Haiku 4.5 ignores this.</div>
         </div>
         <select value={settings.effort} onChange={e => update({ effort: e.target.value })}>
           <option value="low">Low</option>
@@ -314,11 +317,25 @@ export function SettingsPanel({ onSaved }: { onSaved: () => void }) {
 
       <div className="settings-row">
         <div>
-          <label>Voice messages (ElevenLabs)</label>
+          <label>Voice engine</label>
+          <div className="hint">
+            Gemini: free (about 100 voice notes a day), speaks Azerbaijani too, uses your Gemini key.
+            ElevenLabs: paid, English and Russian only. If one fails, the other is tried when its key is set.
+          </div>
+        </div>
+        <select value={settings.voice_provider} onChange={e => update({ voice_provider: e.target.value as Settings['voice_provider'] })}>
+          <option value="gemini">Gemini (free)</option>
+          <option value="elevenlabs">ElevenLabs</option>
+        </select>
+      </div>
+
+      <div className="settings-row">
+        <div>
+          <label>Voice messages</label>
           <div className="hint">
             {settings.voice_available
               ? 'AI can send spoken voice notes when the moment calls for it.'
-              : 'Add an ElevenLabs key in API keys above to unlock.'}
+              : `Add ${settings.voice_provider === 'gemini' ? 'a Gemini' : 'an ElevenLabs'} key in API keys above to unlock.`}
           </div>
         </div>
         <input
@@ -330,7 +347,32 @@ export function SettingsPanel({ onSaved }: { onSaved: () => void }) {
         />
       </div>
 
-      {settings.voice_available && (
+      {settings.voice_available && settings.voice_provider === 'gemini' && (
+        <>
+          <div className="settings-row">
+            <div>
+              <label>Gemini voice</label>
+              <div className="hint">One of Google's 30 voices.</div>
+            </div>
+            <select value={settings.gemini_voice} onChange={e => update({ gemini_voice: e.target.value })}>
+              {settings.gemini_voices.map(v => <option key={v.value} value={v.value}>{v.label}</option>)}
+            </select>
+          </div>
+          <div className="settings-row">
+            <div>
+              <label>How it talks</label>
+              <div className="hint">Sent to the voice as "Say ...". Example: like a sarcastic sports commentator. Empty = neutral.</div>
+            </div>
+            <input
+              defaultValue={settings.voice_style}
+              onBlur={e => update({ voice_style: e.target.value })}
+              style={{ width: 260 }}
+            />
+          </div>
+        </>
+      )}
+
+      {settings.voice_available && settings.voice_provider === 'elevenlabs' && (
         <div className="settings-row">
           <div>
             <label>ElevenLabs voice ID</label>
@@ -429,7 +471,7 @@ export function SettingsPanel({ onSaved }: { onSaved: () => void }) {
       />
       <FreqSlider
         label="Voice note usage"
-        hint={settings.voice_available ? 'How often replies become spoken voice notes.' : 'Add an ElevenLabs key (API keys above) + enable voice.'}
+        hint={settings.voice_available ? 'How often replies become spoken voice notes.' : 'Add a key for the voice engine (API keys above) + enable voice.'}
         value={settings.voice_freq}
         disabled={!settings.voice_available || !settings.voice_enabled}
         onChange={v => update({ voice_freq: v })}

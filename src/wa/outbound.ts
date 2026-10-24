@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import { jidNormalizedUser, type WASocket, type WAMessage } from 'baileys';
-import { DEFAULT_MSG_PREFIX, DEFAULT_MSG_SUFFIX, ELEVENLABS, IMAGE_GEN, OUTBOUND, resolveStickerPath, type ImageModelChoice } from '../config.js';
+import { DEFAULT_MSG_PREFIX, DEFAULT_MSG_SUFFIX, IMAGE_GEN, OUTBOUND, resolveStickerPath, type ImageModelChoice } from '../config.js';
 import { logger } from '../logger.js';
-import { elevenLabsTts } from '../voice/tts.js';
+import { stripVoiceTags, synthesizeVoice } from '../voice/tts.js';
 import { geminiGenerateImage } from '../images/gen.js';
 import type { AiClient } from '../ai/client.js';
 import type { Repo } from '../memory/repo.js';
@@ -194,13 +194,12 @@ export class Outbound {
         )) ?? null;
       }
       case 'voice': {
-        const voiceId = this.repo.getConfig('voice_id') || ELEVENLABS.DEFAULT_VOICE_ID;
         // "recording" presence while TTS renders (only if typing indicators enabled)
         if (this.typingOn()) { try { await sock.sendPresenceUpdate('recording', chatJid); } catch { /* ignore */ } }
-        const audio = await elevenLabsTts(action.text, voiceId, this.repo.getKey('elevenlabs_api_key'));
+        const audio = await synthesizeVoice(this.repo, action.text);
         if (!audio) {
           logger.warn('TTS failed — falling back to text message');
-          const text = this.decorate(action.text);
+          const text = this.decorate(stripVoiceTags(action.text));
           return (await sock.sendMessage(chatJid, { text })) ?? null;
         }
         // a human needs a moment to record what they're saying

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { downloadMediaMessage, type WAMessage } from 'baileys';
-import { INTRO_MESSAGE, DATA_DIR, DEFAULT_DAILY_BUDGET_USD, DEFAULT_MSG_PREFIX, DEFAULT_MSG_SUFFIX, DEMO_MODE, ELEVENLABS, IMAGE_DIR, IMAGE_GEN, INITIATIVE, applyMentions } from './config.js';
+import { INTRO_MESSAGE, DATA_DIR, DEFAULT_DAILY_BUDGET_USD, DEFAULT_MSG_PREFIX, DEFAULT_MSG_SUFFIX, DEMO_MODE, ELEVENLABS, GEMINI_TTS, IMAGE_DIR, IMAGE_GEN, INITIATIVE, applyMentions } from './config.js';
 import { logger, waLogger } from './logger.js';
 import { openDb } from './memory/db.js';
 import { Repo } from './memory/repo.js';
@@ -10,10 +10,12 @@ import { VoiceProfiler, type VoiceLearnResult } from './memory/voice.js';
 import { MemberReporter, type ReportResult } from './memory/reporter.js';
 import { InitiativeDistiller, type DistillResult } from './memory/initiative.js';
 import {
-  BACKUP_MAX_AGE_MS, CONFIRM_PHRASE, anonymizeVoiceItems, backupDb, clearImages, countImages, countRows, dbBytes, estimateRewriteCostUsd,
-  freeBytes, getKeptVoiceItems, getKnownNames, wipeMemory, type RowCounts, type WipeResult,
+  AUTO_FRESH_START, BACKUP_MAX_AGE_MS, CONFIRM_PHRASE, anonymizeVoiceItems, backupDb, clearImages, countImages, countRows, dbBytes,
+  estimateRewriteCostUsd, freeBytes, getKeptVoiceItems, getKnownNames, swapKnownNames, wipeMemory,
+  type RowCounts, type VoiceRewrite, type WipeResult,
 } from './memory/freshStart.js';
 import { JidResolver } from './wa/jid.js';
+import { voiceAvailable, voiceProvider } from './voice/tts.js';
 import { WaConnection } from './wa/connection.js';
 import { Normalizer } from './wa/inbound.js';
 import { Groups } from './wa/groups.js';
@@ -59,6 +61,8 @@ export class App {
   private initiativeDistiller: InitiativeDistiller;
   /** true while a fresh start runs: learners don't start and AI actions are refused. */
   memoryLocked = false;
+  /** progress of the last fresh start, shown in Settings */
+  freshStartJob: FreshStartJob = { state: 'idle', step: '', message: null };
 
   getArbiter(jid: string): Arbiter | null {
     return this.arbiters.get(jid) ?? null;
@@ -171,6 +175,12 @@ export class App {
         void this.handleRawMessage(msg, type).catch(err => logger.error({ err }, 'message handling failed'));
       }
     });
+
+    if (this.autoFreshStartDue()) {
+      logger.warn('AUTO FRESH START: the owner downloaded a backup and asked for a fresh start; running it before WhatsApp connects');
+      const res = await this.runFreshStart({ restart: false });
+      logger.warn({ status: res.status, message: res.message, rewritten: res.rewritten, nameMethod: res.name_method }, 'AUTO FRESH START finished');
+    }
 
     if (DEMO_MODE) {
       logger.info('booting in DEMO mode — no WhatsApp, seeded data, outbound disabled');
@@ -343,6 +353,7 @@ export class App {
       counts: countRows(this.repo.db),
       images: DEMO_MODE ? 0 : countImages(IMAGE_DIR),
       rewrite_cost_usd: estimateRewriteCostUsd(items),
+      job: this.freshStartJob,
       last_fresh_start: Number(this.repo.getConfig('fresh_start_at')) || null,
       backup_downloaded_at: this.backupDownloadedAt(),
       backup_fresh: this.hasFreshBackup(),
@@ -375,34 +386,75 @@ export class App {
     return true;
   }
 
+  /** Button path: quick checks, then the job runs in the background (the AI name pass can take
+   *  minutes, longer than an HTTP request lives). Progress shows in freshStartJob. */
+  startFreshStart(): FreshStartResult {
+    if (this.memoryLocked) return { status: 'busy', message: 'A fresh start is already running.' };
+    if (!this.hasFreshBackup()) return { status: 'error', message: 'Download a backup first (button above). Nothing was changed.' };
+    void this.runFreshStart({ restart: true });
+    return { status: 'ok' };
+  }
+
+  /** One-time automatic fresh start on boot: see AUTO_FRESH_START. */
+  autoFreshStartDue(): boolean {
+    if (DEMO_MODE || Date.now() >= AUTO_FRESH_START.EXPIRES) return false;
+    const backupAt = this.backupDownloadedAt();
+    const freshAt = Number(this.repo.getConfig('fresh_start_at')) || 0;
+    return backupAt !== null && backupAt >= AUTO_FRESH_START.BACKUP_AFTER && freshAt < backupAt;
+  }
+
+  private setFreshStep(step: string): void {
+    this.freshStartJob = { ...this.freshStartJob, state: 'running', step };
+    logger.info({ step }, 'fresh start');
+  }
+
   /**
    * Order: lock (no new learning, replies paused) -> wait for in-flight AI calls -> AI removes names
    * from kept voice items -> then, all synchronous so nothing can run in between: safety copy of the
-   * DB, wipe in one transaction, delete chat images -> restart so every in-memory cache starts clean.
-   * Any failure before the wipe changes nothing and unlocks.
+   * DB, wipe in one transaction, delete chat images. `restart` exits afterwards so every in-memory
+   * cache starts clean (not needed on boot, before anything is loaded). Any failure before the wipe
+   * changes nothing and unlocks.
    */
-  async freshStart(): Promise<FreshStartResult> {
+  async runFreshStart(opts: { restart: boolean }): Promise<FreshStartResult> {
     if (this.memoryLocked) return { status: 'busy', message: 'A fresh start is already running.' };
-    if (!this.hasFreshBackup()) return { status: 'error', message: 'Download a backup first (button above). Nothing was changed.' };
     this.memoryLocked = true;
+    this.freshStartJob = { state: 'running', step: 'Starting', message: null };
+    const res = await this.freshStartSteps(opts);
+    this.freshStartJob = {
+      state: res.status === 'ok' ? 'done' : 'error',
+      step: res.status === 'ok' ? (opts.restart ? 'Restarting' : 'Done') : 'Stopped',
+      message: res.status === 'ok'
+        ? `Names removed from ${res.rewritten ?? 0} items${res.name_method === 'swap' ? ' (simple name swap: the AI check was not available)' : ''}. ${res.images ?? 0} chat images deleted. Safety copy: ${res.backup}.`
+        : res.message ?? 'Unknown error',
+    };
+    return res;
+  }
+
+  private async freshStartSteps(opts: { restart: boolean }): Promise<FreshStartResult> {
     this.memberReporter.stop();
     for (const l of [...this.extractors.values(), ...this.voiceProfilers.values()]) l.cancelPending();
     for (const a of this.arbiters.values()) a.suspend();
     let done = false;
     const busy: FreshStartResult = { status: 'busy', message: 'ForceAI is busy learning. Try again in a minute. Nothing was changed.' };
     try {
+      this.setFreshStep('Waiting for running AI calls');
       if (!(await this.waitForMemoryIdle(Date.now() + 90_000))) return busy;
 
+      // names out of the kept items: the AI when it can, else a plain swap of known names
       const items = getKeptVoiceItems(this.repo.db);
-      let rewrites: Awaited<ReturnType<typeof anonymizeVoiceItems>> = [];
+      const names = getKnownNames(this.repo.db);
+      let rewrites: VoiceRewrite[] = [];
+      let nameMethod: 'ai' | 'swap' | 'none' = 'none';
       if (items.length > 0) {
-        if (!this.ai.hasAnthropicKey()) return { status: 'error', message: 'Add your Anthropic key first: the AI removes names from the kept items. Nothing was changed.' };
-        if (this.ai.isOverBudget()) return { status: 'error', message: "Today's AI budget is used up. Raise it in Settings, then try again. Nothing was changed." };
-        try {
-          rewrites = await anonymizeVoiceItems(this.ai, items, getKnownNames(this.repo.db));
-        } catch (err) {
-          logger.error({ err }, 'fresh start: name removal failed');
-          return { status: 'error', message: `The AI name check failed (${String((err as Error)?.message ?? err)}). Nothing was changed. Try again.` };
+        if (this.ai.hasAnthropicKey() && !this.ai.isOverBudget()) {
+          this.setFreshStep(`Removing names from ${items.length} kept items`);
+          const res = await anonymizeVoiceItems(this.ai, items, names, (d, t) => this.setFreshStep(`Removing names: part ${d} of ${t}`));
+          rewrites = res.rewrites;
+          nameMethod = res.aiChunks === 0 ? 'swap' : 'ai';
+        } else {
+          logger.warn('fresh start: no Anthropic key or over budget, swapping known names instead of the AI check');
+          rewrites = swapKnownNames(items, names);
+          nameMethod = 'swap';
         }
       }
 
@@ -410,6 +462,7 @@ export class App {
       if (!(await this.waitForMemoryIdle(Date.now() + 90_000))) return busy;
 
       // ---- from here on everything is synchronous: no message or learner can run in between ----
+      this.setFreshStep('Saving a safety copy and wiping');
       const db = this.repo.db;
       const need = dbBytes(db) * 1.1 + 20 * 1024 * 1024;
       const free = freeBytes(DATA_DIR);
@@ -438,10 +491,17 @@ export class App {
       try { images = clearImages(IMAGE_DIR); } catch (err) { logger.warn({ err }, 'fresh start: image folder not cleared'); }
       try { db.exec('VACUUM'); } catch (err) { logger.warn({ err }, 'fresh start: VACUUM skipped'); }
       this.prompts.memoryVersion += 1;
-      logger.info({ before: wipe.before, after: wipe.after, rewritten: wipe.rewritten, merged: wipe.merged, images, backup }, 'fresh start done, restarting');
+      logger.info({ before: wipe.before, after: wipe.after, rewritten: wipe.rewritten, merged: wipe.merged, nameMethod, images, backup }, 'fresh start done');
 
-      setTimeout(() => process.exit(1), 1500); // Railway restarts it (restart policy: on failure)
-      return { status: 'ok', before: wipe.before, after: wipe.after, rewritten: wipe.rewritten, images, backup: path.basename(backup), restarting: true };
+      if (opts.restart) {
+        setTimeout(() => process.exit(1), 1500); // Railway restarts it (restart policy: on failure)
+      } else {
+        this.memoryLocked = false; // boot: nothing is loaded yet, so no restart needed
+      }
+      return { status: 'ok', before: wipe.before, after: wipe.after, rewritten: wipe.rewritten, name_method: nameMethod, images, backup: path.basename(backup), restarting: opts.restart };
+    } catch (err) {
+      logger.error({ err }, 'fresh start failed');
+      return { status: 'error', message: `Fresh start failed (${String((err as Error)?.message ?? err)}). Nothing was changed.` };
     } finally {
       if (!done) {
         this.memoryLocked = false;
@@ -717,8 +777,11 @@ export class App {
       msg_prefix: this.repo.getConfig('msg_prefix') ?? DEFAULT_MSG_PREFIX,
       msg_suffix: this.repo.getConfig('msg_suffix') ?? DEFAULT_MSG_SUFFIX,
       voice_enabled: this.repo.getConfig('voice_enabled') === '1',
-      voice_available: this.repo.hasKey('elevenlabs_api_key'),
+      voice_available: voiceAvailable(this.repo),
       voice_id: this.repo.getConfig('voice_id') || ELEVENLABS.DEFAULT_VOICE_ID,
+      voice_provider: voiceProvider(this.repo),
+      gemini_voice: this.repo.getConfig('gemini_voice') || GEMINI_TTS.DEFAULT_VOICE,
+      voice_style: this.repo.getConfig('voice_style') ?? GEMINI_TTS.DEFAULT_STYLE,
       persona_mode: this.repo.getConfig('persona_mode') ?? 'default',
       persona_custom: this.repo.getConfig('persona_custom') ?? '',
       sticker_freq: this.repo.getConfig('sticker_freq') ?? 'often',
@@ -789,9 +852,16 @@ export class App {
   }
 }
 
+export interface FreshStartJob {
+  state: 'idle' | 'running' | 'done' | 'error';
+  step: string;
+  message: string | null;
+}
+
 export interface FreshStartPreview {
   demo: boolean;
   running: boolean;
+  job: FreshStartJob;
   counts: RowCounts;
   images: number;
   rewrite_cost_usd: number;
@@ -808,6 +878,7 @@ export interface FreshStartResult {
   before?: RowCounts;
   after?: RowCounts;
   rewritten?: number;
+  name_method?: 'ai' | 'swap' | 'none';
   images?: number;
   backup?: string;
   restarting?: boolean;

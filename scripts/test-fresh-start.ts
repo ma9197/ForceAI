@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { openDb } from '../src/memory/db.js';
 import { Repo } from '../src/memory/repo.js';
 import {
-  anonymizeVoiceItems, backupDb, clearImages, countImages, countRows, estimateRewriteCostUsd, getKeptVoiceItems, getKnownNames, wipeMemory,
+  anonymizeVoiceItems, backupDb, clearImages, swapKnownNames, countImages, countRows, estimateRewriteCostUsd, getKeptVoiceItems, getKnownNames, wipeMemory,
 } from '../src/memory/freshStart.js';
 import { createBackupArchive } from '../src/memory/backup.js';
 
@@ -99,19 +99,42 @@ const rw = await anonymizeVoiceItems(fakeAi(() => ({ items: [
   { id: slang, content: 'washed = past their prime', example: 'they are washed' }, // unchanged
   { id: ref, content: '   ', example: null }, // empty
 ] })), kept, ['Murad', 'Kanan']);
-assert.deepEqual(rw, [{ id: joke, content: 'making the loser go quiet', example: null }]);
+assert.deepEqual(rw.rewrites, [{ id: joke, content: 'making the loser go quiet', example: null }]);
+assert.deepEqual([rw.aiChunks, rw.swapChunks], [1, 0]);
 assert.ok(calls[0].messages[0].content.includes('- Murad'), 'names are sent as hints');
 calls.length = 0;
 const many = Array.from({ length: 130 }, (_, i) => ({ id: i + 1000, category: 'slang', content: `w${i}`, example: null }));
-await anonymizeVoiceItems(fakeAi(() => ({ items: [] })), many, []);
+const progress: string[] = [];
+await anonymizeVoiceItems(fakeAi(() => ({ items: [] })), many, [], (d, t) => progress.push(`${d}/${t}`));
 assert.equal(calls.length, 3, '130 items go in 3 calls');
-await assert.rejects(anonymizeVoiceItems(fakeAi(() => ({ items: [] }), 'max_tokens'), kept, []), /cut off/);
-await assert.rejects(anonymizeVoiceItems(fakeAi(() => null), kept, []), /no usable answer/);
+assert.deepEqual(progress, ['1/3', '2/3', '3/3']);
+// a failing AI chunk falls back to swapping known names instead of failing the fresh start
+for (const broken of [fakeAi(() => ({ items: [] }), 'max_tokens'), fakeAi(() => null)]) {
+  const res = await anonymizeVoiceItems(broken, kept, ['Murad', 'Kanan']);
+  assert.deepEqual([res.aiChunks, res.swapChunks], [0, 1]);
+  assert.ok(res.rewrites.some(r => r.id === joke && r.content === 'making someone go quiet' && r.example === 'someone went quiet 💀'));
+}
+
+// ---- code fallback: whole words, any case, multi-word names, never common words ----
+const swap = swapKnownNames([
+  { id: 1, category: 'joke', content: "kanan's car and MURAD bro", example: null },
+  { id: 2, category: 'phrase', content: 'he said what he said', example: 'Kananov is not Kanan' },
+  { id: 3, category: 'slang', content: 'nothing here', example: null },
+  { id: 4, category: 'reference', content: 'Ali Veli strikes again', example: null },
+], ['Kanan', 'Murad', 'Said', 'Ali Veli']);
+assert.deepEqual(swap, [
+  { id: 1, content: "someone's car and someone bro", example: null },
+  { id: 2, content: 'he said what he said', example: 'Kananov is not someone' },
+  { id: 4, content: 'someone strikes again', example: null },
+]);
 
 // ---- safety copy ----
 const now = Date.now();
 const backup = backupDb(db, dir, now);
 assert.ok(fs.existsSync(backup), 'backup file exists');
+const backup2 = backupDb(db, dir, now); // same second again: a new name, never a failure
+assert.ok(backup2 !== backup && fs.existsSync(backup2), 'second backup in the same second gets its own file');
+fs.rmSync(backup2);
 
 // ---- wipe ----
 const res = wipeMemory(db, {
