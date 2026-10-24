@@ -145,6 +145,8 @@ export interface LintContext {
   p80Len?: number;
   /** share of human texts that end on a laugh; under 0.1 the bot does not laugh at its own line either */
   laughEndShare?: number;
+  /** 2+ people are shouting right now (a goal, big news) and nobody asked it anything: a long line reads like a bot */
+  hype?: boolean;
 }
 
 /**
@@ -255,6 +257,8 @@ export function lintPlan(actions: BotAction[], ctx: LintContext): LintResult {
     const limit = Math.max(220, ctx.medianLen * 6);
     if (a.type !== 'voice' && fixed.length > limit) {
       issues.push({ index, problem: `too long for this chat (${fixed.length} characters, people here write about ${ctx.medianLen || 'short'})` });
+    } else if (ctx.hype && a.type !== 'voice' && fixed.length > Math.max(60, ctx.p80Len ?? 0)) {
+      issues.push({ index, problem: `too long for a hype moment (${fixed.length} characters): people are shouting, say it in a few words` });
     }
     const emojis = (fixed.match(EMOJI) ?? []).length;
     if (emojis > 5) issues.push({ index, problem: `${emojis} emojis in one message` });

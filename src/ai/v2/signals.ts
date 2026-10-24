@@ -411,6 +411,10 @@ export interface Dynamics {
   storyteller: string | null;
   /** a question to the group that nobody has answered yet */
   hangingQuestion: { shortId: string; who: string } | null;
+  /** the newest question is rhetorical ("who even watches that?", "кто вообще так играет?!"): not one to answer */
+  rhetorical: { shortId: string; who: string } | null;
+  /** a burst of shouting from 2+ people in the last 90 s (a goal, big news): who is shouting */
+  hype: string[] | null;
   /** a message that looks like real bad news, who sent it, and the word that flagged it */
   serious: { shortId: string; word: string; who: string } | null;
   /** people saying bye or goodnight: the chat is winding down (the newest goodbye's short id) */
@@ -457,11 +461,16 @@ export function dynamics(rows: MsgRow[], botName: string, now = Date.now()): Dyn
 
   // a question to the group: ends in "?", not a reply, not from the owner, nobody else spoke since
   let hangingQuestion: Dynamics['hangingQuestion'] = null;
+  let rhetorical: Dynamics['rhetorical'] = null;
   const recent = humans.filter(r => now - r.ts < 10 * 60_000);
   for (let i = recent.length - 1; i >= Math.max(0, recent.length - 3); i--) {
     const q = recent[i];
     if (q.type !== 'text' || q.is_owner || q.quoted_id || mentionsBot(q)) continue;
     if (!QUESTION_END.test(q.text ?? '')) continue;
+    if (rhetoricalText(q.text ?? '')) {
+      if (q.short_id && now - q.ts < 5 * 60_000) rhetorical = { shortId: q.short_id, who: q.sender_name ?? '?' };
+      break;
+    }
     const answered = recent.slice(i + 1).some(r => r.sender_jid !== q.sender_jid) || rows.some(r => r.is_bot && r.ts > q.ts);
     if (!answered && q.short_id) hangingQuestion = { shortId: q.short_id, who: q.sender_name ?? '?' };
     break;
@@ -489,7 +498,58 @@ export function dynamics(rows: MsgRow[], botName: string, now = Date.now()): Dyn
     windingDown = { who: goneWho.length ? goneWho : [lastBye.sender_name ?? '?'], shortId: lastBye.short_id };
   }
 
-  return { privatePair, storyteller, hangingQuestion, serious, windingDown };
+  // a hype moment: 3+ loud texts ("GOOOOL", "LETS GOOO!!", caps) from 2+ people in the last 90 seconds,
+  // and no bad news (shouting about bad news is not hype)
+  let hype: Dynamics['hype'] = null;
+  // a laugh in caps ("HAHAHAHA") is laughing and "gn!!" is a goodbye: neither is shouting
+  const laughOnly = (t: string) => LAUGH_TEXT.test(t) && t.length <= 60 && words(t.replace(LAUGH_TEXT, ' ')).length <= 1;
+  const loud = humans.filter(r => {
+    const t = r.text ?? '';
+    return r.type === 'text' && now - r.ts < 90_000 && !laughOnly(t) && !closingText(t) && (loudText(t) || GOAL.test(t));
+  });
+  const shouting = [...new Set(loud.map(r => (r.is_owner ? 'Said (owner)' : r.sender_name ?? '?')))];
+  if (!serious && loud.length >= 3 && shouting.length >= 2) hype = shouting;
+  if (hype) privatePair = null; // two friends shouting at a goal together are not a private exchange
+
+  return { privatePair, storyteller, hangingQuestion, serious, windingDown, rhetorical, hype };
+}
+
+/** A goal shout ("gooool", "goaaal", "gollll", "ГОЛЛЛ", "qooool", "GOAL", "golazo"): stretched, or in capitals. "his goal was offside" is not one. */
+const GOAL = /(?<!\p{L})(?:[gGqQ]+(?:[oO]{2,}[aA]*[lL]+|[oO]+[aA]{2,}[lL]+|[oO]+[aA]*[lL]{2,})|[гГ]+(?:[оО]{2,}[лЛ]+|[оО]+[лЛ]{2,})|GOAL|GOL|QOL|ГОЛ|gola[sz]o|GOLA[SZ]O)(?!\p{L})/u;
+
+/** The rest of the message is only punctuation or emojis: "bro what?" counts, "bro what time is it" does not. */
+const END = '(?=[\\s?!.…\\p{Extended_Pictographic}\\u{1F3FB}-\\u{1F3FF}\\u200d\\ufe0f]*$)';
+/** Asking for a fact (time, place, score, what happened): an honest question, never rhetorical. */
+const INFO_ASK = new RegExp('(?<!\\p{L})(?:' + [
+  'when', 'where', 'what time', 'which', 'how (?:many|much|long)', 'score', 'scored', 'happened', 'channel', 'link',
+  'когда', 'где', 'куда', 'во сколько', 'сколько', 'сч[её]т', 'что случилось', 'забил\\p{L}*', 'канал', 'ссылк\\p{L}*',
+  ...['ne zaman', 'nerede', 'nerde', 'nereye', 'kaçta', 'saat kaç', 'hangi', 'ne oldu', 'nə vaxt', 'harda', 'hara', 'neçədə', 'hansı', 'nə oldu', 'kim attı', 'kim vurdu'].map(loose),
+].join('|') + ')(?!\\p{L})', 'iu');
+/**
+ * Questions nobody expects an answer to: venting, disbelief, sarcasm ("who even...", "what is wrong with
+ * him", "кто вообще так играет", "ты серьёзно", "ne alaka", "ciddi misin", "bu nədi belə"), or one ending in
+ * "!?". Answering one literally is a classic bot move. Questions that ask for a fact (time, place, score,
+ * what happened) never count, and short phrases ("bro what", "как так") only when they end the message.
+ */
+const RHETORICAL = new RegExp('(?<!\\p{L})(?:' + [
+  'who even(?! (?:is|are)\\b)', 'who tf', 'who the hell', 'who asked', 'why would (?:anyone|anybody|you|he|she|they)', "what['’]?s wrong with", 'what is wrong with',
+  'how is (?:that|this|he|she|it) (?:even )?(?:allowed|legal|possible|real)', 'how (?:is|was) (?:that|this) not an? (?:pen|penalty|foul|red|card|goal|offside)',
+  '(?:are|r) (?:you|u) (?:serious|kidding)', '(?:you|u) (?:serious|kidding me)', 'is this a joke', 'is (?:he|the ref|var) blind',
+  'why is (?:he|she|this|it) like this', 'how (?:do|did) (?:you|u|he|they) miss', 'what was that' + END, 'bro what' + END, 'what the hell', 'wtf',
+  'кто вообще (?:так|такое|это|смотрит)', 'кто так (?:играет|делает|бь[её]т)', 'что за (?:бред|дичь|херня|фигня)', 'зачем вообще', 'нафига', 'ты серь[её]зно', 'ты издеваешься', 'издеваются',
+  'что (?:он|они|ты) творит', 'какого (?:хрена|ч[её]рта)', 'как так(?:\\s+можно)?' + END, 'что это было',
+  "kto v[ao]+b?(?:sh|shch|sch)e (?:tak|smotrit)", "ty ser['j]?(?:yo|jo|e|io)zno", 'kak tak' + END, 'chto eto bylo',
+  ...['ne alaka', 'ciddi misin', 'şaka mı', 'bu ne ya', 'ne biçim', 'olur mu böyle', 'olacak iş mi', 'kör mü bu', 'hakem kör mü', 'ne yapıyor bu', 'napıyor bu'].map(loose),
+  ...['nə əlaqəsi', 'ciddisən', 'bu nədi belə', 'bu nə biabırçılıqdı', 'nə danışırsan', 'zarafat edirsən', 'dəli olmusan', 'nə edir bu', 'bu nə oyundu'].map(loose),
+  loose('olar belə') + END, loose('bu nə idi') + END, 'kim(?:\\s+\\p{L}+){1,3},?\\s+ki' + END,
+].join('|') + ')(?!\\p{L})', 'iu');
+
+export function rhetoricalText(text: string): boolean {
+  const t = text.trim();
+  const low = t.toLocaleLowerCase('tr');
+  if (INFO_ASK.test(t) || INFO_ASK.test(low)) return false;
+  // only the end is checked for "!?": a long run of "?" must not be re-scanned from every position
+  return RHETORICAL.test(t) || RHETORICAL.test(low) || /(?:\?!|!\?)[\s\p{Extended_Pictographic}\u{1F3FB}-\u{1F3FF}‍️]*$/u.test(t.slice(-40));
 }
 
 /**
@@ -919,11 +979,14 @@ export function formatRoomNow(r: RoomNow, stage: 'gate' | 'writer'): string | nu
   const storyQuestion = !!(q && r.dyn.storyteller && r.dyn.storyteller === q.who);
   if (q && storyQuestion) lines.push(`- ${q.who}: several messages in a row, the last one a question (#${q.shortId}, may be part of the story)`);
   else if (q) lines.push(`- open question: #${q.shortId} (${q.who}) asked the group, nobody answered yet`);
+  if (r.dyn.rhetorical) lines.push(`- rhetorical (likely): #${r.dyn.rhetorical.shortId} (${r.dyn.rhetorical.who}) sounds like venting or sarcasm, not a real ask`);
   if (r.dyn.privatePair) lines.push(`- ${r.dyn.privatePair[0]} and ${r.dyn.privatePair[1]} are going back and forth with each other`);
+  if (r.dyn.hype) lines.push(`- hype: ${r.dyn.hype.join(', ')} shouting in the last 90 seconds`);
   if (r.dyn.windingDown) lines.push(`- winding down: ${r.dyn.windingDown.who.join(', ')} said bye or goodnight (#${r.dyn.windingDown.shortId})`);
   if (stage === 'gate' && r.dyn.storyteller && !storyQuestion) lines.push(`- ${r.dyn.storyteller} is sending several messages in a row (probably not finished)`);
   for (const c of r.cues) lines.push(`- possible irony: #${c.shortId} ${c.who}, ${c.cue}`);
-  const moods = r.map.people.filter(p => !p.serious && (p.loud || p.laughing || p.talkingTo.length))
+  const shouting = new Set(r.dyn.hype ?? []); // already said in the hype line
+  const moods = r.map.people.map(p => ({ ...p, loud: p.loud && !shouting.has(p.name) })).filter(p => !p.serious && (p.loud || p.laughing || p.talkingTo.length))
     .map(p => [p.name, p.loud ? 'loud' : '', p.laughing ? 'laughing' : '', p.talkingTo.length ? `talking to ${p.talkingTo.join(', ')}` : ''].filter(Boolean).join(' '));
   if (moods.length) lines.push(`- people: ${moods.join('; ')}`);
   const chain = r.map.chains.find(c => c.fresh);

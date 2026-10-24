@@ -374,6 +374,8 @@ export class BrainV2 {
         burstiness: signals.style?.burstiness,
         p80Len: signals.style?.p80Len,
         laughEndShare: laughEndShare(signals.humanTexts.slice(-40)),
+        // only for a jump-in: someone who asked gets a real answer, and an argument or bad news is not hype
+        hype: !!signals.dyn.hype && !asked && !serious && out.read.vibe !== 'heated',
       };
       let lint = lintPlan(actions, { ...lintCtx, recentBotTexts: signals.botTexts.slice(-30), recentHumanTexts: signals.humanTexts.slice(-40) });
       let rewritten = 0;
