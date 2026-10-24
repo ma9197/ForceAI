@@ -407,25 +407,42 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
     ({ id: `i${++k}`, short_id: `m${k}`, sender_jid: who, sender_name: who, text, type: 'text', is_bot: 0, is_owner: 0, ts: T + at * 1000, ...extra });
   const now = T + 120_000;
   const cueOf = (text: string) => ironyCues([r('Kanan', text, 60)], now)[0]?.cue ?? null;
-  assert.equal(cueOf('yeah right, he totally scored'), '"yeah right"');
-  assert.equal(cueOf('ну да, конечно он лучший'), '"ну да"');
-  assert.equal(cueOf('ага конечно'), '"ага конечно"');
-  assert.equal(cueOf('tabii canım, kesin kazanırlar'), '"tabii canım"');
-  assert.equal(cueOf('hə də, çox ağıllısan'), '"hə də"');
-  assert.equal(cueOf('thanks a lot man'), '"thanks a lot"');
+  // sarcasm that should be flagged, in each language, typed either way
+  for (const [line, cue] of [
+    ['yeah right, he totally scored', '"yeah right"'], ['ага, конечно', '"ага, конечно"'], ['ага щас', '"ага щас"'],
+    ['кто бы сомневался', '"кто бы сомневался"'], ['ну да, ну да', '"ну да, ну да"'], ['aga konechno', '"aga konechno"'],
+    ['tabii tabii', '"tabii tabii"'], ['TABİİ TABİİ', '"tabii tabii"'], ['ne demezsin', '"ne demezsin"'], ['cok biliyorsun', '"cok biliyorsun"'],
+    ['hə də, hə də', '"hə də, hə də"'], ['he de he de', '"he de he de"'], ['cox bilirsen', '"cox bilirsen"'],
+  ] as const) assert.equal(cueOf(line), cue, line);
+  assert.equal(cueOf('very funny.'), 'a dry "very funny" (no laugh with it)');
+  assert.equal(cueOf('очень смешно'), 'a dry "very funny" (no laugh with it)');
   assert.equal(cueOf('he is so smart 🙄'), 'an eye-roll, smirk or clown emoji');
-  assert.equal(cueOf('genius move 💀'), 'praise next to a laugh or clown emoji');
-  assert.equal(cueOf('what a goal, genius pass'), null, 'sincere praise alone is not a cue');
-  assert.equal(cueOf('ну дай мне'), null, '"ну да" must be its own words');
-  assert.equal(cueOf('see you at nine'), null);
-  // a switch of alphabet by someone who usually writes the other way
-  const usual = ['bro that was crazy', 'i am on my way', 'who is playing tonight', 'nah he is washed'].map((t, i) => r('Murad', t, 10 + i));
+  assert.equal(cueOf('nice 👏 one 👏'), 'claps between words');
+  assert.equal(cueOf('best ref ever /s'), '"/s"');
+  // everyday sincere lines must stay clean (a wrong hint is worse than none)
+  for (const line of ['aynen kanka', 'çox sağ ol qardaş', 'ne güzel olmuş', 'hə də, gəlirəm', 'hə, əlbəttə gəlirəm', 'ну да, логично', 'tabii canım gel',
+    'thanks a lot man, saved me', 'oh perfect, see you at 8', 'wow thanks for the ticket', 'big brain play by messi', 'legend 💀', 'gg 😂',
+    'очень смешной мем', 'çok komikti ya 😂', 'very funny 😂😂', 'see /s/abc', 'what a goal, genius pass', 'ну дай мне', 'see you at nine']) {
+    assert.equal(cueOf(line), null, line);
+  }
+  // strong cues are kept over weak ones
+  const usual = ['bro that was crazy', 'i am on my way', 'who is playing tonight', 'nah he is washed', 'see you there then', 'he is cooked'].map((t, i) => r('Murad', t, 10 + i));
+  const mix = ironyCues([r('Aysel', 'yeah right he scored', 40), r('Kanan', '🙄🙄', 61), r('Leyla', 'ok 🙃', 62), r('Aysel', 'smart 🤡', 63), r('Murad', 'sure 😏', 64)], now);
+  assert.equal(mix.length, 3);
+  assert.ok(mix.some(c => c.cue === '"yeah right"'), 'the strongest cue is never pushed out by newer weak ones');
+  assert.deepEqual(mix.map(c => c.who), ['Aysel', 'Aysel', 'Murad'], 'kept in chat order');
+  // alphabet switch: only a clear one (5 of the last 6 and the one right before), real sentences, links ignored
   const sw = ironyCues([...usual, r('Murad', 'ну конечно он лучший игрок', 60)], now);
-  assert.equal(sw[0]?.cue, 'a switch to Russian (often a joke or a quote)');
-  assert.equal(ironyCues([...usual, r('Murad', 'he is the best player ever', 60)], now).length, 0, 'no switch, no cue');
+  assert.equal(sw[0]?.cue, 'a switch to Russian (sometimes a joke or a quote)');
+  const lasting = ironyCues([...usual, r('Murad', 'да я уже еду домой', 60), r('Murad', 'буду через десять минут', 61)], now);
+  assert.equal(lasting.length, 1, 'a lasting switch is flagged once, not on every message');
+  const ruUsual = ['я уже еду домой', 'кто сегодня играет', 'он вообще не умеет', 'давай завтра тогда', 'ну это было сильно', 'посмотрим что будет'].map((t, i) => r('Kanan', t, 10 + i));
+  assert.equal(ironyCues([...ruUsual, r('Kanan', 'https://youtu.be/dQw4w9WgXcQ', 60)], now).length, 0, 'a link is not a switch');
+  assert.equal(ironyCues([...ruUsual, r('Kanan', 'Vinicius Jr', 60)], now).length, 0, 'a name is not a switch');
+  assert.equal(ironyCues([...usual.slice(0, 4), r('Murad', 'ну конечно он лучший игрок', 60)], now).length, 0, 'not enough history to call it a switch');
   assert.equal(ironyCues([r('Said', 'yeah right', 60, { is_owner: 1 })], now).length, 0, "the owner's lines are never cues");
   assert.equal(ironyCues([r('Kanan', 'yeah right', 0)], T + 20 * 60_000).length, 0, 'only the last minutes');
-  assert.ok(formatIronyCues(sw)!.includes('POSSIBLE IRONY') && formatIronyCues(sw)!.includes('#m'));
+  assert.ok(formatIronyCues(sw)!.includes('often still sincere'));
   assert.equal(formatIronyCues([]), null);
 }
 
