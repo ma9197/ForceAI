@@ -11,7 +11,7 @@ import { CHATTINESS_SHIFT, decide, roomShift, threshold } from '../src/ai/v2/pol
 import { actualAfter, pickReplayCuts } from '../src/ai/v2/replay.js';
 import { TasteLearner, readTasteRules } from '../src/ai/v2/taste.js';
 import {
-  botTargets, botTics, callbackKeywords, dynamics, formatDecisionFeedback, formatTargets, formatTics, formatClockLine, formatLinesThatWorked, formatRoomNow,
+  botTargets, botTics, callbackKeywords, dynamics, formatDecisionFeedback, formatTeasing, formatTics, teaseReception, formatClockLine, formatLinesThatWorked, formatRoomNow,
   formatBits, formatReactionHabit, formatTakes, groupLaughs, ironyCues, parseDecisionLine, roomMap, ignoredStreak, laughCounts, landedLines, ownTakes, participation, reception, runningBits, seriousHit,
   styleStats, type MsgRow,
 } from '../src/ai/v2/signals.js';
@@ -66,8 +66,39 @@ const botLines = ['kanan you are washed', 'murad what was that', 'Kanan again lo
 botLines.push(row('bot', 'take the L', { is_bot: 1, quoted_id: 'q1' }));
 const targets = botTargets(botLines, ['Kanan Aliyev', 'Murad'], id => (id === 'q1' ? 'Kanan Aliyev' : null));
 assert.deepEqual(targets, [{ name: 'Kanan Aliyev', count: 5 }, { name: 'Murad', count: 1 }]);
-assert.ok(formatTargets(targets)!.startsWith('EASY ON: Kanan Aliyev'));
-assert.equal(formatTargets([{ name: 'Murad', count: 2 }]), null);
+assert.ok(formatTeasing(targets, [])!.includes('- EASY ON: Kanan Aliyev (in 5 of your last 15 messages)'));
+assert.equal(formatTeasing([{ name: 'Murad', count: 2 }], []), null);
+
+// how each friend takes the bot's digs
+{
+  const T = 1_800_000_000_000;
+  let k = 0;
+  const r = (who: string, text: string, at: number, extra: Partial<MsgRow> = {}): MsgRow =>
+    ({ id: `t${++k}`, short_id: `m${k}`, sender_jid: who, sender_name: who, text, type: 'text', is_bot: who === 'bot' ? 1 : 0, is_owner: 0, ts: T + at * 1000, ...extra });
+  const rows: MsgRow[] = [];
+  // Kanan laughs at digs (a laughing reply, a 😂 reaction)
+  const d1 = r('bot', 'kanan predicted 3-0 again', 10); rows.push(d1, r('Kanan', 'HAHAHA ok fair', 12));
+  const d2 = r('bot', 'kanan and his penalties', 60); rows.push(d2, { ...r('Kanan', '😂', 62), type: 'reaction', quoted_id: d2.id });
+  // Aysel pushes back
+  const d3 = r('bot', 'aysel still lost in the parking lot', 120); rows.push(d3, r('Aysel', 'not funny', 125));
+  const d4 = r('bot', 'aysel driving again', 180); rows.push(d4, { ...r('Aysel', '🙄', 182), type: 'reaction', quoted_id: d4.id });
+  // a line about two people tells nothing about either; a line nobody answers is just "teased"
+  rows.push(r('bot', 'kanan and aysel both cooked', 240), r('bot', 'kanan you ok', 300), r('Murad', 'lol', 305));
+  const takes = teaseReception(rows, ['Kanan Aliyev', 'Aysel', 'Murad']);
+  const kanan = takes.find(t => t.name === 'Kanan Aliyev')!;
+  const aysel = takes.find(t => t.name === 'Aysel')!;
+  assert.deepEqual([kanan.teased, kanan.laughed, kanan.pushedBack], [3, 2, 0], JSON.stringify(kanan));
+  assert.deepEqual([aysel.teased, aysel.laughed, aysel.pushedBack], [2, 0, 2]);
+  const tx = formatTeasing([], takes)!;
+  assert.ok(tx.includes('- Aysel pushed back on 2 of your 2 digs: keep it light with them') && tx.includes('- Kanan Aliyev laughed at 2 of your 3 digs: they enjoy it'), tx);
+  assert.ok(teaseReception([r('bot', 'murad is washed', 10), r('Murad', 'отстань', 12)], ['Murad'])[0].pushedBack === 1, 'pushback in Russian');
+  assert.ok(teaseReception([r('bot', 'murad is washed', 10), r('Murad', 'bəsdir', 12)], ['Murad'])[0].pushedBack === 1, 'pushback in Azerbaijani');
+  assert.equal(teaseReception([r('bot', 'that is sus', 10), r('Murad', 'sus', 12)], ['Murad']).length, 0, 'English "sus" is not pushback (and nobody was named)');
+  // quoting Kanan and naming him is one person, not two (full name in the member list, first name in the chat)
+  const q = r('Kanan', 'i will score tonight', 400);
+  const one = teaseReception([q, r('bot', 'kanan you will not', 410, { quoted_id: q.id }), r('Kanan', 'hahaha', 415)], ['Kanan Aliyev']);
+  assert.deepEqual(one.map(t => [t.name, t.teased, t.laughed]), [['Kanan Aliyev', 1, 1]], JSON.stringify(one));
+}
 // lines that worked: one deduped list, without the bot's current tics or digs at an "easy on" person
 const worked = formatLinesThatWorked(['good one 🔥', 'kanan is cooked 💀'], [{ text: 'good one 🔥', laughs: 2 }, { text: 'murad and the penalty again', laughs: 3 }],
   [{ who: 'Aysel', text: 'he drives like he takes pens', laughs: 2 }], { emojis: ['💀'], names: ['Kanan Aliyev'] })!;

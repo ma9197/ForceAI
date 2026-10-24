@@ -345,11 +345,6 @@ export function botTargets(botRows: MsgRow[], names: string[], senderOf: (id: st
   return [...counts.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
 }
 
-export function formatTargets(targets: { name: string; count: number }[], min = 4, window = 15): string | null {
-  const heavy = targets.filter(t => t.count >= min);
-  if (heavy.length === 0) return null;
-  return `EASY ON: ${heavy.map(t => `${t.name} (in ${t.count} of your last ${window} messages)`).join(', ')}. You keep going at the same person; give them a break unless they start it.`;
-}
 
 /**
  * The owner's calls on past v2 decisions (rated in the dashboard feed), as examples of when to talk.
@@ -915,4 +910,80 @@ export function formatLinesThatWorked(
 export function formatClockLine(cities: ClockCity[], now = new Date()): string {
   const list = cities?.length ? cities : DEFAULT_CLOCK_CITIES;
   return `Time now (read off, never calculate; mention it only when the time or date matters): ${list.map(c => `${c.label} ${cityNow(c, now)}`).join('; ')}`;
+}
+
+/** Pushing back on a dig ("not funny", "отстань", "yeter artık", "bəsdir"...), or a cold reaction. */
+const PUSHBACK = new RegExp('(?<!\\p{L})(?:' + [
+  'not funny', 'shut up', 'stop it', 'stfu', 'leave me alone', 'cringe', 'unfunny', 'too far', 'not cool',
+  'не смешно', 'отстань', 'заткнись', 'хватит', 'завали',
+  ...['komik değil', 'yeter artık', 'kes artık', 'bıktım'].map(loose),
+  ...['gülməli deyil', 'bəsdir', 'əl çək'].map(loose),
+].join('|') + ')(?!\\p{L})', 'iu');
+const COLD_REACTION = /😐|😑|🙄|👎|🖕|😒/u;
+
+export interface TeaseTake { name: string; teased: number; laughed: number; pushedBack: number }
+
+/**
+ * How each friend takes the bot's digs, measured: for every recent bot line aimed at someone (their
+ * name, or a quote of their message), did THAT person laugh (laugh reaction, laughing reply, a "hahaha"
+ * right after) or push back ("not funny", "отстань", "bəsdir", a 🙄 / 👎 on it)? Friends tease people who
+ * enjoy it; a real friend notices who does not. Owner and bot lines are never targets.
+ */
+export function teaseReception(rows: MsgRow[], names: string[]): TeaseTake[] {
+  const byId = new Map(rows.filter(r => r.id).map(r => [r.id!, r]));
+  const chat = rows.filter(r => r.type !== 'reaction');
+  const reactsOn = new Map<string, MsgRow[]>();
+  for (const r of rows) if (r.type === 'reaction' && r.quoted_id) reactsOn.set(r.quoted_id, [...(reactsOn.get(r.quoted_id) ?? []), r]);
+  const people = new Map<string, TeaseTake>();
+  const firstOf = (n: string) => n.trim().split(/\s+/)[0].toLowerCase();
+  // one entry per first name, so "Kanan" and "Kanan Aliyev" count as one person
+  const known = new Map<string, { name: string; re: RegExp }>();
+  for (const n of names) {
+    const f = firstOf(n);
+    if (f.length >= 3 && !known.has(f)) known.set(f, { name: n, re: new RegExp(`(?<!\\p{L})${f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?!\\p{L})`, 'u') });
+  }
+  for (let i = 0; i < chat.length; i++) {
+    const b = chat[i];
+    if (!b.is_bot || b.type !== 'text' || !b.id) continue;
+    const text = (b.text ?? '').toLowerCase();
+    const quoted = b.quoted_id ? byId.get(b.quoted_id) : undefined;
+    const targets = new Map<string, string>(); // first name -> display name
+    if (quoted && !quoted.is_bot && !quoted.is_owner && quoted.sender_name) {
+      const f = firstOf(quoted.sender_name);
+      targets.set(f, known.get(f)?.name ?? quoted.sender_name);
+    }
+    for (const [f, k] of known) if (k.re.test(text)) targets.set(f, k.name);
+    if (targets.size !== 1) continue; // a dig at one person (a line about everyone tells nothing about anyone)
+    const [tFirst, target] = [...targets][0];
+    const isTarget = (r: MsgRow) => !r.is_bot && !r.is_owner && firstOf(r.sender_name ?? '') === tFirst;
+    // what the target did in the next few messages (or reacted on the line itself)
+    const after = chat.slice(i + 1, i + 6).filter(r => r.ts - b.ts <= 5 * 60_000);
+    const reacts = (reactsOn.get(b.id) ?? []).filter(isTarget);
+    const theirs = after.filter(isTarget);
+    const laughed = reacts.some(r => LAUGH_EMOJI.test(r.text ?? ''))
+      || theirs.some(r => (r.quoted_id === b.id || theirs[0] === r) && LAUGH_TEXT.test(r.text ?? '') && !PUSHBACK.test(r.text ?? ''));
+    const pushed = reacts.some(r => COLD_REACTION.test(r.text ?? '')) || theirs.some(r => PUSHBACK.test(r.text ?? ''));
+    const p = people.get(tFirst) ?? { name: target, teased: 0, laughed: 0, pushedBack: 0 };
+    p.teased += 1;
+    if (pushed) p.pushedBack += 1;
+    else if (laughed) p.laughed += 1;
+    people.set(tFirst, p);
+  }
+  return [...people.values()].sort((a, b) => b.teased - a.teased);
+}
+
+/**
+ * EASY ON (it keeps going at the same person) and how each person takes its digs, in one block. EASY ON
+ * works like a rule (see the craft text); the rest is information.
+ */
+export function formatTeasing(targets: { name: string; count: number }[], takes: TeaseTake[], min = 4, window = 15): string | null {
+  const lines: string[] = [];
+  const heavy = targets.filter(t => t.count >= min);
+  if (heavy.length) lines.push(`- EASY ON: ${heavy.map(t => `${t.name} (in ${t.count} of your last ${window} messages)`).join(', ')}. Give them a break unless they start it.`);
+  for (const t of takes) {
+    if (t.teased < 2) continue;
+    if (t.pushedBack >= 1) lines.push(`- ${t.name} pushed back on ${t.pushedBack} of your ${t.teased} digs: keep it light with them`);
+    else if (t.laughed >= 2) lines.push(`- ${t.name} laughed at ${t.laughed} of your ${t.teased} digs: they enjoy it`);
+  }
+  return lines.length ? `TEASING (measured):\n${lines.join('\n')}` : null;
 }

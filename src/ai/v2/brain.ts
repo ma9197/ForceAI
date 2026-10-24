@@ -14,8 +14,8 @@ import { formatTasteRules, readTasteRules } from './taste.js';
 import { CriticSchema, GateV2Schema, PlanV2Schema, RewriteSchema, type GateV2Out, type PlanV2Out } from './schemas.js';
 import {
   botTargets, botTics, callbackKeywords, dynamics, formatBits, formatCallbacks, formatClockLine, formatDecisionFeedback, formatLinesThatWorked,
-  formatReactionHabit, formatRoomNow, formatStyleStats, formatTakes, formatTargets, formatTics, groupLaughs, ironyCues, landedLines, ownTakes,
-  participation, reception, roomMap, runningBits, stripMarker, styleStats, type Bit, type Dynamics, type MsgRow, type StyleStats,
+  formatReactionHabit, formatRoomNow, formatStyleStats, formatTakes, formatTeasing, formatTics, groupLaughs, ironyCues, landedLines, ownTakes,
+  participation, reception, roomMap, runningBits, stripMarker, styleStats, teaseReception, type Bit, type Dynamics, type MsgRow, type StyleStats,
 } from './signals.js';
 
 export interface GateV2Result {
@@ -264,7 +264,7 @@ export class BrainV2 {
         groupLaughs(history),
         { emojis: tics?.emojis.map(e => e.emoji), names: easyOn },
       ) ?? '',
-      formatTargets(targets) ?? '',
+      formatTeasing(targets, teaseReception(history, names), BRAIN_V2.TARGET_MIN, BRAIN_V2.TARGET_WINDOW) ?? '',
       callbacks ?? '',
       formatBits(phrases) ?? '',
       formatTakes(ownTakes((this.repo.getTextMessagesSince(chatJid, now - 7 * 86_400_000, 200, true) as MsgRow[]).filter(r => r.ts <= now), strip, now).filter(x => notDisliked(x.text)), now) ?? '',
