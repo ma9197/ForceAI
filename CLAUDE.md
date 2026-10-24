@@ -59,4 +59,6 @@ A WhatsApp group-chat AI that acts like one of the friends (banter, roasts, foot
 - The model obeys text it sees in the chat (a fake "Admin:" worked once); defend in code, not only in the prompt.
 - Neurons layout: edges must be type-blind and sorted by `hash(id)`, chord targets random, the simulation must cool, charge uncapped. Test fixtures must use real id formats (`type:rowId`).
 - `post()` in `ui/src/api.ts` must always send a JSON body, or Fastify returns 400.
+- Never put an emoji that carries U+FE0F (like ⚰️ or ❤️) inside a regex character class `[...]`: the selector then matches every ❤️ and ✔️. Use alternation (`/😂|🤣|⚰/u`).
+- Arbiter: after an awaited AI call, consume only the buffer you had before the call (`consumeBuffer(ts)`). Messages that arrived meanwhile can be direct mentions and must stay buffered.
 - Railway: the domain targets port 8080; after attaching a volume you must click Deploy or it never mounts.
