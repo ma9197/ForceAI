@@ -28,10 +28,10 @@ READ:
 | No recycled jokes | A line that shares most of its words with something it said lately is dropped, not only exact copies. | ChatGPT repeats the same jokes (arXiv 2306.04563) |
 | What landed | Its recent lines that got laughs (😂 reactions, "hahaha" replies), so it learns this group's humor. | HUMA reflection step |
 | Callbacks | Older messages from this chat that match today's topic, for callback jokes. | Generative Agents memory retrieval (2023) |
-| Your taste (👍 / 👎) | Your latest liked and disliked lines in that group are shown as examples of what to aim for and avoid (per group: groups never share memory). | Research brief #1: owner-labelled examples instead of training |
+| Your taste (👍 / 👎) | Your latest liked lines in that group are shown as examples to aim for. Disliked lines are never shown (that can plant them): code keeps them out of what it learns from, and blocks close copies. Per group: groups never share memory. | Research brief #1: owner-labelled examples instead of training |
 | Easy on one person | If it aimed at the same friend in 4 of its last 15 lines, it is told to give them a break. | Research brief #7: roast budget |
 | Thought seeds the reply | When it jumps in because of its inner thought, the reply writer gets that thought, so the jump-in keeps its reason. | Inner Thoughts |
-| Second opinion | Before an unprompted line goes out, a second quick call plays a sharp friend and says send or skip. Skip means silence. Settings toggle, on by default. | Research brief: pairwise judge beats single scoring (arXiv 2603.12520) |
+| Second opinion | Before an unprompted line goes out, a second quick call plays a sharp friend and says send or skip. Skip means silence. Never used when someone asked it or you gave an instruction. Settings toggle, on by default. | Research brief: pairwise judge beats single scoring (arXiv 2603.12520) |
 | Your calls on its decisions (👍 / 👎 on `T1v2`) | You mark "spoke" or "stayed quiet" as a good or bad call. Your latest calls are shown to the thinking stage as examples. | Research brief #1: owner-labelled examples |
 | Room check in code | Measured facts about the chat right now: two people in a back-and-forth (bar +0.8), someone mid-story (+0.5), a question nobody answered (-0.5). Shown to the thinking stage and moved on the bar. | Speak or Stay Silent (2026), MUCA (2024): models are bad at "when" on their own |
 | Reads its own reception | If its last unprompted lines got no laugh, reply or reaction, it raises its own bar (+0.5 for 2 ignored, +1 for 3+). If they got laughs, the bar drops a little. | HUMA reflection step, in code |
@@ -43,6 +43,9 @@ READ:
 | Quotes like the group does | If people here almost never quote-reply (under 15%), it does not quote the message right above either. | Measured style, like the style card |
 | Two short texts | In a group that texts in bursts, one longer two-sentence text is sent as two short messages. | X-Turing, Stephanie2 (2025): bursts read as human |
 | Takes a roast | When someone roasts it, it hits back lighter or owns it, in one line. | Persona craft |
+| Always answers when asked | When someone talks to it, the reply writer is told so: it answers (a reaction is enough if they only laughed). Silence is only an option for lines nobody asked for. | Prompt review, round 5 |
+| Calibrated scores | The thinking stage gets 4 short worked examples (mid-story: wait, strong callback: speak, private logistics: ignore, a friend's great roast: react) so its 0-10 scores mean the same thing every time. Humor and novelty are judged harshly, the rest plainly. | Few-shot calibration |
+| Your dials win | Your emoji dial, character adjustment and boundaries win over v2's own style rules. | Prompt review, round 5 |
 | Anti-cringe linter (code) | Fixes or flags AI tells before sending: assistant phrases, "not just X but Y", semicolons, hashtags, long dashes, essays, repeats, parroting, 3+ texts in a row. One cheap rewrite only when needed. In serious moments it holds back stickers, voice notes and polls. When the group types lowercase, so does it. | Antislop (ICLR 2026), Wikipedia's signs of AI writing, LLMafia |
 
 What stays the same in v2: the persona, the training examples, all memory (facts, voice profile, member reads, stickers), boundaries, owner commands, "Admin:" protection, sleep, rate limits, budget, dials.

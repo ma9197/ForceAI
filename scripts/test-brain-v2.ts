@@ -40,7 +40,9 @@ assert.equal(styleStats(chat.slice(0, 5)), null, 'too few messages: no numbers')
 const tics = botTics(['bro is cooked 💀', 'bro that is crazy 💀', 'we are so back 💀', 'nah bro 💀', 'bro what 💀', 'bro chill', 'who asked?']);
 assert.ok(tics && tics.emojis[0].emoji === '💀' && tics.emojis[0].count === 5);
 assert.ok(tics.openers.some(o => o.word === 'bro'));
-assert.ok(formatTics(tics)!.includes('💀 in 5 of your last 7'));
+assert.ok(formatTics(tics)!.includes('💀 is in 5 of your last 7'));
+assert.ok(!formatTics(tics)!.includes('"bro'), 'openers and phrases are counted, never quoted back');
+assert.equal(botTics(['kanan you are late', 'kanan pls', 'kanan again', 'kanan bro', 'kanan stop', 'kanan lol'], ['Kanan Aliyev'])?.openers.length, 0, 'a name is not a tic');
 assert.equal(botTics(['a', 'b']), null);
 
 const part = participation([...chat, row('bot', 'hi', { is_bot: 1 }), row('a', 'yo'), row('b', 'yo')]);
@@ -65,8 +67,8 @@ const targets = botTargets(botLines, ['Kanan Aliyev', 'Murad'], id => (id === 'q
 assert.deepEqual(targets, [{ name: 'Kanan Aliyev', count: 5 }, { name: 'Murad', count: 1 }]);
 assert.ok(formatTargets(targets)!.startsWith('EASY ON: Kanan Aliyev'));
 assert.equal(formatTargets([{ name: 'Murad', count: 2 }]), null);
-assert.ok(formatTaste(['good one'], ['cringe one'])!.includes('liked:\n- "good one"'));
-assert.equal(formatTaste([], []), null);
+assert.ok(formatTaste(['good one'])!.includes('- "good one"'));
+assert.equal(formatTaste([]), null);
 
 // ---- linter ----
 const marker = { prefix: '🤖 ', suffix: '' };
@@ -301,6 +303,9 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
     { recentBotTexts: ['2-1 madrid, bellingham scored twice'], recentHumanTexts: [], medianLen: 20, marker });
   assert.equal(asked.actions.length, 1);
   assert.ok(asked.issues[0].problem.includes('say it in new words'));
+  const avoid = lintPlan([{ type: 'message', text: 'madrid wins it 2-1 on sunday trust me' }],
+    { recentBotTexts: [], recentHumanTexts: [], medianLen: 20, marker, unprompted: true, avoidTexts: ['madrid wins 2-1 sunday, trust me'] });
+  assert.ok(avoid.actions.length === 0 && avoid.dropped[0].startsWith('too close to a line your owner disliked'));
   assert.equal(lintPlan([{ type: 'message', text: 'kanan is late again, classic kanan behaviour' }],
     { recentBotTexts: ['kanan predicted madrid wins three nil'], recentHumanTexts: [], medianLen: 20, marker }).actions.length, 1, 'same name, different line: fine');
 
@@ -412,6 +417,7 @@ assert.ok(userText.includes('HOW THIS CHAT TEXTS RIGHT NOW'), 'style numbers');
 assert.ok(userText.includes('OLDER MOMENTS'), 'callback candidates found');
 assert.ok(!userText.includes('you: 🤖'), 'callbacks show the bot lines without its marker');
 assert.ok(userText.includes('A THOUGHT YOU HAD A MOMENT AGO'), 'saved thought offered');
+assert.ok(userText.includes('Someone talked to you: answer them'), 'the writer knows it was asked');
 assert.ok(userText.includes('"kanan tax": Murad, Kanan, 3 times over 3 days'), 'running bits reach the generator');
 assert.ok(userText.includes('2 days ago: "madrid wins 2-1 sunday, trust me"'), 'own takes reach the generator, marker stripped');
 assert.ok(userText.includes("YOUR OWNER'S TASTE") && userText.includes('- "madrid fans in shambles 💀"'), 'owner taste reaches the generator, marker stripped');
@@ -425,11 +431,18 @@ assert.ok(res.plan.note.includes('angle: callback') && res.plan.note.includes('r
 calls.length = 0;
 const vetoed = await brain.generate({ chatJid: G, consumedUpToTs: Date.now() - 60_000, unprompted: true });
 assert.equal(calls.length, 3, 'generator + rewrite + second opinion');
+assert.ok(!calls[0].messages[0].content.includes('Someone talked to you'), 'a jump-in is not told it was asked');
+assert.ok(!calls[2].messages[0].content.includes('(you)'), 'the critic plays a member: the bot is labelled by name');
 assert.deepEqual(vetoed!.plan.actions, []);
 assert.ok(vetoed!.plan.note.includes('second opinion said skip: not funny'));
 criticAnswer = { reason: 'lands', verdict: 'send' };
 const sent = await brain.generate({ chatJid: G, consumedUpToTs: Date.now() - 60_000, unprompted: true });
 assert.equal(sent!.plan.actions.length, 2);
+calls.length = 0;
+criticAnswer = { reason: 'nope', verdict: 'skip' };
+const told = await brain.generate({ chatJid: G, consumedUpToTs: Date.now() - 60_000, unprompted: true, operatorInstruction: 'say hi to kanan' });
+assert.equal(calls.length, 2, 'an owner instruction never goes to the second opinion');
+assert.equal(told!.plan.actions.length, 2);
 repo.setConfig('v2_second_opinion', '0');
 calls.length = 0;
 await brain.generate({ chatJid: G, consumedUpToTs: Date.now() - 60_000, unprompted: true });
@@ -448,7 +461,9 @@ assert.equal(repo.setDecisionFeedback(d3, 'good'), false, 'only v2 turn-taking d
 assert.deepEqual([...repo.getDecisionVerdicts([d1, d2, d3]).entries()], [[d1, 'bad'], [d2, 'bad']]);
 const fb = formatDecisionFeedback(repo.getDecisionFeedback(G, 8))!;
 assert.equal(repo.getDecisionFeedback('other@g.us', 8).length, 0, 'calls stay in their group');
-assert.ok(fb.includes('should have STAYED QUIET here: r | strong thought') && fb.includes('should have SPOKEN here: r | nothing worth adding'));
+assert.ok(fb.includes('should have STAYED QUIET here: r / thought: roast kanan again') && fb.includes('should have SPOKEN here: r / thought: ask about the match'), fb);
+assert.ok(!fb.includes('urge'), 'the code numbers stay out of the examples');
+assert.ok(formatDecisionFeedback([{ decision: 'RESPOND', reason: 'asked who wins | addressed | urge 0 vs bar 6.5', verdict: 'bad' }])!.includes('your answer MISSED here'), 'a bad answer is not "stay quiet"');
 prompts.memoryVersion += 1;
 calls.length = 0;
 await brain.gate(G, Date.now() - 60_000, false);
@@ -489,6 +504,16 @@ gateAnswer = () => gate({ decision: 'WAIT', thought: null, scene: { topic: 'gran
 await brain.gate(G, Date.now() - 60_000, false);
 assert.equal(brain.hasThought(G), false, 'serious moment: dropped even while waiting');
 saveOne();
+
+// a 👎 line: kept out of "own takes", and a close copy of it is blocked
+assert.equal(repo.setFeedback('o4', -1), true);
+calls.length = 0;
+genAnswer = { ...genAnswer, actions: [{ type: 'message', text: 'madrid wins 2-1 sunday trust me fr' }] };
+const disliked = await brain.generate({ chatJid: G, consumedUpToTs: Date.now() - 60_000, unprompted: true });
+const dislikedText = calls[0].messages[0].content as string;
+assert.ok(!dislikedText.includes('madrid wins 2-1 sunday, trust me'), 'a disliked line is never shown to the writer');
+assert.deepEqual(disliked!.plan.actions, []);
+assert.equal(disliked!.lint.dropped.length, 1, 'blocked (here as its own recent line; the 👎 path is unit-tested above)');
 
 // per-group chattiness beats the global setting; "default" follows it
 repo.setConfig('v2_chattiness', 'chatty');

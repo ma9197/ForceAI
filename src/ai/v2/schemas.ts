@@ -32,14 +32,14 @@ export const GateV2Schema = z.object({
     humor: Score.describe('0-10: a friend would actually laugh or react. 5 = mild, 8+ = genuinely funny.'),
     timing: Score.describe('0-10: now is a natural moment to come in (a pause, a punchline landed, a question hanging). Low if someone is mid-story or two people are in a private back-and-forth.'),
     fit: Score.describe('0-10: matches the vibe and the people (no roasting someone who is genuinely down).'),
-  }).describe('Scores for the thought. All 0 if thought is null. Be a harsh judge: most thoughts are 4-6.'),
+  }).describe('Scores for the thought. All 0 if thought is null. Judge humor and novelty harshly (most thoughts are 4-6 there); score relevance, timing and fit plainly.'),
   decision: z.enum(['RESPOND', 'WAIT', 'IGNORE', 'REACT']),
   react: z.object({
     target_message_id: z.string().describe('Short id (like m41) of the message to react to.'),
     emoji: z.string().describe('One emoji.'),
-  }).nullable().describe('Only for REACT: a single emoji reaction instead of words. Otherwise null.'),
+  }).nullable().describe('The one emoji reaction you would tap if you do not talk: required for REACT, and fill it whenever a reaction genuinely fits (it is used when words are not good enough). null if none fits.'),
   reason: z.string().describe('Why, in 15 words or fewer. Shown on the operator dashboard.'),
-  address_message_ids: z.array(z.string()).describe('Short ids of the messages a response should engage. Empty if not RESPOND.'),
+  address_message_ids: z.array(z.string()).describe('Short ids of the messages your thought (or a response) would engage. Fill them even if you do not choose RESPOND.'),
   wait_ms: z.number().nullable().describe('Only for WAIT: ms to wait for more messages (2000-15000).'),
 });
 export type GateV2Out = z.infer<typeof GateV2Schema>;
