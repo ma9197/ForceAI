@@ -521,12 +521,13 @@ export function closingText(text: string): boolean {
   return CLOSING_WORD.test(bare);
 }
 
-export type Reception = 'laughed' | 'answered' | 'ignored';
+export type Reception = 'laughed' | 'answered' | 'ignored' | 'booed';
 
 /**
- * How the bot's recent UNPROMPTED lines were received: laughed at, answered, or ignored (three or
- * more human messages later, nobody laughed, replied or said its name). A run of ignored lines means
- * it is misjudging this room right now, so the policy raises its bar (HUMA's reflection step, in code).
+ * How the bot's recent UNPROMPTED lines were received: laughed at, booed ("cringe", "not funny", 🙄),
+ * answered, or ignored (three or more human messages later, nobody laughed, replied or said its name).
+ * A run of ignored lines, or pushback on the last one, means it is misjudging this room right now, so the
+ * policy raises its bar (HUMA's reflection step, in code).
  * A line counts as unprompted when the human message before it did not mention or reply to the bot.
  */
 export function reception(rows: MsgRow[], botName: string, now = Date.now(), last = 4): Reception[] {
@@ -543,6 +544,11 @@ export function reception(rows: MsgRow[], botName: string, now = Date.now(), las
     if (prompted) continue;
     const after = chat.slice(i + 1).filter(r => !r.is_bot && !r.is_owner);
     if ((laughs.get(b.id) ?? 0) > 0) { out.push('laughed'); continue; }
+    // pushback is not engagement: a 🙄 / 👎 on it, or "cringe" / "not funny" / "не смешно" right after it
+    // (the next human message, or one that quotes it or names the bot)
+    const booed = rows.some(r => r.type === 'reaction' && r.quoted_id === b.id && !r.is_bot && !r.is_owner && COLD_REACTION.test(r.text ?? ''))
+      || after.slice(0, 4).some((r, k) => (k === 0 || r.quoted_id === b.id || (r.text ?? '').toLowerCase().includes(bot)) && PUSHBACK.test(r.text ?? ''));
+    if (booed) { out.push('booed'); continue; }
     const engaged = after.slice(0, 4).some(r => r.quoted_id === b.id || (r.text ?? '').toLowerCase().includes(bot))
       || rows.some(r => r.type === 'reaction' && r.quoted_id === b.id && !r.is_bot);
     if (engaged) { out.push('answered'); continue; }
@@ -905,7 +911,8 @@ export function formatRoomNow(r: RoomNow, stage: 'gate' | 'writer'): string | nu
   if (chain) lines.push(`- reply chain: ${chain.ids.map(i => `#${i}`).join(' > ')} (${chain.people.join(', ')})`);
   if (stage === 'gate' && r.rec) {
     const streak = ignoredStreak(r.rec);
-    if (streak >= 2) lines.push(`- your last ${streak} unprompted lines got no reaction`);
+    if (r.rec[r.rec.length - 1] === 'booed') lines.push('- your last unprompted line got pushback (called cringe, not funny or an eye-roll)');
+    else if (streak >= 2) lines.push(`- your last ${streak} unprompted lines got no reaction`);
     else if (r.rec.filter(x => x === 'laughed').length >= 2) lines.push('- your recent unprompted lines got laughs');
   }
   if (r.part) {

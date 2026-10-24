@@ -24,6 +24,7 @@ export const POLICY = {
   IGNORED_STEP: 0.5,         // each ignored unprompted line after the first raises the bar...
   IGNORED_MAX: 1.0,          // ...up to this much
   LAUGHED: -0.3,             // two recent unprompted lines got laughs: the room is with it
+  BOOED: 0.8,                // its last unprompted line got pushback ("cringe", "not funny", 🙄)
 } as const;
 
 /** Measured room signals (signals.ts) that move the bar for unprompted lines. */
@@ -43,8 +44,10 @@ export function roomShift(room: Room): { delta: number; notes: string[] } {
   if (room.dyn?.storyteller) add(POLICY.STORYTELLER, 'mid-story');
   if (room.dyn?.hangingQuestion) add(POLICY.HANGING_QUESTION, 'open question');
   if (room.dyn?.windingDown) add(POLICY.WINDING_DOWN, 'winding down');
-  const streak = ignoredStreak(room.rec ?? []);
-  if (streak >= 2) add(Math.min(POLICY.IGNORED_MAX, POLICY.IGNORED_STEP * (streak - 1)), `${streak} ignored`);
+  const rec = room.rec ?? [];
+  const streak = ignoredStreak(rec);
+  if (rec[rec.length - 1] === 'booed') add(POLICY.BOOED, 'pushback on last line');
+  else if (streak >= 2) add(Math.min(POLICY.IGNORED_MAX, POLICY.IGNORED_STEP * (streak - 1)), `${streak} ignored`);
   else if ((room.rec ?? []).filter(r => r === 'laughed').length >= 2) add(POLICY.LAUGHED, 'landing');
   return { delta: Math.round(delta * 10) / 10, notes };
 }

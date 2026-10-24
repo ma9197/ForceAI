@@ -11,7 +11,7 @@ import { CHATTINESS_SHIFT, decide, roomShift, threshold } from '../src/ai/v2/pol
 import { actualAfter, pickReplayCuts } from '../src/ai/v2/replay.js';
 import { TasteLearner, readTasteRules } from '../src/ai/v2/taste.js';
 import {
-  botTargets, botTics, callbackKeywords, closingText, dynamics, formatDecisionFeedback, formatTeasing, formatTics, teaseReception, formatClockLine, formatLinesThatWorked, formatRoomNow,
+  botTargets, botTics, callbackKeywords, closingText, dynamics, formatDecisionFeedback, formatTeasing, formatTics, teaseReception, formatClockLine, formatLinesThatWorked, formatRoomNow, type Reception,
   formatBits, formatReactionHabit, formatTakes, groupLaughs, ironyCues, parseDecisionLine, roomMap, ignoredStreak, laughCounts, landedLines, ownTakes, participation, reception, runningBits, seriousHit,
   styleStats, type MsgRow,
 } from '../src/ai/v2/signals.js';
@@ -264,6 +264,16 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
   assert.deepEqual(reception([r('Murad', 'forceai thoughts?', 0), b('madrid is done', 5), r('Kanan', 'ok', 6), r('Murad', 'ok', 7), r('Aysel', 'ok', 8)], 'ForceAI', T + 100_000), [], 'asked: not judged');
   const funny = b('ref is on the barca payroll', 5);
   assert.deepEqual(reception([r('Murad', 'match', 0), funny, r('Kanan', 'HAHAHA', 8)], 'ForceAI', T + 100_000), ['laughed']);
+  // round 17: pushback is not engagement
+  const flop = b('kanan the human pass master', 5);
+  assert.deepEqual(reception([r('Murad', 'match', 0), flop, r('Kanan', 'cringe', 8)], 'ForceAI', T + 100_000), ['booed'], '"cringe" right after it');
+  assert.deepEqual(reception([r('Murad', 'match', 0), flop, { ...r('Aysel', '🙄', 7), type: 'reaction', quoted_id: flop.id }, r('Kanan', 'anyway', 8)], 'ForceAI', T + 100_000), ['booed'], 'an eye-roll on it');
+  assert.deepEqual(reception([r('Murad', 'match', 0), flop, r('Kanan', 'what time', 8), r('Aysel', 'не смешно', 9, { quoted_id: flop.id })], 'ForceAI', T + 100_000), ['booed'], 'quoting it');
+  assert.deepEqual(reception([r('Murad', 'match', 0), flop, r('Kanan', 'what time', 8), r('Aysel', 'shut up murad', 9), r('Murad', 'lol', 10)], 'ForceAI', T + 100_000), ['ignored'], 'pushback aimed at someone else');
+  assert.deepEqual(reception([r('Murad', 'match', 0), flop, r('Kanan', 'HAHAHA', 7), r('Aysel', 'cringe', 8)], 'ForceAI', T + 100_000), ['laughed'], 'it landed for someone');
+  const booedRec: Reception[] = ['laughed', 'booed'];
+  assert.deepEqual(roomShift({ rec: booedRec }), { delta: 0.8, notes: ['pushback on last line +0.8'] });
+  assert.ok(formatRoomNow({ dyn: quietDyn, map: emptyMap, cues: [], rec: booedRec }, 'gate')!.includes('- your last unprompted line got pushback'));
 
   // policy: the room moves the bar for unprompted lines only
   const calm = { window: 30, botShare: 0.05, humansSinceBot: 10, secondsSinceBot: 600 };
