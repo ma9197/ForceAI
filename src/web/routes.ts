@@ -141,6 +141,8 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     if (!id || (rating !== 1 && rating !== -1 && rating !== 0)) return reply.code(400).send({ error: 'id and rating (1, -1 or 0) required' });
     if (!app.repo.setFeedback(id, rating)) return reply.code(404).send({ error: 'not a bot text message' });
     app.prompts.memoryVersion += 1;
+    const jid = app.repo.getMessageById(id)?.chat_jid as string | undefined;
+    if (jid && !DEMO_MODE && !app.memoryLocked) app.tasteLearner.maybeAuto(jid); // enough new ratings: relearn the house rules
     return { ok: true };
   });
 
@@ -152,7 +154,34 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     }
     if (!app.repo.setDecisionFeedback(id, verdict)) return reply.code(404).send({ error: 'not a brain v2 decision' });
     app.prompts.memoryVersion += 1;
+    const jid = app.repo.getDecisionChat(id);
+    if (jid && !DEMO_MODE && !app.memoryLocked) app.tasteLearner.maybeAuto(jid);
     return { ok: true };
+  });
+
+  // brain v2 house rules learned from the owner's ratings in a group: see, relearn now, or clear
+  fastify.get<{ Querystring: { jid?: string } }>('/api/brain/taste', async (req, reply) => {
+    const jid = req.query.jid;
+    if (!jid) return reply.code(400).send({ error: 'jid required' });
+    return app.tasteLearner.state(jid);
+  });
+
+  fastify.post<{ Body: { jid?: string; action?: string } }>('/api/brain/taste', async (req, reply) => {
+    const { jid, action } = req.body ?? {};
+    if (!jid || (action !== 'learn' && action !== 'clear')) return reply.code(400).send({ error: 'jid and action (learn or clear) required' });
+    if (DEMO_MODE) return { error: 'Not available in the demo: it needs real ratings and an API key.' };
+    if (action === 'clear') {
+      app.tasteLearner.clear(jid);
+      return app.tasteLearner.state(jid);
+    }
+    if (app.needsSetup) return reply.code(409).send({ error: 'Add your Anthropic API key first.' });
+    if (app.memoryLocked) return reply.code(409).send({ error: 'A fresh start is running. Try again in a minute.' });
+    const res = await app.tasteLearner.run(jid);
+    if (res.status === 'busy') return { error: 'Already learning. Try again in a few seconds.' };
+    if (res.status === 'empty') return { error: 'No ratings in this group yet. Tap 👍 or 👎 on its lines and decisions first.' };
+    if (res.status === 'budget') return reply.code(409).send({ error: "Today's AI budget is used up." });
+    if (res.status === 'error') return { error: 'Learning failed. Try again later.' };
+    return app.tasteLearner.state(jid);
   });
 
   fastify.post<{ Body: { jid: string } }>('/api/resume', async (req, reply) => {

@@ -32,6 +32,18 @@ export class Repo {
     this.setConfig(`brain_v2_${chatJid}`, mode === 'v2' ? '1' : mode === 'shadow' ? 'shadow' : '0');
   }
 
+  /** Owner ratings in one group since `sinceTs` (lines and decisions), for the v2 learning loop. */
+  countRatingsSince(chatJid: string, sinceTs: number): number {
+    const a = (this.db.prepare('SELECT COUNT(*) AS n FROM bot_feedback WHERE chat_jid = ? AND ts > ?').get(chatJid, sinceTs) as { n: number }).n;
+    const b = (this.db.prepare('SELECT COUNT(*) AS n FROM decision_feedback WHERE chat_jid = ? AND ts > ?').get(chatJid, sinceTs) as { n: number }).n;
+    return a + b;
+  }
+
+  /** The group a logged decision belongs to (null if unknown). */
+  getDecisionChat(decisionId: number): string | null {
+    return (this.db.prepare('SELECT chat_jid FROM decisions WHERE id = ?').get(decisionId) as { chat_jid: string | null } | undefined)?.chat_jid ?? null;
+  }
+
   /** Blind A/B test in the Compare panel: which brain's lines the owner picked (without knowing which was which). */
   addBrainAb(chatJid: string, winner: 'v1' | 'v2' | 'tie'): void {
     this.db.prepare('INSERT INTO brain_ab(chat_jid, winner, ts) VALUES(?, ?, ?)').run(chatJid, winner, Date.now());

@@ -121,6 +121,7 @@ function staticDemoResponse(path: string, options?: RequestInit): unknown {
     spoke: 0, unprompted: 0, pauses: 0, reacted: 0, quiet: 0, vetoed: 0, rewrites: 0, chattiness: 'default',
     shadow: { spoke: 0, reacted: 0, quiet: 0, waited: 0 }, v1Spoke: 0, ab: { v1: 0, v2: 0, tie: 0 },
   };
+  if (url === '/api/brain/taste') return { rules: [], at: null, newRatings: 0, every: 8 };
   if (url.startsWith('/api/people/')) {
     const jid = decodeURIComponent(url.slice('/api/people/'.length));
     return (d.profiles as Record<string, unknown>)[jid] ?? null;

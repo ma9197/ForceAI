@@ -13,6 +13,7 @@ interface Stats {
   spoke: number; unprompted: number; pauses: number; reacted: number; quiet: number; vetoed: number; rewrites: number; chattiness?: string;
   shadow?: { spoke: number; reacted: number; quiet: number; waited: number }; v1Spoke?: number; ab?: Ab;
 }
+interface Taste { rules: string[]; at: number | null; newRatings: number; every: number }
 /** Blind test: the two answers shown as A and B; `flip` = A is v2. Revealed after the owner picks. */
 interface Blind { flip: boolean; picked: 'A' | 'B' | 'tie' | null }
 
@@ -32,6 +33,9 @@ export function BrainPreview({ jid, onClose }: { jid: string; onClose: () => voi
   const [replaying, setReplaying] = useState(false);
   const [chattiness, setChattiness] = useState('default');
   const [blind, setBlind] = useState<Blind | null>(null);
+  const [taste, setTaste] = useState<Taste | null>(null);
+  const [tasteBusy, setTasteBusy] = useState(false);
+  const [tasteError, setTasteError] = useState<string | null>(null);
 
   useEffect(() => {
     api<Stats>(`/api/brain/stats?jid=${encodeURIComponent(jid)}`).then(s => {
@@ -39,6 +43,25 @@ export function BrainPreview({ jid, onClose }: { jid: string; onClose: () => voi
       setChattiness(s?.chattiness ?? 'default');
     }).catch(() => setStats(null));
   }, [jid]);
+
+  useEffect(() => {
+    api<Taste>(`/api/brain/taste?jid=${encodeURIComponent(jid)}`).then(t => setTaste(t && Array.isArray(t.rules) ? t : null)).catch(() => setTaste(null));
+  }, [jid]);
+
+  const tasteAction = async (action: 'learn' | 'clear') => {
+    setTasteBusy(true);
+    setTasteError(null);
+    try {
+      const res = await api<Taste & { error?: string; demo?: boolean }>('/api/brain/taste', { method: 'POST', body: JSON.stringify({ jid, action }) });
+      if (res.demo) setTasteError('Not available in the demo.');
+      else if (res.error) setTasteError(res.error);
+      else setTaste(res);
+    } catch (err) {
+      setTasteError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setTasteBusy(false);
+    }
+  };
 
   const changeChattiness = (value: string) => {
     const before = chattiness;
@@ -98,6 +121,25 @@ export function BrainPreview({ jid, onClose }: { jid: string; onClose: () => voi
         <div className="hint">
           v2 shadow, last 24 hours: would have spoken {stats.shadow.spoke} times, reacted {stats.shadow.reacted}, stayed quiet {stats.shadow.quiet}.
           In the same moments v1 chose to speak {stats.v1Spoke ?? 0} times.
+        </div>
+      )}
+      {taste && (
+        <div className="hint">
+          {taste.rules.length > 0 ? (
+            <>
+              <div>House rules v2 learned from your ratings here:</div>
+              {taste.rules.map((r, i) => <div key={i}>- {r}</div>)}
+            </>
+          ) : (
+            <div>No house rules yet. Tap 👍 or 👎 on v2's lines and decisions; every {taste.every} ratings it learns a few rules for this group.</div>
+          )}
+          <div className="brain-buttons" style={{ marginTop: 4 }}>
+            <button disabled={tasteBusy} onClick={() => void tasteAction('learn')} title="One small AI call: turns your latest ratings in this group into a few house rules">
+              {tasteBusy ? 'Learning…' : `Learn from my ratings now${taste.newRatings ? ` (${taste.newRatings} new)` : ''}`}
+            </button>
+            {taste.rules.length > 0 && <button disabled={tasteBusy} onClick={() => void tasteAction('clear')}>Clear rules</button>}
+          </div>
+          {tasteError && <div style={{ color: 'var(--danger)' }}>✗ {tasteError}</div>}
         </div>
       )}
       {stats?.ab && (stats.ab.v1 + stats.ab.v2 + stats.ab.tie) > 0 && (
