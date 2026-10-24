@@ -201,6 +201,8 @@ export interface GroupStatus {
   paused: boolean;
   asleep: boolean;
   phase: ArbiterPhase;
+  /** which brain answers in this group: v1 (default) or v2 (opt-in beta) */
+  brain: 'v1' | 'v2';
   stats: {
     messages_read: number;
     messages_sent: number;

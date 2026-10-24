@@ -80,6 +80,24 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     return { ok: true };
   });
 
+  // brain version per group: v1 (default) or v2 (opt-in). Demo: harmless, it only flips a config key.
+  fastify.post<{ Body: { jid?: string; version?: string } }>('/api/brain', async (req, reply) => {
+    const { jid, version } = req.body ?? {};
+    if (!jid || (version !== 'v1' && version !== 'v2')) return reply.code(400).send({ error: 'jid and version (v1|v2) required' });
+    app.setBrainVersion(jid, version);
+    return { ok: true };
+  });
+
+  // "Compare v1 / v2": both brains answer the latest messages, nothing is sent or saved (4 AI calls)
+  fastify.post<{ Body: { jid?: string } }>('/api/brain/preview', async (req, reply) => {
+    if (DEMO_MODE) return { error: 'Not available in the demo: it needs a real chat and an API key.' };
+    if (app.needsSetup) return reply.code(409).send({ error: 'Add your Anthropic API key first.' });
+    if (app.ai.isOverBudget()) return reply.code(409).send({ error: "Today's AI budget is used up." });
+    const jid = req.body?.jid;
+    if (!jid) return reply.code(400).send({ error: 'jid required' });
+    return app.previewBrains(jid);
+  });
+
   fastify.post<{ Body: { jid: string } }>('/api/resume', async (req, reply) => {
     const { jid } = req.body ?? {};
     if (!jid) return reply.code(400).send({ error: 'jid required' });

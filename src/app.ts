@@ -26,10 +26,11 @@ import { AiClient } from './ai/client.js';
 import { PromptBuilder } from './ai/prompts.js';
 import { Gatekeeper } from './ai/gatekeeper.js';
 import { Generator } from './ai/generator.js';
+import { BrainV2 } from './ai/v2/brain.js';
 import { Arbiter } from './arbiter/arbiter.js';
 import { StickerLearning } from './stickers/learning.js';
 import { Bus } from './web/bus.js';
-import type { FeedMessage, GroupStatus, NeuronNode, NormalizedMessage, StatusPayload } from './types.js';
+import type { BotAction, FeedMessage, GroupStatus, NeuronNode, NormalizedMessage, StatusPayload } from './types.js';
 
 export class App {
   bus = new Bus();
@@ -44,6 +45,8 @@ export class App {
   prompts: PromptBuilder;
   gatekeeper: Gatekeeper;
   generator: Generator;
+  /** the opt-in upgraded brain (per group, see Repo.getBrainVersion) */
+  brainV2: BrainV2;
   stickers: StickerLearning;
   polls: PollTracker;
 
@@ -82,6 +85,7 @@ export class App {
     this.prompts = new PromptBuilder(this.repo, this.polls);
     this.gatekeeper = new Gatekeeper(this.ai, this.repo, this.prompts);
     this.generator = new Generator(this.ai, this.repo, this.prompts);
+    this.brainV2 = new BrainV2(this.ai, this.repo, this.prompts);
     this.stickers = new StickerLearning(
       this.repo,
       this.outbound,
@@ -694,6 +698,7 @@ export class App {
         },
         onPhase: () => this.bus.publish({ kind: 'status', status: this.statusPayload() }),
       },
+      this.brainV2,
     ));
     this.extractors.set(chatJid, new FactExtractor(chatJid, this.repo, this.ai, this.prompts, {
       onFact: (memberJid, fact, category) => {
@@ -754,6 +759,53 @@ export class App {
     const vp = this.voiceProfilers.get(jid);
     if (!vp) return Promise.resolve({ status: 'empty', learned: 0 });
     return vp.learnFromMemory();
+  }
+
+  /**
+   * Dashboard "Compare v1 / v2": what each brain would do right now with the latest messages, without
+   * sending or saving anything (4 AI calls: both gatekeepers, both generators).
+   */
+  async previewBrains(jid: string): Promise<BrainPreview> {
+    const rows = this.repo.getRecentMessages(jid, 40) as any[];
+    const humans = rows.filter(r => !r.is_bot && !r.is_owner && r.type !== 'reaction');
+    if (humans.length === 0) return { error: 'No messages in this group yet.' };
+    // treat the last few human messages as "new", and ask both brains to answer the latest one
+    const firstNew = humans[Math.max(0, humans.length - 5)];
+    const consumedUpToTs = firstNew.ts - 1;
+    const addressIds = [humans[humans.length - 1].short_id];
+    const reason = 'preview: answer the latest messages the way you naturally would';
+    const input = { chatJid: jid, consumedUpToTs, addressIds, gatekeeperReason: reason, dryRun: true };
+    const [g1, p1, g2, p2] = await Promise.all([
+      this.gatekeeper.decide(jid, consumedUpToTs, null, true),
+      this.generator.generate(input),
+      this.brainV2.gate(jid, consumedUpToTs, true, { dryRun: true }),
+      this.brainV2.generate(input),
+    ]);
+    const lines = (actions: BotAction[]) => actions.map(describeAction);
+    return {
+      v1: {
+        gate: `${g1.decision}: ${g1.reason}`,
+        actions: p1 ? lines(p1.actions) : ['(generation failed)'],
+        note: p1?.note ?? '',
+      },
+      v2: {
+        gate: g2 ? `${g2.policy.decision}: ${g2.out.reason} (${g2.policy.why}; urge ${g2.policy.motivation} vs bar ${g2.policy.threshold})` : '(gatekeeper failed)',
+        thought: g2?.out.thought?.text ?? null,
+        scene: g2 ? `${g2.out.scene.topic} / ${g2.out.scene.vibe}${g2.out.scene.running_bit ? ` / bit: ${g2.out.scene.running_bit}` : ''}` : null,
+        read: p2 ? `${p2.out.read.happening} Subtext: ${p2.out.read.subtext}` : null,
+        angles: p2 ? p2.out.angles.map((a, i) => `${i === p2.out.pick ? '>' : ' '} ${a.device}: ${a.idea}`) : [],
+        actions: p2 ? lines(p2.plan.actions) : ['(generation failed)'],
+        fixes: p2 ? [...p2.lint.dropped, ...(p2.rewritten ? [`rewrote ${p2.rewritten} message(s) to remove AI tells`] : [])] : [],
+      },
+    };
+  }
+
+  /** Switch a group between brain v1 (default) and v2. Takes effect on the next decision. */
+  setBrainVersion(jid: string, version: 'v1' | 'v2'): void {
+    this.repo.setBrainVersion(jid, version);
+    this.repo.insertDecision(jid, 'T0', 'BRAIN', `switched to brain ${version}`);
+    this.bus.publish({ kind: 'decision', chatJid: jid, ts: Date.now(), tier: 'T0', decision: 'BRAIN', reason: `switched to brain ${version}` });
+    this.bus.publish({ kind: 'status', status: this.statusPayload() });
   }
 
   setPaused(jid: string, paused: boolean): void {
@@ -848,6 +900,7 @@ export class App {
       paused: arbiter?.paused ?? this.repo.getConfig(`paused_${jid}`) === '1',
       asleep: arbiter?.asleep ?? false,
       phase: arbiter?.phase ?? 'IDLE',
+      brain: this.repo.getBrainVersion(jid),
       stats: {
         messages_read: allStats[`messages_read:${jid}`] ?? 0,
         messages_sent: allStats[`messages_sent:${jid}`] ?? 0,
@@ -891,6 +944,28 @@ export class App {
       stats,
       settings: this.getSettings(),
     };
+  }
+}
+
+export type BrainPreview =
+  | { error: string }
+  | {
+    v1: { gate: string; actions: string[]; note: string };
+    v2: { gate: string; thought: string | null; scene: string | null; read: string | null; angles: string[]; actions: string[]; fixes: string[] };
+  };
+
+/** One action as a readable line for the dashboard preview. */
+function describeAction(a: BotAction): string {
+  switch (a.type) {
+    case 'message': return a.text;
+    case 'reply': return `↩ #${a.target_message_id}: ${a.text}`;
+    case 'reaction': return `reacts ${a.emoji} on #${a.target_message_id}`;
+    case 'sticker': return `[sticker ${a.sticker_id}]`;
+    case 'poll': return `[poll] ${a.question} (${a.options.join(' / ')})`;
+    case 'voice': return `🎤 ${a.text}`;
+    case 'image': return `🖼 ${a.prompt}${a.caption ? ` / caption: ${a.caption}` : ''}`;
+    case 'sleep': return '(goes to sleep)';
+    default: return '(stays silent)';
   }
 }
 

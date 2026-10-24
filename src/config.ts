@@ -126,6 +126,20 @@ export const ARBITER = {
   MAX_ACTIONS: 4,
 } as const;
 
+// ---- Brain v2 (opt-in per group; v1 is the default everywhere) ----
+export const BRAIN_V2 = {
+  GATE_LINES: 30,                 // transcript lines the v2 gatekeeper reads
+  SIGNAL_LINES: 150,              // history used for style numbers, tics and participation
+  TICS_WINDOW: 25,                // the bot's own last N messages checked for repeated habits
+  CALLBACKS: 4,                   // older matching moments offered for callback jokes
+  GEN_MAX_TOKENS: 2600,           // the read + angles fields need room on top of the actions
+  THOUGHT_TTL_MS: 4 * 60_000,     // a saved thought goes stale after this
+  LULL_MS: 60_000,                // pause after the last message before a saved thought is offered
+  LULL_ACTIVE_WINDOW_MS: 5 * 60_000, // ...only if the chat was alive in this window
+  LULL_MIN_HUMAN_MSGS: 6,         // ...with at least this many human messages
+  REACT_MIN_GAP_MS: 45_000,       // at most one gatekeeper-chosen reaction per this window
+} as const;
+
 // ---- Outbound humanization ----
 export const OUTBOUND = {
   TYPING_MS_PER_CHAR: 55,

@@ -19,6 +19,8 @@ export interface GenerateInput {
   operatorInstruction?: string | null;
   /** transcript window size override — bigger on the first reply after waking from sleep (catch-up) */
   transcriptLines?: number;
+  /** dashboard preview (v1 vs v2): nothing is saved, only token usage is recorded */
+  dryRun?: boolean;
 }
 
 export class Generator {
@@ -84,7 +86,7 @@ export class Generator {
       // private observation for the weekly member report (never shown in chat) — resolve the
       // target message's sender and store it against that person.
       const obs = parsed.observation;
-      if (obs?.note?.trim() && obs.about_message_id) {
+      if (!input.dryRun && obs?.note?.trim() && obs.about_message_id) {
         const target = this.repo.getMessageByShortId(obs.about_message_id);
         if (target?.sender_jid && !target.is_bot && !target.is_owner) {
           this.repo.insertMemberObservation(target.sender_jid, input.chatJid, obs.note.trim());

@@ -2,6 +2,7 @@ import { type CSSProperties, type MouseEvent as ReactMouseEvent, useCallback, us
 import { api, post, type Status } from './api';
 import { useWs, type WsEvent } from './useWs';
 import { QrLogin } from './components/QrLogin';
+import { BrainPreview } from './components/BrainPreview';
 import { GroupPicker } from './components/GroupPicker';
 import { SetupWizard } from './components/SetupWizard';
 import { LiveFeed, type FeedItem, type ReplyTarget } from './components/LiveFeed';
@@ -25,6 +26,7 @@ export default function App() {
   const [influence, setInfluence] = useState('');
   const [memoryVersion, setMemoryVersion] = useState(0);
   const [showPicker, setShowPicker] = useState(false);
+  const [showCompare, setShowCompare] = useState(false);
   const [selectedJid, setSelectedJid] = useState<string | null>(null);
   const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null);
   const [why, setWhy] = useState(''); // optional rationale behind an Influence
@@ -174,6 +176,15 @@ export default function App() {
         {!status?.demo && status && status.online && selected && (
           <>
             <span className="phase-chip">{selected.phase}</span>
+            <select
+              className="brain-select"
+              value={selected.brain ?? 'v1'}
+              title="Which brain answers in this group. v1 = the proven one. v2 = the upgraded beta."
+              onChange={e => post('/api/brain', { jid: selected.jid, version: e.target.value })}
+            >
+              <option value="v1">Brain v1</option>
+              <option value="v2">Brain v2 (beta)</option>
+            </select>
             <button
               className={selected.paused ? 'primary' : 'danger'}
               onClick={() => post(selected.paused ? '/api/resume' : '/api/pause', { jid: selected.jid })}
@@ -226,6 +237,7 @@ export default function App() {
                 >
                   <span className="gstate" />
                   <span className="gname">{g.name ?? g.jid.split('@')[0]}</span>
+                  {g.brain === 'v2' && <span className="gbrain" title="This group uses brain v2 (beta)">v2</span>}
                   {g.paused ? <span className="gpaused">⏸</span> : g.asleep ? <span className="gpaused">💤</span> : null}
                   <span className="gclose" title="Unlink group" onClick={(ev) => { ev.stopPropagation(); void unlink(g.jid); }}>✕</span>
                 </div>
@@ -290,7 +302,9 @@ export default function App() {
                     </div>
                   </div>
                 )}
+                {showCompare && selectedJid && <BrainPreview jid={selectedJid} onClose={() => setShowCompare(false)} />}
                 <div className="controls-sys">
+                  <button onClick={() => setShowCompare(v => !v)} title="See what brain v1 and v2 would say right now (nothing is sent)">Compare v1 / v2</button>
                   <button onClick={() => selectedJid && post('/api/continue', { jid: selectedJid })}>Continue ▶</button>
                   <button onClick={() => selectedJid && post('/api/sleep', { jid: selectedJid })} title="Put ForceAI to sleep until someone says 'ForceAI'">Sleep 💤</button>
                 </div>

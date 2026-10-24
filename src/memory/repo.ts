@@ -17,6 +17,15 @@ export class Repo {
     ).run(key, value);
   }
 
+  // ---- brain version per group: v1 (default, the proven brain) or v2 (the upgraded brain, opt-in) ----
+  getBrainVersion(chatJid: string): 'v1' | 'v2' {
+    return this.getConfig(`brain_v2_${chatJid}`) === '1' ? 'v2' : 'v1';
+  }
+
+  setBrainVersion(chatJid: string, version: 'v1' | 'v2'): void {
+    this.setConfig(`brain_v2_${chatJid}`, version === 'v2' ? '1' : '0');
+  }
+
   // ---- API keys (entered in the dashboard, stored in config; env is the fallback) ----
   // DB value wins over env so the UI can override a stale env var. NEVER log these values.
   private static readonly KEY_ENV: Record<string, string> = {
@@ -193,6 +202,27 @@ export class Repo {
       'SELECT COUNT(*) AS c FROM messages WHERE chat_jid = ? AND ts > ? AND is_bot = 0'
     ).get(chatJid, ts) as { c: number };
     return row.c;
+  }
+
+  /**
+   * Brain v2 callbacks: older text messages in this chat (before `beforeTs`) that mention any of the
+   * keywords, best matches first. LIKE is case-insensitive for ASCII only, which is fine for slang.
+   */
+  searchOlderMessages(chatJid: string, beforeTs: number, keywords: string[], limit: number): any[] {
+    if (keywords.length === 0) return [];
+    const where = keywords.map(() => 'text LIKE ?').join(' OR ');
+    const rows = this.db.prepare(
+      `SELECT id, short_id, sender_name, sender_jid, text, type, is_bot, is_owner, ts FROM messages
+       WHERE chat_jid = ? AND ts < ? AND type = 'text' AND is_owner = 0 AND (${where})
+       ORDER BY ts DESC LIMIT 300`,
+    ).all(chatJid, beforeTs, ...keywords.map(k => `%${k}%`)) as any[];
+    const scored = rows.map(r => {
+      const t = String(r.text ?? '').toLowerCase();
+      return { r, hits: keywords.filter(k => t.includes(k.toLowerCase())).length };
+    });
+    const best = scored.filter(s => s.hits >= 2);
+    const pick = (best.length >= limit ? best : scored).sort((a, b) => b.hits - a.hits || b.r.ts - a.r.ts);
+    return pick.slice(0, limit).map(s => s.r).sort((a, b) => a.ts - b.ts);
   }
 
   getMessagesBetween(chatJid: string, fromTs: number, toTs: number): any[] {

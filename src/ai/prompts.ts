@@ -3,7 +3,8 @@ import type { Repo } from '../memory/repo.js';
 import { voiceAvailable, voiceProvider } from '../voice/tts.js';
 import type { VoiceItemRow } from '../types.js';
 import type { PollTracker } from '../wa/polls.js';
-import { loadTrainingData } from './fewshots.js';
+import { loadTrainingData, type TrainingData } from './fewshots.js';
+import { OUTPUT_CONTRACT_V2, V2_CRAFT } from './v2/prompts.js';
 
 export interface SystemBlock {
   type: 'text';
@@ -131,6 +132,7 @@ Your past messages in the transcript may show a marker (like 🤖) at the start 
 
 export class PromptBuilder {
   private blockA: string;
+  private blockAV2: string;
   /** per-group Block B cache — multiple groups generate concurrently */
   private blockBCache = new Map<string, { text: string; builtAt: number; version: number }>();
   /** bump when facts/stickers/summary/members change to invalidate Block B */
@@ -144,6 +146,20 @@ export class PromptBuilder {
       training.fewshotBlock ? `EXAMPLES OF YOU IN ACTION (real exchanges — match this energy):\n\n${training.fewshotBlock}` : '',
       OUTPUT_CONTRACT,
     ].filter(Boolean).join('\n\n');
+    this.blockAV2 = buildBlockAV2(training);
+  }
+
+  /** Brain v2's frozen block: v1's persona and examples plus the v2 craft rules and output contract. */
+  getBlockAV2(): string {
+    return this.blockAV2;
+  }
+
+  /** Brain v2 system blocks: v2 frozen block (1h cache) + the same memory snapshot as v1 (Block B). */
+  buildSystemBlocksV2(chatJid: string): SystemBlock[] {
+    return [
+      { type: 'text', text: this.blockAV2, cache_control: { type: 'ephemeral', ttl: '1h' } },
+      { type: 'text', text: this.getBlockB(chatJid), cache_control: { type: 'ephemeral' } },
+    ];
   }
 
   /** Block A: frozen persona — 1h cache. */
@@ -399,6 +415,16 @@ ${lines}`;
     }
     return lines.join('\n');
   }
+}
+
+function buildBlockAV2(training: TrainingData): string {
+  return [
+    PERSONA_CORE,
+    V2_CRAFT,
+    training.profileBlock ? `PERSONALITY PROFILE (distilled from real chat history):\n${training.profileBlock}` : '',
+    training.fewshotBlock ? `EXAMPLES OF YOU IN ACTION (real exchanges, match this energy; the v2 rules above still apply):\n\n${training.fewshotBlock}` : '',
+    OUTPUT_CONTRACT_V2,
+  ].filter(Boolean).join('\n\n');
 }
 
 export const GATEKEEPER_SYSTEM = `You are the response arbiter for ${BOT_NAME}, an AI member of a WhatsApp friend-group chat. You see the recent transcript; messages after ">> NEW" have not been handled yet. Decide if ${BOT_NAME} should respond NOW, WAIT for more messages, or IGNORE.
