@@ -413,6 +413,8 @@ export interface Dynamics {
   hangingQuestion: { shortId: string; who: string } | null;
   /** the newest question is rhetorical ("who even watches that?", "кто вообще так играет?!"): not one to answer */
   rhetorical: { shortId: string; who: string } | null;
+  /** a burst of shouting from 2+ people in the last 90 s (a goal, big news): who is shouting */
+  hype: string[] | null;
   /** a message that looks like real bad news, who sent it, and the word that flagged it */
   serious: { shortId: string; word: string; who: string } | null;
   /** people saying bye or goodnight: the chat is winding down (the newest goodbye's short id) */
@@ -496,8 +498,18 @@ export function dynamics(rows: MsgRow[], botName: string, now = Date.now()): Dyn
     windingDown = { who: goneWho.length ? goneWho : [lastBye.sender_name ?? '?'], shortId: lastBye.short_id };
   }
 
-  return { privatePair, storyteller, hangingQuestion, serious, windingDown, rhetorical };
+  // a hype moment: 3+ loud texts ("GOOOOL", "LETS GOOO!!", caps) from 2+ people in the last 90 seconds,
+  // and no bad news (shouting about bad news is not hype)
+  let hype: Dynamics['hype'] = null;
+  const loud = humans.filter(r => r.type === 'text' && now - r.ts < 90_000 && (loudText(r.text ?? '') || GOAL.test(r.text ?? '')));
+  const shouting = [...new Set(loud.map(r => (r.is_owner ? 'Said (owner)' : r.sender_name ?? '?')))];
+  if (!serious && loud.length >= 3 && shouting.length >= 2) hype = shouting;
+
+  return { privatePair, storyteller, hangingQuestion, serious, windingDown, rhetorical, hype };
 }
+
+/** A goal shout ("gooool", "ГООЛ", "qooool", "GOAL", "GOL"): stretched, or in capitals. "his goal was offside" is not one. */
+const GOAL = /(?<!\p{L})(?:[gG]+[oO]{2,}[aA]*[lL]+|[гГ]+[оО]{2,}[лЛ]+|[qQ]+[oO]{2,}[lL]+|GOAL|GOL|ГОЛ|QOL)(?!\p{L})/u;
 
 /**
  * Questions nobody expects an answer to: venting, disbelief, sarcasm ("who even...", "what is wrong with
@@ -947,6 +959,7 @@ export function formatRoomNow(r: RoomNow, stage: 'gate' | 'writer'): string | nu
   else if (q) lines.push(`- open question: #${q.shortId} (${q.who}) asked the group, nobody answered yet`);
   if (r.dyn.rhetorical) lines.push(`- rhetorical: #${r.dyn.rhetorical.shortId} (${r.dyn.rhetorical.who}) is venting or being sarcastic, not asking: a take or a reaction fits, not an answer`);
   if (r.dyn.privatePair) lines.push(`- ${r.dyn.privatePair[0]} and ${r.dyn.privatePair[1]} are going back and forth with each other`);
+  if (r.dyn.hype) lines.push(`- hype: ${r.dyn.hype.join(', ')} shouting in the last 90 seconds (a goal? big news?): match the energy in a few words, or just react`);
   if (r.dyn.windingDown) lines.push(`- winding down: ${r.dyn.windingDown.who.join(', ')} said bye or goodnight (#${r.dyn.windingDown.shortId})`);
   if (stage === 'gate' && r.dyn.storyteller && !storyQuestion) lines.push(`- ${r.dyn.storyteller} is sending several messages in a row (probably not finished)`);
   for (const c of r.cues) lines.push(`- possible irony: #${c.shortId} ${c.who}, ${c.cue}`);

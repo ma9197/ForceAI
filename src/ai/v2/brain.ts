@@ -374,6 +374,7 @@ export class BrainV2 {
         burstiness: signals.style?.burstiness,
         p80Len: signals.style?.p80Len,
         laughEndShare: laughEndShare(signals.humanTexts.slice(-40)),
+        hype: !!signals.dyn.hype,
       };
       let lint = lintPlan(actions, { ...lintCtx, recentBotTexts: signals.botTexts.slice(-30), recentHumanTexts: signals.humanTexts.slice(-40) });
       let rewritten = 0;
