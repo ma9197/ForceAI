@@ -6,10 +6,12 @@ import { openDb } from '../src/memory/db.js';
 import { Repo } from '../src/memory/repo.js';
 import { PromptBuilder } from '../src/ai/prompts.js';
 import { BrainV2 } from '../src/ai/v2/brain.js';
-import { lintPlan, phoneStyle, autoFix } from '../src/ai/v2/lint.js';
-import { CHATTINESS_SHIFT, decide, threshold } from '../src/ai/v2/policy.js';
+import { lintPlan, phoneStyle, autoFix, scriptOf } from '../src/ai/v2/lint.js';
+import { CHATTINESS_SHIFT, decide, roomShift, threshold } from '../src/ai/v2/policy.js';
+import { actualAfter, pickReplayCuts } from '../src/ai/v2/replay.js';
 import {
-  botTargets, botTics, callbackKeywords, formatDecisionFeedback, formatTargets, formatTaste, formatTics, landedLines, participation, styleStats, type MsgRow,
+  botTargets, botTics, callbackKeywords, dynamics, formatDecisionFeedback, formatDynamics, formatGroupLaughs, formatTargets, formatTaste, formatTics,
+  groupLaughs, ignoredStreak, laughCounts, landedLines, participation, reception, seriousHit, styleStats, type MsgRow,
 } from '../src/ai/v2/signals.js';
 import type { GateV2Out } from '../src/ai/v2/schemas.js';
 
@@ -121,6 +123,113 @@ assert.ok(threshold(quiet, 'serious') > threshold(quiet, 'banter'));
 assert.equal(threshold(quiet, 'banter', CHATTINESS_SHIFT.quiet), threshold(quiet, 'banter') + 1, 'quiet raises the bar');
 assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relevance: 6, timing: 6, fit: 6 } }), quiet, false, CHATTINESS_SHIFT.chatty).decision, 'RESPOND');
 assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relevance: 6, timing: 6, fit: 6 } }), quiet, false, CHATTINESS_SHIFT.quiet).decision, 'IGNORE');
+
+// ---- round 2: room dynamics, reception, group laughs, bad news, language mirror ----
+{
+  const T = 1_800_000_000_000;
+  let k = 0;
+  const r = (who: string, text: string, at: number, extra: Partial<MsgRow> = {}): MsgRow =>
+    ({ id: `r${++k}`, short_id: `m${k}`, sender_jid: who, sender_name: who, text, type: 'text', is_bot: 0, is_owner: 0, ts: T + at * 1000, ...extra });
+
+  // laughs: a reaction, a quoting laugh, and an unquoted "hahaha" right after count once per person
+  const joke = r('Kanan', 'murad drives like he is taking a penalty', 0);
+  const laughs = laughCounts([joke, r('Murad', 'HAHAHAHA', 5), r('Aysel', '💀💀', 8), r('Murad', 'hahaha', 9),
+    r('Aysel', '😂', 10, { type: 'reaction', quoted_id: joke.id })]);
+  assert.equal(laughs.get(joke.id!), 2, 'two people laughed (Murad twice counts once)');
+  assert.equal(laughCounts([joke, r('Kanan', 'hahaha', 4)]).get(joke.id!), undefined, 'laughing at your own joke does not count');
+  assert.equal(laughCounts([joke, r('Murad', 'hahaha', 200)]).get(joke.id!), undefined, 'too late to be a laugh at it');
+  const gl = groupLaughs([joke, r('Murad', 'HAHAHAHA', 5), r('Aysel', '💀💀', 8), r('Aysel', 'ok', 30)]);
+  assert.deepEqual(gl.map(x => x.who), ['Kanan']);
+  assert.ok(formatGroupLaughs(gl)!.includes('Kanan: "murad drives like'));
+  assert.equal(formatGroupLaughs([]), null);
+
+  // a private back-and-forth between two people
+  const now = T + 200_000;
+  const pair = [r('Murad', 'you owe me 20', 100), r('Kanan', 'for what', 110), r('Murad', 'the pizza', 120), r('Kanan', 'that was you', 130), r('Murad', 'no it was not', 140), r('Kanan', 'send proof', 150)];
+  const d1 = dynamics(pair, 'ForceAI', now);
+  assert.deepEqual(d1.privatePair, ['Murad', 'Kanan']);
+  assert.equal(dynamics([...pair.slice(0, 5), r('Kanan', 'forceai who is right', 150)], 'ForceAI', now).privatePair, null, 'naming the bot is not private');
+
+  // one person mid-story
+  const story = [r('Aysel', 'ok so yesterday', 190), r('Aysel', 'i go to the shop', 195), r('Aysel', 'and guess who is there', 198)];
+  assert.equal(dynamics(story, 'ForceAI', now).storyteller, 'Aysel');
+  assert.equal(dynamics(story, 'ForceAI', now + 60_000).storyteller, null, 'a run that went quiet is over');
+
+  // a question nobody answered (not the owner's, not to the bot)
+  const q = [r('Murad', 'yo', 150), r('Kanan', 'who is playing tonight?', 160)];
+  assert.equal(dynamics(q, 'ForceAI', now).hangingQuestion?.shortId, q[1].short_id);
+  assert.equal(dynamics([...q, r('Murad', 'barca', 170)], 'ForceAI', now).hangingQuestion, null, 'answered');
+  assert.equal(dynamics([r('Said', 'who is playing tonight?', 160, { is_owner: 1 })], 'ForceAI', now).hangingQuestion, null, "owner's questions are never a cue");
+
+  // bad news, in several languages; slang is not
+  assert.ok(seriousHit('my dad passed away this morning'));
+  assert.ok(seriousHit('бабушка в больнице'));
+  assert.ok(seriousHit('nənəm xəstəxanadadır'));
+  assert.equal(seriousHit("i'm dead 💀 öldüm rip madrid"), null);
+  const sad = dynamics([r('Aysel', 'guys my grandma is in the hospital', 150)], 'ForceAI', now);
+  assert.equal(sad.serious?.shortId, `m${k}`);
+  assert.ok(formatDynamics(sad, [])!.includes('real bad news'));
+
+  // reception: unprompted lines that got nothing raise the bar; an answer to a question is not judged
+  const b = (text: string, at: number) => r('bot', text, at, { is_bot: 1 });
+  const ignored = [r('Murad', 'match tonight', 0), b('madrid fans stay quiet tonight', 5), r('Kanan', 'what time', 10), r('Murad', '9', 12), r('Kanan', 'ok', 14),
+    r('Murad', 'who is ref', 20), b('the ref is a barca fan, trust', 25), r('Kanan', 'pizza after?', 30), r('Murad', 'yes', 32), r('Aysel', 'me too', 34)];
+  const rec = reception(ignored, 'ForceAI', T + 100_000);
+  assert.deepEqual(rec, ['ignored', 'ignored']);
+  assert.equal(ignoredStreak(rec), 2);
+  assert.ok(formatDynamics({ privatePair: null, storyteller: null, hangingQuestion: null, serious: null }, rec)!.includes('no reaction'));
+  assert.deepEqual(reception([r('Murad', 'forceai thoughts?', 0), b('madrid is done', 5), r('Kanan', 'ok', 6), r('Murad', 'ok', 7), r('Aysel', 'ok', 8)], 'ForceAI', T + 100_000), [], 'asked: not judged');
+  const funny = b('ref is on the barca payroll', 5);
+  assert.deepEqual(reception([r('Murad', 'match', 0), funny, r('Kanan', 'HAHAHA', 8)], 'ForceAI', T + 100_000), ['laughed']);
+
+  // policy: the room moves the bar for unprompted lines only
+  const calm = { window: 30, botShare: 0.05, humansSinceBot: 10, secondsSinceBot: 600 };
+  const ok = gate({ decision: 'RESPOND', s: { relevance: 6.8, novelty: 6.8, humor: 6.8, timing: 6.8, fit: 6.8 } });
+  assert.equal(decide(ok, calm, false).decision, 'RESPOND');
+  const pairRoom = { dyn: d1, rec: [] };
+  assert.equal(decide(ok, calm, false, 0, pairRoom).decision, 'IGNORE', 'two people talking: a 7 is not enough');
+  assert.deepEqual(decide(ok, calm, false, 0, pairRoom).room, ['pair talking +0.8']);
+  assert.equal(decide(gate({ addressed: true }), calm, false, 0, pairRoom).decision, 'RESPOND', 'still answers when asked');
+  assert.equal(decide(ok, calm, false, 0, { rec: ['ignored', 'ignored', 'ignored'] }).decision, 'IGNORE', 'ignored three times: holds back');
+  assert.equal(roomShift({ rec: ['ignored', 'ignored', 'ignored', 'ignored'] }).delta, 1, 'capped');
+  assert.equal(roomShift({ rec: ['laughed', 'answered', 'laughed'] }).delta, -0.3);
+  const borderline = gate({ decision: 'RESPOND', s: { relevance: 5.8, novelty: 5.8, humor: 6, timing: 5.8, fit: 5.8 } });
+  assert.equal(decide(borderline, calm, false).decision, 'IGNORE');
+  assert.equal(decide(borderline, calm, false, 0, { dyn: dynamics(q, 'ForceAI', now), rec: [] }).decision, 'RESPOND', 'an open question lowers the bar');
+  const sadRoom = { dyn: sad, rec: [] };
+  assert.equal(decide(gate({ decision: 'REACT', react: { target_message_id: 'm1', emoji: '😂' } }), calm, false, 0, sadRoom).decision, 'IGNORE', 'no 😂 on bad news');
+  assert.equal(decide(gate({ decision: 'REACT', react: { target_message_id: 'm1', emoji: '❤️' } }), calm, false, 0, sadRoom).decision, 'REACT', 'a heart is fine');
+  assert.ok(decide(ok, calm, false, 0, sadRoom).threshold > decide(ok, calm, false).threshold, 'bad news spotted in code raises the bar');
+
+  // language mirror: answers in the script of the person it replies to
+  assert.equal(scriptOf('кто играет сегодня вечером'), 'cyrillic');
+  assert.equal(scriptOf('bu gün kim oynayır axşam'), 'latin');
+  assert.equal(scriptOf('ok'), null);
+  const texts: Record<string, string> = { m1: 'кто сегодня играет вообще', m2: 'who is playing tonight' };
+  const base2 = { recentBotTexts: [], recentHumanTexts: [], medianLen: 20, marker, textOf: (id: string) => texts[id] ?? null };
+  assert.ok(lintPlan([{ type: 'reply', text: 'barca vs madrid at nine tonight', target_message_id: 'm1' }], base2).issues.some(i => i.problem.includes('Russian')));
+  assert.equal(lintPlan([{ type: 'reply', text: 'барса с реалом в девять', target_message_id: 'm1' }], base2).issues.length, 0);
+  assert.ok(lintPlan([{ type: 'reply', text: 'барса с реалом в девять вечера', target_message_id: 'm2' }], base2).issues.some(i => i.problem.includes('Latin')));
+  assert.equal(lintPlan([{ type: 'message', text: 'barca vs madrid at nine tonight' }], { ...base2, lastHumanTexts: ['кто сегодня играет', 'who is playing', 'кто знает вообще'] }).issues.length, 0, 'mixed room: no flag');
+  assert.equal(lintPlan([{ type: 'message', text: 'barca vs madrid at nine tonight' }], { ...base2, lastHumanTexts: ['кто сегодня играет', 'никто не знает', 'кто знает вообще'] }).issues.length, 1);
+
+  // replay: moments at the end of bursts, spread out, the latest included; what the bot really did after
+  const day: MsgRow[] = [];
+  for (let i = 0; i < 30; i++) {
+    day.push(r(i % 3 === 0 ? 'Kanan' : 'Murad', `line ${i}`, 1000 + i * 30));
+    if (i % 3 === 0) day.push(r('Kanan', `and ${i}`, 1000 + i * 30 + 5)); // same person, 5 s later: one burst
+  }
+  day.push(r('bot', 'bot line', 1000 + 29 * 30 + 10, { is_bot: 1 }), r('Said', 'owner line', 1000 + 29 * 30 + 12, { is_owner: 1 }));
+  const cuts = pickReplayCuts(day, 6);
+  assert.equal(cuts.length, 6);
+  assert.ok(cuts.every(c => !c.is_bot && !c.is_owner && !(c.text ?? '').startsWith('line 0')), 'never mid-burst, never the bot or owner');
+  assert.equal(cuts[5].text, 'line 29', 'the latest moment is included');
+  assert.ok(cuts.every((c, i) => i === 0 || c.ts > cuts[i - 1].ts), 'in order, no duplicates');
+  assert.equal(pickReplayCuts(day.slice(0, 2), 6).length, 1);
+  assert.equal(actualAfter(day, cuts[5].ts, Infinity), 'said: bot line');
+  assert.equal(actualAfter(day, cuts[0].ts, cuts[1].ts), 'stayed quiet');
+  assert.equal(actualAfter([r('bot', '😂', 10, { is_bot: 1, type: 'reaction' })], T, Infinity), 'reacted 😂');
+}
 
 // ---- brain on a throwaway DB with a fake client ----
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forceai-v2-'));
@@ -236,6 +345,27 @@ assert.equal(sb.quiet, 1);
 assert.ok(sb.rewrites >= 1 || sb.vetoed >= 0);
 assert.equal(repo.setDecisionFeedback(d1, null), true);
 assert.equal(repo.getDecisionFeedback(8).length, 1);
+
+// replay: the gate sees the chat as it was at that moment, and changes nothing
+const cutRow = repo.getMessageByShortId('m50');
+calls.length = 0;
+brain.takeThought(G); // clear the one saved by the gate call above
+const before = brain.lastScene(G);
+const rp = await brain.gate(G, cutRow.ts - 30_000, false, { untilTs: cutRow.ts });
+assert.ok(rp);
+const replayText: string = calls[0].messages[0].content;
+assert.ok(replayText.includes('#m50 ') && !replayText.includes('#m51 ') && !replayText.includes('madrid will win the league watch'), 'nothing after the cut');
+assert.ok(!replayText.includes('Your previous read of the scene'), 'no scene from the future');
+assert.equal(brain.lastScene(G), before, 'replay leaves the live state alone');
+assert.equal(brain.hasThought(G), false, 'replay saves no thought');
+
+// per-group chattiness beats the global setting; "default" follows it
+repo.setConfig('v2_chattiness', 'chatty');
+assert.equal(repo.getV2Chattiness(G), 'chatty');
+repo.setV2Chattiness(G, 'quiet');
+assert.equal(repo.getV2Chattiness(G), 'quiet');
+repo.setV2Chattiness(G, 'default');
+assert.equal(repo.getV2Chattiness(G), 'chatty');
 
 // v1 is untouched: its frozen block has no v2 text
 assert.ok(!prompts.getBlockA().includes('HOW A REAL FRIEND TEXTS'));

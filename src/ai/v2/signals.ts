@@ -252,23 +252,72 @@ export function formatCallbacks(rows: MsgRow[]): string | null {
 const LAUGH_EMOJI = /[😂🤣💀😭⚰️]/u;
 const LAUGH_TEXT = /(ha){2,}|\bxd+\b|\blmf?ao+\b|\blo+l\b|(ах){2,}|(хa){2,}|(ха){2,}|😂|🤣|💀|😭/iu;
 
+/** A short message that is only a laugh ("hahaha", "💀💀", "lmao"), not a line of its own. */
+function pureLaugh(text: string): boolean {
+  const t = text.trim();
+  return t.length > 0 && t.length <= 25 && LAUGH_TEXT.test(t) && words(t.replace(LAUGH_TEXT, ' ')).filter(w => !LAUGH_TEXT.test(w)).length <= 1;
+}
+
 /**
- * Which of the bot's recent lines actually got laughs (laugh reactions on it, or laughing replies
- * quoting it). Showing the bot what landed in THIS group is cheap in-context feedback.
+ * Laughs per message id, from three signals: laugh reactions on it, laughing replies that quote it,
+ * and short unquoted laughs ("hahaha") by someone else right after it (within the next 3 messages and
+ * 90 seconds), which is how most people laugh in a group chat. One laugh per person per message.
+ */
+export function laughCounts(rows: MsgRow[]): Map<string, number> {
+  const who = new Map<string, Set<string>>();
+  const add = (id: string, by: string) => {
+    if (!who.has(id)) who.set(id, new Set());
+    who.get(id)!.add(by);
+  };
+  const authorOf = new Map(rows.filter(r => r.id).map(r => [r.id!, r.sender_jid ?? (r.is_bot ? 'bot' : '?')]));
+  const chat = rows.filter(r => r.type !== 'reaction');
+  for (const r of rows) {
+    if (r.is_bot || !r.quoted_id) continue;
+    const by = r.sender_jid ?? '?';
+    if (authorOf.get(r.quoted_id) === by) continue;
+    if (r.type === 'reaction' ? LAUGH_EMOJI.test(r.text ?? '') : r.type === 'text' && LAUGH_TEXT.test(r.text ?? '')) add(r.quoted_id, by);
+  }
+  for (let i = 0; i < chat.length; i++) {
+    const r = chat[i];
+    if (r.is_bot || r.quoted_id || r.type !== 'text' || !pureLaugh(r.text ?? '')) continue;
+    // credit the nearest earlier real line by someone else
+    for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
+      const t = chat[j];
+      if (r.ts - t.ts > 90_000) break;
+      if (t.type === 'text' && pureLaugh(t.text ?? '')) continue;
+      if (t.id && (t.sender_jid ?? (t.is_bot ? 'bot' : '?')) !== r.sender_jid) add(t.id, r.sender_jid ?? '?');
+      break;
+    }
+  }
+  return new Map([...who.entries()].map(([id, s]) => [id, s.size]));
+}
+
+/**
+ * Which of the bot's recent lines actually got laughs (laugh reactions, laughing replies, or a
+ * "hahaha" right after it). Showing the bot what landed in THIS group is cheap in-context feedback.
  */
 export function landedLines(rows: MsgRow[], strip: (t: string) => string, max = 3): { text: string; laughs: number }[] {
-  const bot = rows.filter(r => r.is_bot && r.type === 'text' && r.id);
-  const laughs = new Map<string, number>();
-  for (const r of rows) {
-    if (!r.quoted_id || r.is_bot) continue;
-    const hit = r.type === 'reaction' ? LAUGH_EMOJI.test(r.text ?? '') : r.type === 'text' && LAUGH_TEXT.test(r.text ?? '');
-    if (hit) laughs.set(r.quoted_id, (laughs.get(r.quoted_id) ?? 0) + 1);
-  }
-  return bot
+  const laughs = laughCounts(rows);
+  return rows.filter(r => r.is_bot && r.type === 'text' && r.id)
     .map(b => ({ text: strip(b.text ?? ''), laughs: laughs.get(b.id!) ?? 0 }))
     .filter(x => x.laughs > 0 && x.text)
     .sort((a, b) => b.laughs - a.laughs)
     .slice(0, max);
+}
+
+/** The group's own lines that made at least two people laugh: the humor that works in this chat. */
+export function groupLaughs(rows: MsgRow[], max = 4): { who: string; text: string; laughs: number }[] {
+  const laughs = laughCounts(rows);
+  return rows.filter(r => !r.is_bot && r.type === 'text' && r.id && !pureLaugh(r.text ?? ''))
+    .map(r => ({ who: r.sender_name ?? '?', text: (r.text ?? '').trim(), laughs: laughs.get(r.id!) ?? 0 }))
+    .filter(x => x.laughs >= 2 && x.text.length >= 4)
+    .sort((a, b) => b.laughs - a.laughs)
+    .slice(0, max);
+}
+
+export function formatGroupLaughs(lines: { who: string; text: string; laughs: number }[]): string | null {
+  if (lines.length === 0) return null;
+  return `WHAT MAKES THIS GROUP LAUGH (their own lines that got the most laughs lately: this is the humor that works here. learn the kind, never copy the line):\n${lines.map(l => `- ${l.who}: "${l.text.slice(0, 140)}" (${l.laughs} laughing)`).join('\n')}`;
 }
 
 export function formatLanded(lines: { text: string; laughs: number }[]): string | null {
@@ -327,4 +376,144 @@ export function formatDecisionFeedback(rows: { decision: string; reason: string;
     return r.verdict === 'good' ? `- staying quiet was RIGHT here: ${what}` : `- should have SPOKEN here: ${what}`;
   });
   return `YOUR OWNER'S CALLS ON YOUR PAST DECISIONS (learn when to talk from these):\n${lines.join('\n')}`;
+}
+
+/**
+ * Words that usually mean real bad news, in the group's languages. Conservative on purpose: slang
+ * like "I'm dead", "öldüm" (died laughing) or "rip" is not here. A hit only makes the bot more careful
+ * (higher bar, no laughing reactions, no stickers), so a false alarm costs little.
+ */
+const SERIOUS = new RegExp([
+  String.raw`\bpassed away\b`, String.raw`\bfuneral\b`, String.raw`\bcondolences?\b`, String.raw`\bin (the )?hospital\b`, String.raw`\bcancer\b`,
+  String.raw`\bdiagnos(ed|is)\b`, String.raw`\bpanic attacks?\b`, String.raw`\bdepress(ed|ion)\b`, String.raw`\bcar (crash|accident)\b`,
+  String.raw`\bmy (mom|mum|dad|mother|father|grandma|grandpa|grandmother|grandfather|brother|sister|uncle|aunt) (died|passed)\b`,
+  String.raw`\b(got|been) (fired|laid off)\b`, String.raw`\bbroke up with\b`, String.raw`\brest in peace\b`,
+  'умер', 'скончал', 'похорон', 'соболезн', 'больниц', 'реанимац', 'диагноз', 'авари', 'уволили', 'депресс',
+  'vəfat', 'rəhmətə get', 'dəfn', 'başsağlığı', 'xəstəxana', 'xərçəng', 'qəza',
+  'vefat', 'cenaze', 'hastane', 'kanser', 'başın sağ', 'kaza geçir',
+].join('|'), 'iu');
+
+export function seriousHit(text: string): string | null {
+  const m = text.match(SERIOUS);
+  return m ? m[0] : null;
+}
+
+export interface Dynamics {
+  /** two people in a quick back-and-forth with each other */
+  privatePair: [string, string] | null;
+  /** someone sending a run of messages right now (a story before its punchline) */
+  storyteller: string | null;
+  /** a question to the group that nobody has answered yet */
+  hangingQuestion: { shortId: string; who: string } | null;
+  /** a message that looks like real bad news, and the word that flagged it */
+  serious: { shortId: string; word: string } | null;
+}
+
+/**
+ * The shape of the conversation right now, measured in code (who talks with whom, who is mid-story,
+ * what is left hanging). Models are poor at "when to speak" on their own (Speak or Stay Silent,
+ * arXiv 2603.11409; MUCA, arXiv 2401.04883), so these become facts in the prompt and nudges to the bar.
+ */
+export function dynamics(rows: MsgRow[], botName: string, now = Date.now()): Dynamics {
+  const bot = botName.toLowerCase();
+  const humans = rows.filter(r => !r.is_bot && r.type !== 'reaction');
+  const recentText = humans.filter(r => r.type === 'text' && now - r.ts < 3 * 60_000);
+  const mentionsBot = (r: MsgRow) => (r.text ?? '').toLowerCase().includes(bot) || (!!r.quoted_id && rows.some(x => x.id === r.quoted_id && x.is_bot));
+
+  // two people trading messages: last 6 texts from exactly two people, switching at least 3 times
+  let privatePair: Dynamics['privatePair'] = null;
+  const last6 = recentText.slice(-6);
+  const lastRow = rows.filter(r => r.type !== 'reaction').slice(-1)[0];
+  if (last6.length >= 5 && !last6.some(mentionsBot) && lastRow && !lastRow.is_bot) {
+    const people = [...new Set(last6.map(r => r.sender_jid))];
+    let switches = 0;
+    for (let i = 1; i < last6.length; i++) if (last6[i].sender_jid !== last6[i - 1].sender_jid) switches += 1;
+    if (people.length === 2 && switches >= 3) {
+      const name = (jid: string | null | undefined) => last6.find(r => r.sender_jid === jid)?.sender_name ?? '?';
+      privatePair = [name(people[0]), name(people[1])];
+    }
+  }
+
+  // one person on a run: 3+ texts in a row, each within 40 s of the last, the latest under 30 s ago
+  let storyteller: string | null = null;
+  const tail = humans.slice(-4);
+  const lastHuman = tail[tail.length - 1];
+  if (lastHuman && lastRow === lastHuman && now - lastHuman.ts < 30_000) {
+    let run = 1;
+    for (let i = tail.length - 2; i >= 0; i--) {
+      if (tail[i].sender_jid !== lastHuman.sender_jid || tail[i + 1].ts - tail[i].ts > 40_000) break;
+      run += 1;
+    }
+    if (run >= 3 && !mentionsBot(lastHuman)) storyteller = lastHuman.sender_name ?? '?';
+  }
+
+  // a question to the group: ends in "?", not a reply, not from the owner, nobody else spoke since
+  let hangingQuestion: Dynamics['hangingQuestion'] = null;
+  const recent = humans.filter(r => now - r.ts < 10 * 60_000);
+  for (let i = recent.length - 1; i >= Math.max(0, recent.length - 3); i--) {
+    const q = recent[i];
+    if (q.type !== 'text' || q.is_owner || q.quoted_id || mentionsBot(q)) continue;
+    if (!/\?\s*(\p{Extended_Pictographic}|\s)*$/u.test(q.text ?? '')) continue;
+    const answered = recent.slice(i + 1).some(r => r.sender_jid !== q.sender_jid) || rows.some(r => r.is_bot && r.ts > q.ts);
+    if (!answered && q.short_id) hangingQuestion = { shortId: q.short_id, who: q.sender_name ?? '?' };
+    break;
+  }
+
+  // real bad news in the last 10 minutes
+  let serious: Dynamics['serious'] = null;
+  for (const r of recent.slice(-8)) {
+    const word = r.type === 'text' ? seriousHit(r.text ?? '') : null;
+    if (word && r.short_id) serious = { shortId: r.short_id, word };
+  }
+
+  return { privatePair, storyteller, hangingQuestion, serious };
+}
+
+export type Reception = 'laughed' | 'answered' | 'ignored';
+
+/**
+ * How the bot's recent UNPROMPTED lines were received: laughed at, answered, or ignored (three or
+ * more human messages later, nobody laughed, replied or said its name). A run of ignored lines means
+ * it is misjudging this room right now, so the policy raises its bar (HUMA's reflection step, in code).
+ * A line counts as unprompted when the human message before it did not mention or reply to the bot.
+ */
+export function reception(rows: MsgRow[], botName: string, now = Date.now(), last = 4): Reception[] {
+  const bot = botName.toLowerCase();
+  const laughs = laughCounts(rows);
+  const chat = rows.filter(r => r.type !== 'reaction');
+  const out: Reception[] = [];
+  for (let i = 0; i < chat.length; i++) {
+    const b = chat[i];
+    if (!b.is_bot || b.type !== 'text' || !b.id) continue;
+    if (chat[i - 1]?.is_bot) continue; // the second text of a burst: judged with the first
+    const before = chat[i - 1];
+    const prompted = before && ((before.text ?? '').toLowerCase().includes(bot) || (!!before.quoted_id && chat.some(x => x.id === before.quoted_id && x.is_bot)));
+    if (prompted) continue;
+    const after = chat.slice(i + 1).filter(r => !r.is_bot && !r.is_owner);
+    if ((laughs.get(b.id) ?? 0) > 0) { out.push('laughed'); continue; }
+    const engaged = after.slice(0, 4).some(r => r.quoted_id === b.id || (r.text ?? '').toLowerCase().includes(bot))
+      || rows.some(r => r.type === 'reaction' && r.quoted_id === b.id && !r.is_bot);
+    if (engaged) { out.push('answered'); continue; }
+    if (after.length >= 3 || (after.length >= 1 && now - b.ts > 5 * 60_000)) out.push('ignored');
+  }
+  return out.slice(-last);
+}
+
+/** How many of the latest judged lines in a row were ignored. */
+export function ignoredStreak(rec: Reception[]): number {
+  let n = 0;
+  for (let i = rec.length - 1; i >= 0 && rec[i] === 'ignored'; i--) n += 1;
+  return n;
+}
+
+export function formatDynamics(d: Dynamics, rec: Reception[]): string | null {
+  const lines: string[] = [];
+  if (d.serious) lines.push(`- #${d.serious.shortId} may be real bad news ("${d.serious.word}"). Read it carefully: if it is sincere, no jokes and no laughing reactions.`);
+  if (d.privatePair) lines.push(`- ${d.privatePair[0]} and ${d.privatePair[1]} are in a back-and-forth with each other. Jumping in needs a really good reason.`);
+  if (d.storyteller) lines.push(`- ${d.storyteller} is sending several messages in a row: probably not finished yet.`);
+  if (d.hangingQuestion) lines.push(`- #${d.hangingQuestion.shortId} (${d.hangingQuestion.who}) asked the group something nobody has answered yet.`);
+  const streak = ignoredStreak(rec);
+  if (streak >= 2) lines.push(`- your last ${streak} unprompted lines got no reaction at all: you are misreading this room right now, hold back.`);
+  else if (rec.filter(r => r === 'laughed').length >= 2) lines.push('- your recent unprompted lines got laughs: the room is with you.');
+  return lines.length ? `ROOM CHECK (measured):\n${lines.join('\n')}` : null;
 }

@@ -143,6 +143,8 @@ export const BRAIN_V2 = {
   TARGET_MIN: 4,                  // ...this many aimed at one person = "give them a break"
   CRITIC_LINES: 15,               // transcript lines the second opinion reads
   DECISION_EXAMPLES: 8,           // owner's latest calls on v2 decisions shown to the v2 gatekeeper
+  REPLAY_HOURS: 3,                // dashboard replay: how far back it looks
+  REPLAY_POINTS: 6,               // ...and at how many moments it asks v2 (one cheap call each)
 } as const;
 
 // ---- Outbound humanization ----

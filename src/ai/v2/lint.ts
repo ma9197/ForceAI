@@ -60,6 +60,16 @@ export function autoFix(text: string, marker: { prefix: string; suffix: string }
   return t;
 }
 
+/** 'cyrillic' / 'latin' when one script clearly dominates the letters, else null (mixed or too short). */
+export function scriptOf(text: string, minLetters = 8): 'cyrillic' | 'latin' | null {
+  const letters = text.replace(EMOJI, '').match(/\p{L}/gu) ?? [];
+  if (letters.length < minLetters) return null;
+  const cyr = letters.filter(c => /[\u0400-\u04FF]/.test(c)).length / letters.length;
+  if (cyr >= 0.6) return 'cyrillic';
+  if (cyr <= 0.05) return 'latin';
+  return null;
+}
+
 export interface LintContext {
   recentBotTexts: string[];   // bot's recent messages, marker stripped
   recentHumanTexts: string[]; // humans' recent messages
@@ -69,6 +79,10 @@ export interface LintContext {
   lowercaseShare?: number;
   /** a genuinely serious moment: stickers, voice notes, polls and images are held back */
   serious?: boolean;
+  /** text of a message by short id (to check a reply is in the language of the message it answers) */
+  textOf?: (shortId: string) => string | null;
+  /** the last few human texts, newest last (the language the room is in right now) */
+  lastHumanTexts?: string[];
 }
 
 /**
@@ -81,6 +95,28 @@ export function phoneStyle(text: string): string {
   if (first) t = t.charAt(0).toLowerCase() + t.slice(1);
   if (/[^.]\.$/.test(t)) t = t.slice(0, -1);
   return t;
+}
+
+/**
+ * A reply in another script than the person it answers (they wrote Russian, it answers in English,
+ * or the other way round). For a plain message: only when the last three human texts all agree.
+ * Azerbaijani, Turkish and English are all Latin, so those mixes are left alone.
+ */
+function languageMismatch(a: BotAction, text: string, ctx: LintContext): string | null {
+  if (a.type !== 'message' && a.type !== 'reply') return null;
+  const mine = scriptOf(text, 12);
+  if (!mine) return null;
+  let theirs: 'cyrillic' | 'latin' | null = null;
+  if (a.type === 'reply' && a.target_message_id && ctx.textOf) {
+    theirs = scriptOf(ctx.textOf(a.target_message_id) ?? '');
+  } else {
+    const last = (ctx.lastHumanTexts ?? []).slice(-3).map(t => scriptOf(t));
+    if (last.length === 3 && last.every(x => x && x === last[0])) theirs = last[0];
+  }
+  if (!theirs || theirs === mine) return null;
+  return theirs === 'cyrillic'
+    ? 'they wrote in Russian (Cyrillic) but this answers in another language: answer in their language and mix'
+    : 'they wrote in Latin letters (English/Azerbaijani/Turkish) but this answers in Russian: answer in their language and mix';
 }
 
 export interface LintResult {
@@ -119,6 +155,8 @@ export function lintPlan(actions: BotAction[], ctx: LintContext): LintResult {
     }
     const emojis = (fixed.match(EMOJI) ?? []).length;
     if (emojis > 5) issues.push({ index, problem: `${emojis} emojis in one message` });
+    const lang = languageMismatch(a, fixed, ctx);
+    if (lang) issues.push({ index, problem: lang });
   }
 
   // more than two text messages in one go reads like a bot dumping a plan: keep the first two

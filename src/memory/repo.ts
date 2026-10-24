@@ -26,6 +26,17 @@ export class Repo {
     this.setConfig(`brain_v2_${chatJid}`, version === 'v2' ? '1' : '0');
   }
 
+  /** Brain v2 chattiness: this group's own setting if set, else the global one (Settings), else balanced. */
+  getV2Chattiness(chatJid: string): string {
+    const own = this.getConfig(`v2_chattiness_${chatJid}`);
+    return own && own !== 'default' ? own : this.getConfig('v2_chattiness') ?? 'balanced';
+  }
+
+  /** 'default' = follow the global setting. */
+  setV2Chattiness(chatJid: string, value: 'quiet' | 'balanced' | 'chatty' | 'default'): void {
+    this.setConfig(`v2_chattiness_${chatJid}`, value);
+  }
+
   // ---- owner feedback on the bot's lines (thumbs up / down in the feed) ----
   /** rating 1 / -1 saves, 0 clears. Only the bot's own text messages can be rated. */
   setFeedback(messageId: string, rating: 1 | -1 | 0): boolean {
@@ -213,6 +224,13 @@ export class Repo {
     return this.db.prepare(
       'SELECT * FROM messages WHERE chat_jid = ? ORDER BY ts DESC LIMIT ?'
     ).all(chatJid, limit).reverse();
+  }
+
+  /** The last `limit` messages up to and including `untilTs` (brain v2 replay: the chat as it was then). */
+  getRecentMessagesBefore(chatJid: string, untilTs: number, limit: number): any[] {
+    return this.db.prepare(
+      'SELECT * FROM messages WHERE chat_jid = ? AND ts <= ? ORDER BY ts DESC LIMIT ?'
+    ).all(chatJid, untilTs, limit).reverse();
   }
 
   getMessageById(id: string): any | undefined {

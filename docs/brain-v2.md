@@ -6,9 +6,10 @@ READ:
 - To compare before switching: **Compare v1 / v2** under the chat. It shows what each brain would send right now. Nothing is sent.
 - v2's goal: talk less but better, get irony, sound like a friend, jump in only when it has something good.
 - Teach it your taste: tap 👍 or 👎 on the bot's lines in the live feed. v2 reads your latest likes and dislikes.
-- Too chatty or too quiet: Settings, **Brain v2 chattiness** (quiet, balanced, chatty).
+- Too chatty or too quiet: Settings, **Brain v2 chattiness** (quiet, balanced, chatty). One group only: the Compare panel has its own chattiness box.
 - Judge its calls: on `T1v2` lines in the live feed, tap 👍 (good call) or 👎 (bad call). v2's thinking stage reads your latest calls.
 - Scoreboard: the Compare panel shows what v2 did in that group in the last 24 hours.
+- Best first test: **Replay last hours with v2** in the Compare panel. It shows what v2 would have done at 6 moments of the last 3 hours, next to what really happened. About 6 small AI calls. Nothing is sent.
 - Cost: a v2 group costs a bit more per message read (a longer thinking step). Pick Haiku 5.5 for the thinking stage to keep it cheap.
 
 ## What v2 does differently
@@ -31,6 +32,11 @@ READ:
 | Thought seeds the reply | When it jumps in because of its inner thought, the reply writer gets that thought, so the jump-in keeps its reason. | Inner Thoughts |
 | Second opinion | Before an unprompted line goes out, a second quick call plays a sharp friend and says send or skip. Skip means silence. Settings toggle, on by default. | Research brief: pairwise judge beats single scoring (arXiv 2603.12520) |
 | Your calls on its decisions (👍 / 👎 on `T1v2`) | You mark "spoke" or "stayed quiet" as a good or bad call. Your latest calls are shown to the thinking stage as examples. | Research brief #1: owner-labelled examples |
+| Room check in code | Measured facts about the chat right now: two people in a back-and-forth (bar +0.8), someone mid-story (+0.5), a question nobody answered (-0.5). Shown to the thinking stage and moved on the bar. | Speak or Stay Silent (2026), MUCA (2024): models are bad at "when" on their own |
+| Reads its own reception | If its last unprompted lines got no laugh, reply or reaction, it raises its own bar (+0.5 for 2 ignored, +1 for 3+). If they got laughs, the bar drops a little. | HUMA reflection step, in code |
+| What makes the group laugh | The friends' own lines that made 2+ people laugh lately ("hahaha" right after, 😂 reactions), as examples of the humor that works there. | Research brief #5: the group's real messages as examples |
+| Bad news safety net | Words like "passed away", "hospital", "funeral" (also in Russian, Azerbaijani, Turkish) make it careful even if the model misread the mood: higher bar, no 😂 reactions, no stickers or voice notes. Slang like "I'm dead" or "öldüm" does not count. | Humor hurts in serious moments (2024) |
+| Same language as the person | A reply in another alphabet than the message it answers (Russian vs Latin letters) is sent back for one quick fix. | Mixed-language studies (2026) |
 | Anti-cringe linter (code) | Fixes or flags AI tells before sending: assistant phrases, "not just X but Y", semicolons, hashtags, long dashes, essays, repeats, parroting, 3+ texts in a row. One cheap rewrite only when needed. In serious moments it holds back stickers, voice notes and polls. When the group types lowercase, so does it. | Antislop (ICLR 2026), Wikipedia's signs of AI writing, LLMafia |
 
 What stays the same in v2: the persona, the training examples, all memory (facts, voice profile, member reads, stickers), boundaries, owner commands, "Admin:" protection, sleep, rate limits, budget, dials.
@@ -42,10 +48,11 @@ What stays the same in v2: the persona, the training examples, all memory (facts
 3. Code (`src/ai/v2/policy.ts`) decides:
    - addressed: answer (or wait if they are still typing)
    - urge = 0.25 relevance + 0.2 novelty + 0.25 humor + 0.2 timing + 0.1 fit
-   - bar = 6.5 (Settings chattiness: quiet +1, chatty -1), +0.7 if the bot is 20%+ of recent messages, +1.5 if 35%+, +1 if it spoke under 45 s ago, +1 in a serious vibe, minus 0.04 per human message since it last spoke (at most 1)
+   - bar = 6.5 (chattiness: quiet +1, chatty -1, per group or Settings), +0.7 if the bot is 20%+ of recent messages, +1.5 if 35%+, +1 if it spoke under 45 s ago, +1 in a serious vibe (or bad news found in code), minus 0.04 per human message since it last spoke (at most 1)
+   - room check: two people talking +0.8, someone mid-story +0.5, an open question -0.5, its own lines ignored +0.5 to +1, its lines landing -0.3 (shown in the feed, like `pair talking +0.8`)
    - speak unprompted only if urge >= bar, humor or novelty >= 6, and talk share under 45%
    - the model said IGNORE but the thought is great (urge >= bar + 1, timing >= 6): speak anyway
-   - otherwise react with an emoji if one was suggested, or stay quiet
+   - otherwise react with an emoji if one was suggested (never a laughing one on bad news), or stay quiet
 4. Reply writing (generator v2) reads the room, picks an angle, writes, then the linter checks it.
 5. Unprompted only: the second opinion says send or skip (Settings, **Brain v2 second opinion**).
 
@@ -74,18 +81,20 @@ Note: the research agent could only open GitHub and Anthropic pages directly; mo
 
 - `src/ai/v2/brain.ts`: the v2 gatekeeper and generator, context assembly, lint and rewrite.
 - `src/ai/v2/policy.ts`: turn-taking in code (urge, bar, share cap).
-- `src/ai/v2/signals.ts`: measured style card, tics, talk share, laughs, callbacks.
+- `src/ai/v2/signals.ts`: measured style card, tics, talk share, laughs, callbacks, room check, reception, bad news words.
+- `src/ai/v2/replay.ts`: which moments the replay looks at.
 - `src/ai/v2/lint.ts`: anti-cringe checks and fixes.
 - `src/ai/v2/prompts.ts`, `src/ai/v2/schemas.ts`: v2 prompt text and JSON shapes.
 - Switch: `Repo.getBrainVersion` (config `brain_v2_<group>`), `POST /api/brain`, top-bar selector.
 - Preview: `App.previewBrains`, `POST /api/brain/preview`, `ui/src/components/BrainPreview.tsx`.
 - Scoreboard: `Repo.brainV2Stats`, `GET /api/brain/stats`.
+- Replay: `App.replayV2`, `POST /api/brain/replay`. Per-group chattiness: `Repo.getV2Chattiness`, `POST /api/brain/chattiness`.
 - Owner feedback: `POST /api/feedback` (👍 / 👎 on lines), `POST /api/decision-feedback` (👍 / 👎 on decisions).
 - Tests: `scripts/test-brain-v2.ts`, `scripts/test-arbiter-v2.ts`. v1 parity: `scripts/v1-request-dump.ts`.
 
 ## Testing plan for the owner
 
-1. Pick one active group. Click **Compare v1 / v2** a few times during a live chat. Read both columns.
+1. Pick one active group. Open **Compare v1 / v2**, click **Replay last hours with v2**. Read where it would speak and what it would say. Then **Run comparison** a few times during a live chat.
 2. If v2 looks better, switch that group to **Brain v2 (beta)**. Leave the others on v1.
 3. Watch the live feed: `T1v2` lines show why it spoke or stayed quiet (urge vs bar). Tap 👍 or 👎 on them and on its lines. If it talks too much or too little, change chattiness.
 4. After a day, compare: did the friends react more to v2's lines? Did anyone call it cringe?
