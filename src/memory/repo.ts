@@ -767,10 +767,57 @@ export class Repo {
   }
 
   // ---- decisions ----
-  insertDecision(chatJid: string | null, tier: string, decision: string, reason: string, tokensIn = 0, tokensOut = 0): void {
-    this.db.prepare(
+  insertDecision(chatJid: string | null, tier: string, decision: string, reason: string, tokensIn = 0, tokensOut = 0): number {
+    const res = this.db.prepare(
       'INSERT INTO decisions(ts, chat_jid, tier, decision, reason, tokens_in, tokens_out) VALUES(?, ?, ?, ?, ?, ?, ?)'
     ).run(Date.now(), chatJid, tier, decision, reason, tokensIn, tokensOut);
+    return Number(res.lastInsertRowid);
+  }
+
+  /** Brain v2 scoreboard for one group since `sinceTs`: how often it spoke, unprompted, reacted, kept quiet. */
+  brainV2Stats(chatJid: string, sinceTs: number): { spoke: number; unprompted: number; pauses: number; reacted: number; quiet: number; vetoed: number; rewrites: number } {
+    const rows = this.db.prepare("SELECT tier, decision, reason FROM decisions WHERE chat_jid = ? AND ts >= ? AND tier IN ('T1v2', 'T2v2')").all(chatJid, sinceTs) as { tier: string; decision: string; reason: string }[];
+    const s = { spoke: 0, unprompted: 0, pauses: 0, reacted: 0, quiet: 0, vetoed: 0, rewrites: 0 };
+    for (const r of rows) {
+      if (r.tier === 'T1v2') {
+        if (r.decision === 'RESPOND') {
+          s.spoke += 1;
+          if (!/\| addressed/.test(r.reason)) s.unprompted += 1;
+        } else if (r.decision === 'PAUSE') s.pauses += 1;
+        else if (r.decision === 'REACT') s.reacted += 1;
+        else if (r.decision === 'IGNORE') s.quiet += 1;
+      } else {
+        if (r.reason.includes('second opinion said skip')) s.vetoed += 1;
+        if (/rewrote \d/.test(r.reason)) s.rewrites += 1;
+      }
+    }
+    return s;
+  }
+
+  /** Owner's call on a brain v2 decision (spoke / stayed quiet): 'good', 'bad', or null to clear. */
+  setDecisionFeedback(decisionId: number, verdict: 'good' | 'bad' | null): boolean {
+    const d = this.db.prepare('SELECT id, chat_jid, tier, decision, reason FROM decisions WHERE id = ?').get(decisionId) as
+      { id: number; chat_jid: string; tier: string; decision: string; reason: string } | undefined;
+    if (!d || d.tier !== 'T1v2') return false;
+    if (verdict === null) {
+      this.db.prepare('DELETE FROM decision_feedback WHERE decision_id = ?').run(decisionId);
+    } else {
+      this.db.prepare(
+        'INSERT INTO decision_feedback(decision_id, chat_jid, decision, reason, verdict, ts) VALUES(?, ?, ?, ?, ?, ?) ON CONFLICT(decision_id) DO UPDATE SET verdict = excluded.verdict, ts = excluded.ts',
+      ).run(decisionId, d.chat_jid, d.decision, d.reason, verdict, Date.now());
+    }
+    return true;
+  }
+
+  getDecisionVerdicts(ids: number[]): Map<number, string> {
+    if (ids.length === 0) return new Map();
+    const rows = this.db.prepare(`SELECT decision_id, verdict FROM decision_feedback WHERE decision_id IN (${ids.map(() => '?').join(',')})`).all(...ids) as { decision_id: number; verdict: string }[];
+    return new Map(rows.map(r => [r.decision_id, r.verdict]));
+  }
+
+  /** The owner's latest calls on v2 decisions (all groups: when to talk is the owner's taste too). */
+  getDecisionFeedback(limit: number): { decision: string; reason: string; verdict: string }[] {
+    return this.db.prepare('SELECT decision, reason, verdict FROM decision_feedback ORDER BY ts DESC LIMIT ?').all(limit) as { decision: string; reason: string; verdict: string }[];
   }
 
   getRecentDecisions(limit: number, chatJid?: string | null): any[] {

@@ -12,7 +12,7 @@ import { isFakeAdminAttempt, isHardTrigger, isReactionLike, isWakeTrigger, parse
 import { RateLimiter } from './ratelimit.js';
 
 export interface ArbiterEvents {
-  onDecision(tier: string, decision: string, reason: string): void;
+  onDecision(tier: string, decision: string, reason: string, id: number): void;
   onAction(action: BotAction): void;
   onPhase(phase: ArbiterPhase): void;
 }
@@ -350,7 +350,7 @@ export class Arbiter {
   }
 
   /** T2 generation + send, with regeneration rules for mid-generation arrivals. */
-  private async runGeneration(addressIds: string[], reason: string, extra: { thought?: string | null; thoughtWhen?: 'now' | 'pause' } = {}): Promise<void> {
+  private async runGeneration(addressIds: string[], reason: string, extra: { thought?: string | null; thoughtWhen?: 'now' | 'pause'; unprompted?: boolean } = {}): Promise<void> {
     this.busy = true;
     this.clearTimer();
     this.clearLull();
@@ -378,7 +378,7 @@ export class Arbiter {
           transcriptLines: wokeThisCycle ? ARBITER.WAKE_TRANSCRIPT_LINES : undefined,
         };
         const plan = v2
-          ? (await this.brainV2!.generate({ ...genInput, thought: extra.thought ?? null, thoughtWhen: extra.thoughtWhen }))?.plan ?? null
+          ? (await this.brainV2!.generate({ ...genInput, thought: extra.thought ?? null, thoughtWhen: extra.thoughtWhen, unprompted: extra.unprompted }))?.plan ?? null
           : await this.generator.generate(genInput);
 
         if (!plan) {
@@ -464,7 +464,7 @@ export class Arbiter {
     this.consecutiveWaits = 0;
     if (policy.decision === 'RESPOND') {
       // the inner thought seeds the reply, so a jump-in keeps the reason it was made for
-      await this.runGeneration(out.address_message_ids, out.reason, { thought: out.thought?.text ?? null, thoughtWhen: 'now' });
+      await this.runGeneration(out.address_message_ids, out.reason, { thought: out.thought?.text ?? null, thoughtWhen: 'now', unprompted: !out.addressed });
       return;
     }
     if (policy.decision === 'REACT' && out.react) await this.sendReaction(out.react.target_message_id, out.react.emoji);
@@ -509,7 +509,7 @@ export class Arbiter {
     const thought = this.brainV2!.takeThought(this.chatJid);
     if (!thought) return;
     this.decision('T1v2', 'PAUSE', `chat paused, offering a saved thought: ${thought.text.slice(0, 90)}`);
-    await this.runGeneration([], 'the chat paused; a thought you had earlier', { thought: thought.text, thoughtWhen: 'pause' });
+    await this.runGeneration([], 'the chat paused; a thought you had earlier', { thought: thought.text, thoughtWhen: 'pause', unprompted: true });
   }
 
   /** After any cycle: deal with leftovers / queued operator instructions. */
@@ -541,7 +541,7 @@ export class Arbiter {
   }
 
   private decision(tier: string, decision: string, reason: string): void {
-    this.repo.insertDecision(this.chatJid, tier, decision, reason);
-    this.events.onDecision(tier, decision, reason);
+    const id = this.repo.insertDecision(this.chatJid, tier, decision, reason);
+    this.events.onDecision(tier, decision, reason, id);
   }
 }

@@ -108,7 +108,7 @@ export default function App() {
         break;
       case 'decision':
         setFeed(f => (e.chatJid === selectedJid
-          ? [...f.slice(-300), { kind: 'decision', ts: e.ts, tier: e.tier, decision: e.decision, reason: e.reason }]
+          ? [...f.slice(-300), { kind: 'decision', ts: e.ts, tier: e.tier, decision: e.decision, reason: e.reason, id: e.id }]
           : f));
         break;
       case 'stats':

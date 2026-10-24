@@ -67,6 +67,13 @@ export const PlanV2Schema = z.object({
 });
 export type PlanV2Out = z.infer<typeof PlanV2Schema>;
 
+/** Second opinion on an unprompted line: reasoning first, verdict last. */
+export const CriticSchema = z.object({
+  reason: z.string().describe('One short line: why a sharp, funny friend would or would not send this right now.'),
+  verdict: z.enum(['send', 'skip']),
+});
+export type CriticOut = z.infer<typeof CriticSchema>;
+
 /** One cheap rewrite pass when the linter finds AI tells in the plan. */
 export const RewriteSchema = z.object({
   fixes: z.array(z.object({

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api';
 
 type Preview =
@@ -9,9 +9,16 @@ type Preview =
   };
 
 /** "Compare v1 / v2": what each brain would say right now. Nothing is sent to the group. */
+interface Stats { spoke: number; unprompted: number; pauses: number; reacted: number; quiet: number; vetoed: number; rewrites: number }
+
 export function BrainPreview({ jid, onClose }: { jid: string; onClose: () => void }) {
   const [data, setData] = useState<Preview | null>(null);
   const [busy, setBusy] = useState(false);
+  const [stats, setStats] = useState<Stats | null>(null);
+
+  useEffect(() => {
+    api<Stats>(`/api/brain/stats?jid=${encodeURIComponent(jid)}`).then(s => setStats(s && 'spoke' in s ? s : null)).catch(() => setStats(null));
+  }, [jid]);
 
   const run = async () => {
     setBusy(true);
@@ -32,6 +39,12 @@ export function BrainPreview({ jid, onClose }: { jid: string; onClose: () => voi
         <span className="muted">What v1 and v2 would send right now to the latest messages. Nothing is sent. About 4 small AI calls.</span>
         <span className="gclose" onClick={onClose}>✕</span>
       </div>
+      {stats && (stats.spoke + stats.reacted + stats.quiet + stats.pauses) > 0 && (
+        <div className="hint">
+          v2 in this group, last 24 hours: spoke {stats.spoke} times ({stats.unprompted} unprompted, {stats.pauses} at a pause),
+          reacted {stats.reacted}, stayed quiet {stats.quiet}. Second opinion said skip {stats.vetoed}, rewrote {stats.rewrites}.
+        </div>
+      )}
       <button className="primary" disabled={busy} onClick={() => void run()}>{busy ? 'Thinking…' : data ? 'Run again' : 'Run comparison'}</button>
       {data && 'error' in data && <div className="hint" style={{ color: 'var(--danger)' }}>✗ {data.error}</div>}
       {data && !('error' in data) && (

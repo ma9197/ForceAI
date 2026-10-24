@@ -141,6 +141,8 @@ export const BRAIN_V2 = {
   TASTE_LINES: 5,                 // owner's latest liked / disliked lines shown as taste examples
   TARGET_WINDOW: 15,              // bot's last N messages checked for picking on one person
   TARGET_MIN: 4,                  // ...this many aimed at one person = "give them a break"
+  CRITIC_LINES: 15,               // transcript lines the second opinion reads
+  DECISION_EXAMPLES: 8,           // owner's latest calls on v2 decisions shown to the v2 gatekeeper
 } as const;
 
 // ---- Outbound humanization ----

@@ -133,11 +133,11 @@ export function toOggOpus(input: Buffer, mimeType: string): Promise<Buffer | nul
 
 /**
  * ElevenLabs text-to-speech → Ogg/Opus buffer (WhatsApp's native voice-note format).
- * Returns null on any failure — callers fall back to sending text.
+ * Returns null on any failure; callers fall back to sending text.
  */
 export async function elevenLabsTts(text: string, voiceId: string, apiKey: string): Promise<Buffer | null> {
   if (!apiKey) {
-    logger.warn('No ElevenLabs API key set — voice disabled');
+    logger.warn('No ElevenLabs API key set, voice disabled');
     return null;
   }
 

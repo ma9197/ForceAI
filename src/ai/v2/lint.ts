@@ -54,7 +54,7 @@ export function autoFix(text: string, marker: { prefix: string; suffix: string }
   if (marker.prefix.trim() && t.startsWith(marker.prefix.trim())) t = t.slice(marker.prefix.trim().length).trim();
   if (marker.suffix.trim() && t.endsWith(marker.suffix.trim())) t = t.slice(0, t.length - marker.suffix.trim().length).trim();
   // the em/en dash is the most recognised AI punctuation tell (and the owner bans it everywhere)
-  t = t.replace(/\s*[—–]\s*/g, ', ').replace(/,\s*,/g, ',').replace(/^,\s*/, '');
+  t = t.replace(/\s*[\u2014\u2013]\s*/g, ', ').replace(/,\s*,/g, ',').replace(/^,\s*/, '');
   // a whole message wrapped in quotes reads like a script line
   if (/^["“].+["”]$/s.test(t) && !t.slice(1, -1).includes('"')) t = t.slice(1, -1).trim();
   return t;

@@ -7,6 +7,8 @@ READ:
 - v2's goal: talk less but better, get irony, sound like a friend, jump in only when it has something good.
 - Teach it your taste: tap 👍 or 👎 on the bot's lines in the live feed. v2 reads your latest likes and dislikes.
 - Too chatty or too quiet: Settings, **Brain v2 chattiness** (quiet, balanced, chatty).
+- Judge its calls: on `T1v2` lines in the live feed, tap 👍 (good call) or 👎 (bad call). v2's thinking stage reads your latest calls.
+- Scoreboard: the Compare panel shows what v2 did in that group in the last 24 hours.
 - Cost: a v2 group costs a bit more per message read (a longer thinking step). Pick Haiku 5.5 for the thinking stage to keep it cheap.
 
 ## What v2 does differently
@@ -27,6 +29,8 @@ READ:
 | Your taste (👍 / 👎) | Your latest liked and disliked lines (all groups) are shown as examples of what to aim for and avoid. | Research brief #1: owner-labelled examples instead of training |
 | Easy on one person | If it aimed at the same friend in 4 of its last 15 lines, it is told to give them a break. | Research brief #7: roast budget |
 | Thought seeds the reply | When it jumps in because of its inner thought, the reply writer gets that thought, so the jump-in keeps its reason. | Inner Thoughts |
+| Second opinion | Before an unprompted line goes out, a second quick call plays a sharp friend and says send or skip. Skip means silence. Settings toggle, on by default. | Research brief: pairwise judge beats single scoring (arXiv 2603.12520) |
+| Your calls on its decisions (👍 / 👎 on `T1v2`) | You mark "spoke" or "stayed quiet" as a good or bad call. Your latest calls are shown to the thinking stage as examples. | Research brief #1: owner-labelled examples |
 | Anti-cringe linter (code) | Fixes or flags AI tells before sending: assistant phrases, "not just X but Y", semicolons, hashtags, long dashes, essays, repeats, parroting, 3+ texts in a row. One cheap rewrite only when needed. In serious moments it holds back stickers, voice notes and polls. When the group types lowercase, so does it. | Antislop (ICLR 2026), Wikipedia's signs of AI writing, LLMafia |
 
 What stays the same in v2: the persona, the training examples, all memory (facts, voice profile, member reads, stickers), boundaries, owner commands, "Admin:" protection, sleep, rate limits, budget, dials.
@@ -43,6 +47,7 @@ What stays the same in v2: the persona, the training examples, all memory (facts
    - the model said IGNORE but the thought is great (urge >= bar + 1, timing >= 6): speak anyway
    - otherwise react with an emoji if one was suggested, or stay quiet
 4. Reply writing (generator v2) reads the room, picks an angle, writes, then the linter checks it.
+5. Unprompted only: the second opinion says send or skip (Settings, **Brain v2 second opinion**).
 
 Every v2 decision shows in the live feed as `T1v2` (with urge and bar) and `T2v2` (with the angle and any fixes).
 
@@ -74,18 +79,18 @@ Note: the research agent could only open GitHub and Anthropic pages directly; mo
 - `src/ai/v2/prompts.ts`, `src/ai/v2/schemas.ts`: v2 prompt text and JSON shapes.
 - Switch: `Repo.getBrainVersion` (config `brain_v2_<group>`), `POST /api/brain`, top-bar selector.
 - Preview: `App.previewBrains`, `POST /api/brain/preview`, `ui/src/components/BrainPreview.tsx`.
+- Scoreboard: `Repo.brainV2Stats`, `GET /api/brain/stats`.
+- Owner feedback: `POST /api/feedback` (👍 / 👎 on lines), `POST /api/decision-feedback` (👍 / 👎 on decisions).
 - Tests: `scripts/test-brain-v2.ts`, `scripts/test-arbiter-v2.ts`. v1 parity: `scripts/v1-request-dump.ts`.
 
 ## Testing plan for the owner
 
 1. Pick one active group. Click **Compare v1 / v2** a few times during a live chat. Read both columns.
 2. If v2 looks better, switch that group to **Brain v2 (beta)**. Leave the others on v1.
-3. Watch the live feed: `T1v2` lines show why it spoke or stayed quiet (urge vs bar). If it talks too much or too little, tell Claude which way.
+3. Watch the live feed: `T1v2` lines show why it spoke or stayed quiet (urge vs bar). Tap 👍 or 👎 on them and on its lines. If it talks too much or too little, change chattiness.
 4. After a day, compare: did the friends react more to v2's lines? Did anyone call it cringe?
 
 ## Ideas not built yet
 
-- Pairwise "which would a real member send" judge for unprompted lines (costs one more call).
 - A real bits table (jokes that got 2+ laughs, retired when they stop landing). Partly covered by "what landed".
 - Reply timing based on reading time plus thinking time (shared with v1, so left alone).
-- Thumbs up / down on the v2 decisions themselves (spoke vs stayed quiet), retrieved as examples for the thinking stage.

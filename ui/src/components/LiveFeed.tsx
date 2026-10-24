@@ -3,14 +3,14 @@ import { post } from '../api';
 
 export type FeedItem =
   | { kind: 'message'; id: string; shortId: string; senderName: string; isBot: boolean; isOwner: boolean; type: string; text: string; quotedText?: string; reactionEmoji?: string; ts: number; rating?: number }
-  | { kind: 'decision'; ts: number; tier: string; decision: string; reason: string };
+  | { kind: 'decision'; ts: number; tier: string; decision: string; reason: string; id?: number; verdict?: string };
 
 function time(ts: number): string {
   return new Date(ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 }
 
 /** Distinct, readable member-name colors (WhatsApp-style). Assigned per person by first appearance
- *  so two members never collide — unlike a hash, which could map both to the same hue. */
+ *  so two members never collide, unlike a hash, which could map both to the same hue. */
 const NAME_PALETTE = [
   '#53bdeb', '#e542a3', '#5ad469', '#ffab00', '#a78bfa', '#ff7e6b',
   '#00d5c0', '#f6c445', '#7aa2ff', '#ff8fb1', '#9ad36b', '#f0883e',
@@ -56,6 +56,22 @@ function RateButtons({ id, initial }: { id: string; initial?: number }) {
   );
 }
 
+/** Owner's call on a brain v2 decision: 👍 = right call, 👎 = wrong call (spoke when it should not, or the reverse). */
+function DecisionRate({ id, initial }: { id: number; initial?: string }) {
+  const [verdict, setVerdict] = useState<string | null>(initial ?? null);
+  const rate = (v: 'good' | 'bad') => {
+    const next = verdict === v ? null : v;
+    setVerdict(next);
+    void post('/api/decision-feedback', { id, verdict: next }).catch(() => setVerdict(verdict));
+  };
+  return (
+    <span className="rate" title="Was this the right call? Brain v2 learns when to talk from these.">
+      <span className={`rate-btn ${verdict === 'good' ? 'on' : ''}`} onClick={() => rate('good')}>👍</span>
+      <span className={`rate-btn ${verdict === 'bad' ? 'on' : ''}`} onClick={() => rate('bad')}>👎</span>
+    </span>
+  );
+}
+
 export function LiveFeed({ items, selectedShortId, onSelect }: {
   items: FeedItem[];
   selectedShortId?: string | null;
@@ -88,7 +104,10 @@ export function LiveFeed({ items, selectedShortId, onSelect }: {
           lastSenderKey = null; // a system row breaks the run
           return (
             <div key={`d${i}`} className="decision-row" title={new Date(item.ts).toLocaleString()}>
-              <b>{item.tier} {item.decision}</b> — {item.reason}
+              <b>{item.tier} {item.decision}</b>: {item.reason}
+              {item.tier === 'T1v2' && item.id != null && ['RESPOND', 'IGNORE', 'REACT', 'PAUSE'].includes(item.decision) && (
+                <DecisionRate id={item.id} initial={item.verdict} />
+              )}
             </div>
           );
         }
@@ -128,7 +147,7 @@ export function LiveFeed({ items, selectedShortId, onSelect }: {
           </div>
         );
       })}
-      {items.length === 0 && <p className="muted" style={{ textAlign: 'center', marginTop: 40 }}>No activity yet — messages and bot decisions will appear here live.</p>}
+      {items.length === 0 && <p className="muted" style={{ textAlign: 'center', marginTop: 40 }}>No activity yet. Messages and bot decisions will appear here live.</p>}
     </div>
   );
 }
