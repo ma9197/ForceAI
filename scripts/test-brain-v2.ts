@@ -12,7 +12,7 @@ import { actualAfter, pickReplayCuts } from '../src/ai/v2/replay.js';
 import { TasteLearner, readTasteRules } from '../src/ai/v2/taste.js';
 import {
   botTargets, botTics, callbackKeywords, dynamics, formatDecisionFeedback, formatDynamics, formatGroupLaughs, formatTargets, formatTaste, formatTics,
-  formatBits, formatReactionHabit, formatRoomMap, formatTakes, groupLaughs, parseDecisionLine, roomMap, ignoredStreak, laughCounts, landedLines, ownTakes, participation, reception, runningBits, seriousHit,
+  formatBits, formatIronyCues, formatReactionHabit, formatRoomMap, formatTakes, groupLaughs, ironyCues, parseDecisionLine, roomMap, ignoredStreak, laughCounts, landedLines, ownTakes, participation, reception, runningBits, seriousHit,
   styleStats, type MsgRow,
 } from '../src/ai/v2/signals.js';
 import type { GateV2Out } from '../src/ai/v2/schemas.js';
@@ -397,6 +397,36 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
   assert.equal(reacts.msgs, 1, 'reactions are not messages');
   const twins = roomMap([r('Murad', 'hi?', 10, { sender_jid: 'm1@s' }), r('Murad', 'yo', 11, { sender_jid: 'm2@s' })], [], 'ForceAI', at).people;
   assert.equal(twins.length, 2, 'two people with the same name stay two people');
+}
+
+// ---- round 10: irony cues in the group's languages ----
+{
+  const T = 1_800_000_000_000;
+  let k = 0;
+  const r = (who: string, text: string, at: number, extra: Partial<MsgRow> = {}): MsgRow =>
+    ({ id: `i${++k}`, short_id: `m${k}`, sender_jid: who, sender_name: who, text, type: 'text', is_bot: 0, is_owner: 0, ts: T + at * 1000, ...extra });
+  const now = T + 120_000;
+  const cueOf = (text: string) => ironyCues([r('Kanan', text, 60)], now)[0]?.cue ?? null;
+  assert.equal(cueOf('yeah right, he totally scored'), '"yeah right"');
+  assert.equal(cueOf('ну да, конечно он лучший'), '"ну да"');
+  assert.equal(cueOf('ага конечно'), '"ага конечно"');
+  assert.equal(cueOf('tabii canım, kesin kazanırlar'), '"tabii canım"');
+  assert.equal(cueOf('hə də, çox ağıllısan'), '"hə də"');
+  assert.equal(cueOf('thanks a lot man'), '"thanks a lot"');
+  assert.equal(cueOf('he is so smart 🙄'), 'an eye-roll, smirk or clown emoji');
+  assert.equal(cueOf('genius move 💀'), 'praise next to a laugh or clown emoji');
+  assert.equal(cueOf('what a goal, genius pass'), null, 'sincere praise alone is not a cue');
+  assert.equal(cueOf('ну дай мне'), null, '"ну да" must be its own words');
+  assert.equal(cueOf('see you at nine'), null);
+  // a switch of alphabet by someone who usually writes the other way
+  const usual = ['bro that was crazy', 'i am on my way', 'who is playing tonight', 'nah he is washed'].map((t, i) => r('Murad', t, 10 + i));
+  const sw = ironyCues([...usual, r('Murad', 'ну конечно он лучший игрок', 60)], now);
+  assert.equal(sw[0]?.cue, 'a switch to Russian (often a joke or a quote)');
+  assert.equal(ironyCues([...usual, r('Murad', 'he is the best player ever', 60)], now).length, 0, 'no switch, no cue');
+  assert.equal(ironyCues([r('Said', 'yeah right', 60, { is_owner: 1 })], now).length, 0, "the owner's lines are never cues");
+  assert.equal(ironyCues([r('Kanan', 'yeah right', 0)], T + 20 * 60_000).length, 0, 'only the last minutes');
+  assert.ok(formatIronyCues(sw)!.includes('POSSIBLE IRONY') && formatIronyCues(sw)!.includes('#m'));
+  assert.equal(formatIronyCues([]), null);
 }
 
 // ---- brain on a throwaway DB with a fake client ----

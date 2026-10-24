@@ -15,7 +15,7 @@ import { CriticSchema, GateV2Schema, PlanV2Schema, RewriteSchema, type GateV2Out
 import {
   botTargets, botTics, callbackKeywords, dynamics, formatDecisionFeedback, formatCallbacks, formatDynamics, formatGroupLaughs, formatLanded,
   formatParticipation, formatStyleStats, formatTargets, formatTaste, formatTics, groupLaughs, landedLines, participation, reception,
-  formatBits, formatReactionHabit, formatRoomMap, formatTakes, ownTakes, roomMap, runningBits, stripMarker, styleStats, type Bit, type Dynamics, type MsgRow, type StyleStats,
+  formatBits, formatIronyCues, formatReactionHabit, formatRoomMap, formatTakes, ironyCues, ownTakes, roomMap, runningBits, stripMarker, styleStats, type Bit, type Dynamics, type MsgRow, type StyleStats,
 } from './signals.js';
 
 export interface GateV2Result {
@@ -146,6 +146,7 @@ export class BrainV2 {
       formatParticipation(part),
       formatDynamics(dyn, rec) ?? '',
       formatRoomMap(roomMap(rows, this.memberNames(chatJid), BOT_NAME, now)) ?? '',
+      formatIronyCues(ironyCues(history, now)) ?? '',
       formatReactionHabit(history) ?? '',
       part.secondsSinceBot !== null && part.secondsSinceBot < 60 ? `(You last spoke ${part.secondsSinceBot}s ago.)` : '',
       lastScene ? `Your previous read of the scene: ${lastScene.topic} / ${lastScene.vibe}${lastScene.running_bit ? ` / bit: ${lastScene.running_bit}` : ''}` : '',
@@ -230,6 +231,7 @@ export class BrainV2 {
       tics ? formatTics(tics) : '',
       formatDynamics(dyn, []) ?? '',
       formatRoomMap(roomMap(rows, names, BOT_NAME)) ?? '',
+      formatIronyCues(ironyCues(history)) ?? '',
       formatLanded(landedLines(history, strip).filter(l => notDisliked(l.text))) ?? '',
       formatGroupLaughs(groupLaughs(history)) ?? '',
       formatTasteRules(readTasteRules(this.repo, chatJid)) ?? '',

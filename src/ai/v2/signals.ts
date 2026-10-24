@@ -791,3 +791,68 @@ export function formatRoomMap(map: { people: PersonNow[]; chains: { ids: string[
   const chains = map.chains.map(c => `- ${c.ids.map(i => `#${i}`).join(' > ')} (${c.people.join(', ')})`);
   return [`WHO IS DOING WHAT (recent messages, measured):`, ...lines, ...(chains.length ? ['REPLY CHAINS RUNNING:', ...chains] : [])].join('\n');
 }
+
+/**
+ * Phrases that often carry irony in this group's languages. A hit is a hint to check literal vs meant,
+ * never a verdict (many of these are sincere in context). LLMs prompted without help do worse than small
+ * tuned models on mixed-language sarcasm (arXiv 2602.21933), so code points at the likely spots.
+ */
+const IRONY_MARKERS = new RegExp([
+  // English
+  String.raw`\byeah right\b`, String.raw`\bsure (buddy|jan|pal)\b`, String.raw`\boh (great|wonderful|perfect)\b`, String.raw`\bwow,? thanks\b`,
+  String.raw`\bthanks a lot\b`, String.raw`\breal smooth\b`, String.raw`\bnice one,? genius\b`, String.raw`\bwhat a surprise\b`, String.raw`\bshocker\b`,
+  String.raw`\bbig brain\b`, String.raw`\bsaid no one ever\b`, String.raw`\bcool story\b`, String.raw`(^|\s)/s\b`,
+  // Russian
+  String.raw`(?<!\p{L})ну да(?!\p{L})`, String.raw`(?<!\p{L})ага,? конечно`, String.raw`(?<!\p{L})конечно-конечно`, String.raw`(?<!\p{L})ну-ну(?!\p{L})`,
+  String.raw`(?<!\p{L})спасибо,? кэп`, String.raw`(?<!\p{L})очень смешно`, String.raw`(?<!\p{L})гениально(?!\p{L})`,
+  // Turkish
+  String.raw`(?<!\p{L})tabi+ canım`, String.raw`(?<!\p{L})ne güzel(?!\p{L})`, String.raw`(?<!\p{L})çok komik`, String.raw`(?<!\p{L})aferin sana`, String.raw`(?<!\p{L})aynen(?!\p{L})`,
+  // Azerbaijani
+  String.raw`(?<!\p{L})hə də(?!\p{L})`, String.raw`(?<!\p{L})hə,? əlbəttə`, String.raw`(?<!\p{L})afərin sənə`, String.raw`(?<!\p{L})çox sağ ol(?!\p{L})`,
+].join('|'), 'iu');
+/** Praise next to a laugh or clown emoji ("genius 💀", "great job 🤡") usually means the opposite. */
+const MOCK_PRAISE = /\b(genius|brilliant|great job|well done|amazing|legend|smart|gg)\b|(?<!\p{L})(гений|молодец|красавчик|dahi|helal|afərin|əla)(?!\p{L})/iu;
+const MOCK_EMOJI = /💀|😂|🤡|🙄|🙃|😏/u;
+
+export interface IronyCue { shortId: string; who: string; cue: string }
+
+/**
+ * Likely irony in the recent human messages, measured: a known marker phrase, an eye-roll / upside-down
+ * / smirk / clown emoji, praise next to a laugh, or a sudden switch of alphabet by someone who usually
+ * writes in the other one (switching language often marks a joke or a quote; switching features help
+ * humor and sarcasm detection, ACL 2020).
+ */
+export function ironyCues(rows: MsgRow[], now = Date.now(), max = 3): IronyCue[] {
+  const human = rows.filter(r => !r.is_bot && !r.is_owner && r.type === 'text' && r.text);
+  const recent = human.filter(r => now - r.ts <= 10 * 60_000).slice(-8);
+  const out: IronyCue[] = [];
+  for (const r of recent) {
+    const t = r.text ?? '';
+    let cue: string | null = null;
+    const m = t.match(IRONY_MARKERS);
+    if (m) cue = `"${m[0].trim()}"`;
+    else if (/🙄|🙃|😏|🤡/u.test(t)) cue = 'an eye-roll, smirk or clown emoji';
+    else if (MOCK_PRAISE.test(t) && MOCK_EMOJI.test(t)) cue = 'praise next to a laugh or clown emoji';
+    else {
+      // a switch of alphabet: they usually write the other way (at least 4 of their last 6 texts)
+      const mine = human.filter(x => x.sender_jid === r.sender_jid && x.ts < r.ts).slice(-6).map(x => scriptOfText(x.text ?? '')).filter(Boolean);
+      const now_ = scriptOfText(t);
+      if (now_ && mine.length >= 4 && mine.filter(s => s !== now_).length >= 4) cue = `a switch to ${now_ === 'cyrillic' ? 'Russian' : 'Latin letters'} (often a joke or a quote)`;
+    }
+    if (cue && r.short_id) out.push({ shortId: r.short_id, who: r.sender_name ?? '?', cue });
+  }
+  return out.slice(-max);
+}
+
+/** Same rule as the linter's scriptOf, kept local so signals stay independent of lint. */
+function scriptOfText(text: string): 'cyrillic' | 'latin' | null {
+  const letters = text.replace(EMOJI, '').match(/\p{L}/gu) ?? [];
+  if (letters.length < 6) return null;
+  const cyr = letters.filter(c => /[Ѐ-ӿ]/.test(c)).length / letters.length;
+  return cyr >= 0.6 ? 'cyrillic' : cyr <= 0.05 ? 'latin' : null;
+}
+
+export function formatIronyCues(cues: IronyCue[]): string | null {
+  if (cues.length === 0) return null;
+  return `POSSIBLE IRONY (measured cues; check literal words vs what they mean before you answer, it can still be sincere):\n${cues.map(c => `- #${c.shortId} ${c.who}: ${c.cue}`).join('\n')}`;
+}

@@ -3,7 +3,7 @@ import { autoFix, lintPlan, phoneStyle, scriptOf, splitInTwo } from '../src/ai/v
 import { decide, roomShift } from '../src/ai/v2/policy.js';
 import {
   botTargets, botTics, callbackKeywords, dynamics, formatBits, formatDynamics, formatTics, groupLaughs, laughCounts, landedLines,
-  formatRoomMap, ownTakes, parseDecisionLine, participation, reception, roomMap, runningBits, seriousHit, styleStats, type MsgRow,
+  formatIronyCues, formatRoomMap, ironyCues, ownTakes, parseDecisionLine, participation, reception, roomMap, runningBits, seriousHit, styleStats, type MsgRow,
 } from '../src/ai/v2/signals.js';
 
 // Brain v2 fuzz: random multilingual, emoji-heavy, very long and malformed messages through every pure
@@ -68,6 +68,7 @@ for (let round = 0; round < ROUNDS; round++) {
   timed('formatDynamics', () => formatDynamics(dyn, rec));
   timed('runningBits', () => formatBits(runningBits(rows, 'ForceAI'), now));
   timed('roomMap', () => formatRoomMap(roomMap(rows, ['Kanan Aliyev', 'Murad', 'x'], 'ForceAI', now)));
+  timed('ironyCues', () => formatIronyCues(ironyCues(rows, now)));
   timed('ownTakes', () => ownTakes(rows, strip, now));
   timed('callbackKeywords', () => callbackKeywords(rows));
   timed('botTargets', () => botTargets(rows.filter(r => r.is_bot), ['Kanan', 'Murad', '(weird) name.*'], () => pick(['Kanan', null])));
