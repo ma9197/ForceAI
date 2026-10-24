@@ -1,9 +1,10 @@
-import { ARBITER } from '../config.js';
+import { ARBITER, BRAIN_V2 } from '../config.js';
 import { logger } from '../logger.js';
 import type { Repo } from '../memory/repo.js';
 import type { AiClient } from '../ai/client.js';
 import type { Gatekeeper } from '../ai/gatekeeper.js';
 import type { Generator } from '../ai/generator.js';
+import type { BrainV2 } from '../ai/v2/brain.js';
 import type { Outbound } from '../wa/outbound.js';
 import type { JidResolver } from '../wa/jid.js';
 import type { ArbiterPhase, BotAction, NormalizedMessage } from '../types.js';
@@ -43,6 +44,9 @@ export class Arbiter {
   private rate: RateLimiter;
   private plannedActions = 0;
   private sentActions = 0;
+  // brain v2 only (never set for v1 groups)
+  private lullTimer: NodeJS.Timeout | null = null;
+  private lastReactTs = 0;
 
   constructor(
     private chatJid: string,
@@ -53,6 +57,7 @@ export class Arbiter {
     private outbound: Outbound,
     private jids: JidResolver,
     private events: ArbiterEvents,
+    private brainV2: BrainV2 | null = null,
   ) {
     // restore EXACT prior state across restarts/updates
     this.paused = repo.getConfig(`paused_${chatJid}`) === '1';
@@ -61,6 +66,11 @@ export class Arbiter {
       perMin: Number(repo.getConfig('rate_per_min') ?? ARBITER.RATE_PER_MIN),
       perHour: Number(repo.getConfig('rate_per_hour') ?? ARBITER.RATE_PER_HOUR),
     }));
+  }
+
+  /** This group answers with brain v2 (opt-in per group in the dashboard; v1 is the default). */
+  private isV2(): boolean {
+    return !!this.brainV2 && this.repo.getBrainVersion(this.chatJid) === 'v2';
   }
 
   /** Clear the rolling rate-limit window (Settings "reset" button). */
@@ -82,6 +92,7 @@ export class Arbiter {
   sleep(): void {
     if (this.superIdle) return;
     this.clearTimer();
+    this.clearLull();
     this.buffer = [];
     this.hardTriggerIds.clear();
     this.decision('T0', 'SUPER_IDLE', 'manually put to sleep — waiting for ForceAI mention');
@@ -123,13 +134,14 @@ export class Arbiter {
   setPaused(paused: boolean): void {
     this.paused = paused;
     this.repo.setConfig(`paused_${this.chatJid}`, paused ? '1' : '0');
-    if (paused) this.clearTimer();
+    if (paused) { this.clearTimer(); this.clearLull(); }
   }
 
   /** Suspend all activity (full shutdown) without changing persisted paused/asleep state. */
   suspend(): void {
     this.suspended = true;
     this.clearTimer();
+    this.clearLull();
   }
 
   resume(): void {
@@ -138,6 +150,7 @@ export class Arbiter {
 
   /** Entry point for every normalized message in the active group. */
   onMessage(m: NormalizedMessage): void {
+    this.clearLull(); // brain v2: any new message means the chat is not paused anymore
     if (this.suspended) return; // bot is shut down
     if (m.isBot) return; // own sends — never input
     if (this.paused) return;
@@ -302,6 +315,10 @@ export class Arbiter {
       // T1 gatekeeper
       this.setPhase('EVALUATING');
       const forceDecide = this.consecutiveWaits >= ARBITER.MAX_WAITS;
+      if (this.isV2()) {
+        await this.evaluateV2(forceDecide);
+        return;
+      }
       const sinceBot = this.lastBotActionTs ? (Date.now() - this.lastBotActionTs) / 1000 : null;
       const gate = await this.gatekeeper.decide(this.chatJid, this.consumedUpToTs, sinceBot, forceDecide);
       this.decision('T1', gate.decision, gate.reason);
@@ -333,10 +350,12 @@ export class Arbiter {
   }
 
   /** T2 generation + send, with regeneration rules for mid-generation arrivals. */
-  private async runGeneration(addressIds: string[], reason: string): Promise<void> {
+  private async runGeneration(addressIds: string[], reason: string, extra: { thought?: string | null; thoughtWhen?: 'now' | 'pause' } = {}): Promise<void> {
     this.busy = true;
     this.clearTimer();
+    this.clearLull();
     this.setPhase('GENERATING');
+    const v2 = this.isV2();
 
     // consume the operator instruction up front so a failed generation can't loop on it
     const instruction = this.pendingInfluence;
@@ -350,14 +369,17 @@ export class Arbiter {
         const epochAtStart = this.generationEpoch;
         const snapshotTs = this.buffer.length ? this.buffer[this.buffer.length - 1].ts : Date.now();
 
-        const plan = await this.generator.generate({
+        const genInput = {
           chatJid: this.chatJid,
           consumedUpToTs: this.consumedUpToTs,
           addressIds,
           gatekeeperReason: reason,
           operatorInstruction: instruction,
           transcriptLines: wokeThisCycle ? ARBITER.WAKE_TRANSCRIPT_LINES : undefined,
-        });
+        };
+        const plan = v2
+          ? (await this.brainV2!.generate({ ...genInput, thought: extra.thought ?? null, thoughtWhen: extra.thoughtWhen }))?.plan ?? null
+          : await this.generator.generate(genInput);
 
         if (!plan) {
           this.decision('T2', 'SILENT', 'generation failed or unparseable');
@@ -381,7 +403,7 @@ export class Arbiter {
         // the owner can tell it to sleep in natural language → model emits a 'sleep' action
         const wantsSleep = plan.actions.some(a => a.type === 'sleep');
         const realActions = plan.actions.filter(a => a.type !== 'nothing' && a.type !== 'sleep');
-        this.decision('T2', realActions.length ? 'SEND' : wantsSleep ? 'SLEEP' : 'NOTHING', plan.note);
+        this.decision(v2 ? 'T2v2' : 'T2', realActions.length ? 'SEND' : wantsSleep ? 'SLEEP' : 'NOTHING', plan.note);
 
         if (realActions.length === 0 && !wantsSleep) {
           this.consumeBuffer(snapshotTs);
@@ -414,6 +436,80 @@ export class Arbiter {
       this.busy = false;
       this.postCycle();
     }
+  }
+
+  // ---- brain v2: inner-thought gatekeeper, reactions, saved thoughts at a pause ----
+
+  /** v2 T1: the gatekeeper forms and scores a thought; code (policy.ts) turns it into a decision. */
+  private async evaluateV2(forceDecide: boolean): Promise<void> {
+    const res = await this.brainV2!.gate(this.chatJid, this.consumedUpToTs, forceDecide);
+    if (!res) {
+      this.decision('T1v2', 'IGNORE', 'gatekeeper failed or unparseable');
+      this.consumeBuffer();
+      this.setPhase('IDLE');
+      return;
+    }
+    const { out, policy } = res;
+    const thought = out.thought ? ` | thought: ${out.thought.text.slice(0, 90)}` : '';
+    this.decision('T1v2', policy.decision, `${out.reason} | ${policy.why} | urge ${policy.motivation} vs bar ${policy.threshold}${thought}`);
+
+    if (policy.decision === 'WAIT') {
+      this.consecutiveWaits += 1;
+      const ms = Math.min(Math.max(out.wait_ms ?? 5000, ARBITER.WAIT_MIN), ARBITER.WAIT_MAX);
+      this.busy = false; // release lock before re-arming
+      this.setPhase('ACCUMULATING');
+      this.armTimer(ms);
+      return;
+    }
+    this.consecutiveWaits = 0;
+    if (policy.decision === 'RESPOND') {
+      // the inner thought seeds the reply, so a jump-in keeps the reason it was made for
+      await this.runGeneration(out.address_message_ids, out.reason, { thought: out.thought?.text ?? null, thoughtWhen: 'now' });
+      return;
+    }
+    if (policy.decision === 'REACT' && out.react) await this.sendReaction(out.react.target_message_id, out.react.emoji);
+    this.consumeBuffer();
+    this.setPhase('IDLE');
+    this.armLull();
+  }
+
+  /** A single emoji reaction chosen by the gatekeeper: presence without words, no T2 call. */
+  private async sendReaction(target: string, emoji: string): Promise<void> {
+    if (Date.now() - this.lastReactTs < BRAIN_V2.REACT_MIN_GAP_MS) return;
+    this.lastReactTs = Date.now();
+    await this.outbound.executePlan(this.chatJid, [{ type: 'reaction', emoji, target_message_id: target }], (info) => {
+      this.events.onAction(info.action);
+    });
+  }
+
+  /** After a v2 IGNORE/REACT with a good-but-badly-timed thought saved: offer it when the chat pauses. */
+  private armLull(): void {
+    if (!this.isV2() || !this.brainV2!.hasThought(this.chatJid)) return;
+    this.clearLull();
+    this.lullTimer = setTimeout(() => void this.onLull(), BRAIN_V2.LULL_MS);
+  }
+
+  private clearLull(): void {
+    if (this.lullTimer) {
+      clearTimeout(this.lullTimer);
+      this.lullTimer = null;
+    }
+  }
+
+  private async onLull(): Promise<void> {
+    this.lullTimer = null;
+    if (!this.isV2() || this.suspended || this.paused || this.superIdle || this.busy || this.buffer.length > 0) return;
+    const now = Date.now();
+    const recent = this.repo.getMessagesBetween(this.chatJid, now - BRAIN_V2.LULL_ACTIVE_WINDOW_MS, now) as any[];
+    const last = recent[recent.length - 1];
+    if (!last || last.is_bot || now - last.ts < BRAIN_V2.LULL_MS - 2000) return; // bot spoke last, or not quiet yet
+    const humans = recent.filter(r => !r.is_bot && !r.is_owner && r.type !== 'reaction').length;
+    if (humans < BRAIN_V2.LULL_MIN_HUMAN_MSGS) return; // the chat was not really alive
+    if (this.ai.isOverBudget() || !this.rate.canAct()) return;
+    const thought = this.brainV2!.takeThought(this.chatJid);
+    if (!thought) return;
+    this.decision('T1v2', 'PAUSE', `chat paused, offering a saved thought: ${thought.text.slice(0, 90)}`);
+    await this.runGeneration([], 'the chat paused; a thought you had earlier', { thought: thought.text, thoughtWhen: 'pause' });
   }
 
   /** After any cycle: deal with leftovers / queued operator instructions. */

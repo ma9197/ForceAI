@@ -80,6 +80,33 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     return { ok: true };
   });
 
+  // brain version per group: v1 (default) or v2 (opt-in). Demo: harmless, it only flips a config key.
+  fastify.post<{ Body: { jid?: string; version?: string } }>('/api/brain', async (req, reply) => {
+    const { jid, version } = req.body ?? {};
+    if (!jid || (version !== 'v1' && version !== 'v2')) return reply.code(400).send({ error: 'jid and version (v1|v2) required' });
+    app.setBrainVersion(jid, version);
+    return { ok: true };
+  });
+
+  // "Compare v1 / v2": both brains answer the latest messages, nothing is sent or saved (4 AI calls)
+  fastify.post<{ Body: { jid?: string } }>('/api/brain/preview', async (req, reply) => {
+    if (DEMO_MODE) return { error: 'Not available in the demo: it needs a real chat and an API key.' };
+    if (app.needsSetup) return reply.code(409).send({ error: 'Add your Anthropic API key first.' });
+    if (app.ai.isOverBudget()) return reply.code(409).send({ error: "Today's AI budget is used up." });
+    const jid = req.body?.jid;
+    if (!jid) return reply.code(400).send({ error: 'jid required' });
+    return app.previewBrains(jid);
+  });
+
+  // owner's thumbs up / down on one of the bot's lines (brain v2 learns the owner's taste from these)
+  fastify.post<{ Body: { id?: string; rating?: number } }>('/api/feedback', async (req, reply) => {
+    const { id, rating } = req.body ?? {};
+    if (!id || (rating !== 1 && rating !== -1 && rating !== 0)) return reply.code(400).send({ error: 'id and rating (1, -1 or 0) required' });
+    if (!app.repo.setFeedback(id, rating)) return reply.code(404).send({ error: 'not a bot text message' });
+    app.prompts.memoryVersion += 1;
+    return { ok: true };
+  });
+
   fastify.post<{ Body: { jid: string } }>('/api/resume', async (req, reply) => {
     const { jid } = req.body ?? {};
     if (!jid) return reply.code(400).send({ error: 'jid required' });
@@ -399,10 +426,12 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     const messages = app.repo.getRecentMessages(jid, limit);
     const decisions = app.repo.getRecentDecisions(limit, jid);
     const mentions = app.repo.getMentionNameMap();
+    const ratings = app.repo.getFeedbackRatings(messages.filter(r => r.is_bot).map(r => r.id));
     return {
       messages: messages.map(r => ({
         id: r.id, shortId: r.short_id, senderName: r.sender_name, isBot: !!r.is_bot,
         isOwner: !!r.is_owner, type: r.type, text: applyMentions(r.text ?? '', mentions), ts: r.ts,
+        ...(ratings.has(r.id) ? { rating: ratings.get(r.id) } : {}),
       })),
       decisions,
     };
@@ -475,7 +504,7 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
   fastify.post<{ Body: {
     gatekeeper_model?: string; generation_model?: string; effort?: string; daily_budget_usd?: number;
     msg_prefix?: string; msg_suffix?: string; voice_enabled?: boolean; voice_id?: string;
-    voice_provider?: string; gemini_voice?: string; voice_style?: string;
+    voice_provider?: string; gemini_voice?: string; voice_style?: string; v2_chattiness?: string;
     persona_mode?: string; persona_custom?: string;
     sticker_freq?: string; voice_freq?: string; emoji_freq?: string;
     intro_message?: string; intro_enabled?: boolean; rate_per_min?: number; rate_per_hour?: number;
@@ -521,6 +550,7 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
         app.prompts.memoryVersion += 1; // voice language rule lives in Block B
       }
       if (b.gemini_voice && b.gemini_voice in GEMINI_TTS.VOICES) app.repo.setConfig('gemini_voice', b.gemini_voice);
+      if (b.v2_chattiness && ['quiet', 'balanced', 'chatty'].includes(b.v2_chattiness)) app.repo.setConfig('v2_chattiness', b.v2_chattiness);
       if (b.voice_style !== undefined) app.repo.setConfig('voice_style', b.voice_style.trim().slice(0, 300));
       if (b.persona_mode !== undefined) {
         app.repo.setConfig('persona_mode', b.persona_mode);

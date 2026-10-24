@@ -17,6 +17,41 @@ export class Repo {
     ).run(key, value);
   }
 
+  // ---- brain version per group: v1 (default, the proven brain) or v2 (the upgraded brain, opt-in) ----
+  getBrainVersion(chatJid: string): 'v1' | 'v2' {
+    return this.getConfig(`brain_v2_${chatJid}`) === '1' ? 'v2' : 'v1';
+  }
+
+  setBrainVersion(chatJid: string, version: 'v1' | 'v2'): void {
+    this.setConfig(`brain_v2_${chatJid}`, version === 'v2' ? '1' : '0');
+  }
+
+  // ---- owner feedback on the bot's lines (thumbs up / down in the feed) ----
+  /** rating 1 / -1 saves, 0 clears. Only the bot's own text messages can be rated. */
+  setFeedback(messageId: string, rating: 1 | -1 | 0): boolean {
+    const msg = this.getMessageById(messageId) as { chat_jid: string; text: string | null; is_bot: number; type: string } | undefined;
+    if (!msg || !msg.is_bot || msg.type !== 'text') return false;
+    if (rating === 0) {
+      this.db.prepare('DELETE FROM bot_feedback WHERE message_id = ?').run(messageId);
+    } else {
+      this.db.prepare(
+        'INSERT INTO bot_feedback(message_id, chat_jid, text, rating, ts) VALUES(?, ?, ?, ?, ?) ON CONFLICT(message_id) DO UPDATE SET rating = excluded.rating, ts = excluded.ts',
+      ).run(messageId, msg.chat_jid, msg.text ?? '', rating, Date.now());
+    }
+    return true;
+  }
+
+  getFeedbackRatings(ids: string[]): Map<string, number> {
+    if (ids.length === 0) return new Map();
+    const rows = this.db.prepare(`SELECT message_id, rating FROM bot_feedback WHERE message_id IN (${ids.map(() => '?').join(',')})`).all(...ids) as { message_id: string; rating: number }[];
+    return new Map(rows.map(r => [r.message_id, r.rating]));
+  }
+
+  /** The owner's latest rated lines across all groups (their taste is the same everywhere). */
+  getFeedbackLines(rating: 1 | -1, limit: number): string[] {
+    return (this.db.prepare('SELECT text FROM bot_feedback WHERE rating = ? ORDER BY ts DESC LIMIT ?').all(rating, limit) as { text: string }[]).map(r => r.text);
+  }
+
   // ---- API keys (entered in the dashboard, stored in config; env is the fallback) ----
   // DB value wins over env so the UI can override a stale env var. NEVER log these values.
   private static readonly KEY_ENV: Record<string, string> = {
@@ -193,6 +228,27 @@ export class Repo {
       'SELECT COUNT(*) AS c FROM messages WHERE chat_jid = ? AND ts > ? AND is_bot = 0'
     ).get(chatJid, ts) as { c: number };
     return row.c;
+  }
+
+  /**
+   * Brain v2 callbacks: older text messages in this chat (before `beforeTs`) that mention any of the
+   * keywords, best matches first. LIKE is case-insensitive for ASCII only, which is fine for slang.
+   */
+  searchOlderMessages(chatJid: string, beforeTs: number, keywords: string[], limit: number): any[] {
+    if (keywords.length === 0) return [];
+    const where = keywords.map(() => 'text LIKE ?').join(' OR ');
+    const rows = this.db.prepare(
+      `SELECT id, short_id, sender_name, sender_jid, text, type, is_bot, is_owner, ts FROM messages
+       WHERE chat_jid = ? AND ts < ? AND type = 'text' AND is_owner = 0 AND (${where})
+       ORDER BY ts DESC LIMIT 300`,
+    ).all(chatJid, beforeTs, ...keywords.map(k => `%${k}%`)) as any[];
+    const scored = rows.map(r => {
+      const t = String(r.text ?? '').toLowerCase();
+      return { r, hits: keywords.filter(k => t.includes(k.toLowerCase())).length };
+    });
+    const best = scored.filter(s => s.hits >= 2);
+    const pick = (best.length >= limit ? best : scored).sort((a, b) => b.hits - a.hits || b.r.ts - a.r.ts);
+    return pick.slice(0, limit).map(s => s.r).sort((a, b) => a.ts - b.ts);
   }
 
   getMessagesBetween(chatJid: string, fromTs: number, toTs: number): any[] {

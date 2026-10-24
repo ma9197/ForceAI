@@ -6,6 +6,7 @@ export interface GroupStatus {
   paused: boolean;
   asleep: boolean;
   phase: string;
+  brain?: 'v1' | 'v2';
   stats: {
     messages_read: number;
     messages_sent: number;
@@ -18,6 +19,7 @@ export interface GroupStatus {
 
 export interface Status {
   connection: string;
+  connection_note?: string | null;
   online: boolean;
   needsSetup: boolean;
   demo: boolean;

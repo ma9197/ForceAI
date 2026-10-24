@@ -32,6 +32,12 @@ The owner will tell the friends that ForceAI restarted from scratch. It keeps le
 
 **Update 2026-10-24 (later):** the owner's button run failed (most likely the AI name pass ran inside the HTTP request and timed out). Fixed: the fresh start now runs as a background job with progress in Settings, the AI pass runs 4 chunks in parallel, and a failing chunk falls back to a code swap of known names. The owner then asked Claude to do it for them: `AUTO_FRESH_START` in `src/memory/freshStart.ts` runs it once on boot, before WhatsApp connects, where a backup was downloaded since 2026-10-24 and no fresh start finished after it. It expires on 2026-10-31; remove it after that.
 
+## Brain v2 (built 2026-10-24 night, owner's /goal)
+
+- Owner asked for a smarter, more human, less cringe brain that also jumps in unprompted, as "version 2", testable per group while every group stays on v1.
+- Built and deployed: see `docs/brain-v2.md` (research, design, testing plan). v1 parity proven with `scripts/v1-request-dump.ts`.
+- Next: the owner tests v2 in one group (Compare v1 / v2 first), rates lines with 👍 / 👎, then reports. Tune `POLICY` in `src/ai/v2/policy.ts` and the prompts in `src/ai/v2/prompts.ts` from real feedback.
+
 ## Task 2: refactor backlog (found by a full read on 2026-10-23, not yet confirmed by running)
 
 Fix first:

@@ -22,6 +22,7 @@ interface Settings {
   voice_available: boolean;
   voice_id: string;
   voice_provider: 'gemini' | 'elevenlabs';
+  v2_chattiness: string;
   gemini_voice: string;
   voice_style: string;
   gemini_voices: { value: string; label: string }[];
@@ -234,6 +235,18 @@ export function SettingsPanel({ onSaved }: { onSaved: () => void }) {
           onChange={e => update({ generation_model: e.target.value })}
         >
           {settings.model_options.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+        </select>
+      </div>
+
+      <div className="settings-row">
+        <div>
+          <label>Brain v2 chattiness</label>
+          <div className="hint">Only for groups switched to brain v2. How easily it jumps in when nobody asked. Answers when someone talks to it are not affected.</div>
+        </div>
+        <select value={settings.v2_chattiness} onChange={e => update({ v2_chattiness: e.target.value })}>
+          <option value="quiet">Quiet</option>
+          <option value="balanced">Balanced</option>
+          <option value="chatty">Chatty</option>
         </select>
       </div>
 

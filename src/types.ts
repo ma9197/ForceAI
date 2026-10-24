@@ -201,6 +201,8 @@ export interface GroupStatus {
   paused: boolean;
   asleep: boolean;
   phase: ArbiterPhase;
+  /** which brain answers in this group: v1 (default) or v2 (opt-in beta) */
+  brain: 'v1' | 'v2';
   stats: {
     messages_read: number;
     messages_sent: number;
@@ -213,6 +215,8 @@ export interface GroupStatus {
 
 export interface StatusPayload {
   connection: string;
+  /** why WhatsApp last dropped the connection, if it dropped in the last 10 minutes */
+  connection_note: string | null;
   online: boolean;
   needsSetup: boolean;
   demo: boolean;
@@ -237,6 +241,7 @@ export interface StatusPayload {
     voice_available: boolean;
     voice_id: string;
     voice_provider: 'gemini' | 'elevenlabs';
+    v2_chattiness: string;
     gemini_voice: string;
     voice_style: string;
     persona_mode: string;

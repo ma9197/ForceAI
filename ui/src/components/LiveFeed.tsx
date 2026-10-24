@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import { post } from '../api';
 
 export type FeedItem =
-  | { kind: 'message'; id: string; shortId: string; senderName: string; isBot: boolean; isOwner: boolean; type: string; text: string; quotedText?: string; reactionEmoji?: string; ts: number }
+  | { kind: 'message'; id: string; shortId: string; senderName: string; isBot: boolean; isOwner: boolean; type: string; text: string; quotedText?: string; reactionEmoji?: string; ts: number; rating?: number }
   | { kind: 'decision'; ts: number; tier: string; decision: string; reason: string };
 
 function time(ts: number): string {
@@ -35,6 +36,23 @@ function MediaImage({ id, kind, caption }: { id: string; kind: 'image' | 'sticke
       />
       {kind === 'image' && caption ? <div className="msg-caption">{caption}</div> : null}
     </>
+  );
+}
+
+/** Owner's thumbs up / down on one of the bot's lines: brain v2 learns the owner's taste from these. */
+function RateButtons({ id, initial }: { id: string; initial?: number }) {
+  const [rating, setRating] = useState(initial ?? 0);
+  const rate = (ev: React.MouseEvent, r: 1 | -1) => {
+    ev.stopPropagation(); // the message click selects a reply target
+    const next = rating === r ? 0 : r;
+    setRating(next);
+    void post('/api/feedback', { id, rating: next }).catch(() => setRating(rating));
+  };
+  return (
+    <span className="rate" title="Rate this line. Brain v2 learns your taste from these.">
+      <span className={`rate-btn ${rating === 1 ? 'on' : ''}`} onClick={e => rate(e, 1)}>👍</span>
+      <span className={`rate-btn ${rating === -1 ? 'on' : ''}`} onClick={e => rate(e, -1)}>👎</span>
+    </span>
   );
 }
 
@@ -106,6 +124,7 @@ export function LiveFeed({ items, selectedShortId, onSelect }: {
                 : `[${m.type}] ${m.text}`}
             </div>
             <span className="msg-time">{time(m.ts)}</span>
+            {m.isBot && m.type === 'text' && <RateButtons id={m.id} initial={m.rating} />}
           </div>
         );
       })}
