@@ -10,7 +10,7 @@ import { Arbiter } from '../src/arbiter/arbiter.js';
 // The arbiter routes each group to the right brain: v1 groups never touch brain v2, v2 groups use the
 // v2 gatekeeper + generator, a v2 REACT sends one reaction, and a saved thought is offered at a pause.
 // All fakes, short timers, a throwaway DB.
-Object.assign(ARBITER as any, { DEBOUNCE_BASE: 150, DEBOUNCE_PER_MSG: 0, DEBOUNCE_MAX: 300, SAME_SENDER_EXTRA: 0 });
+Object.assign(ARBITER as any, { DEBOUNCE_BASE: 150, DEBOUNCE_PER_MSG: 0, DEBOUNCE_MAX: 300, SAME_SENDER_EXTRA: 0, HARD_TRIGGER_DEBOUNCE: 150 });
 Object.assign(BRAIN_V2 as any, { LULL_MS: 1200, LULL_MIN_HUMAN_MSGS: 3 });
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forceai-arb-'));
@@ -28,11 +28,14 @@ function msg(chatJid: string, who: string, text: string) {
 
 const log: string[] = [];
 const v2Gate: any = { decision: 'IGNORE', react: null };
+let gateDelay = 0;
+let genDelay = 0;
 function harness(chatJid: string) {
   const sent: any[] = [];
   const fakeBrain: any = {
     gate: async () => {
       log.push(`v2gate:${chatJid}`);
+      if (gateDelay) await sleep(gateDelay);
       const out = { scene: { topic: 't', threads: '', vibe: 'banter', running_bit: null, bit_played_out: false }, addressed: false,
         thought: { text: 'saved line', why: '' }, scores: { relevance: 8, novelty: 8, humor: 8, timing: 3, fit: 8 },
         reason: 'r', address_message_ids: ['m1'], wait_ms: null, ...v2Gate };
@@ -41,6 +44,8 @@ function harness(chatJid: string) {
     generate: async (input: any) => {
       log.push(`v2gen:${chatJid}:${input.thought ?? ''}`);
       log.push(`unprompted:${!!input.unprompted}:${input.thoughtWhen ?? ''}`);
+      log.push(`ids:${(input.addressIds ?? []).join(',')}`);
+      if (genDelay) await sleep(genDelay);
       return { plan: { actions: [{ type: 'message', text: 'v2 says hi' }], note: 'v2' } };
     },
     hasThought: () => true,
@@ -119,6 +124,64 @@ await sleep(1500);
 two.arb.onMessage(msg(V2, 'a', 'back to normal'));
 await sleep(700);
 assert.ok(log.includes(`v1gate:${V2}`) && !log.includes(`v2gate:${V2}`));
+
+// 7. someone names the bot while the v2 gate is still thinking: answered as a direct question, not lost
+log.length = 0;
+const V3 = 'v3@g.us';
+repo.setBrainVersion(V3, 'v2');
+const three = harness(V3);
+v2Gate.decision = 'IGNORE';
+gateDelay = 400;
+three.arb.onMessage(msg(V3, 'a', 'random chat'));
+await sleep(300);
+const asked = msg(V3, 'b', 'forceai who wins tonight?');
+three.arb.onMessage(asked);
+await sleep(1200);
+gateDelay = 0;
+assert.ok(log.includes('T1v2:IGNORE') && log.includes('T0:HARD_TRIGGER'), log.join(' '));
+assert.ok(log.includes('unprompted:false:') && log.includes(`ids:${asked.shortId}`), 'answered as a direct question');
+
+// 8. named mid-way through an unprompted jump-in: the regenerated reply is an answer (no second opinion veto)
+log.length = 0;
+v2Gate.decision = 'RESPOND';
+genDelay = 400;
+three.arb.onMessage(msg(V3, 'a', 'kanan thinks madrid wins'));
+await sleep(350);
+const mid = msg(V3, 'c', 'forceai you agree?');
+three.arb.onMessage(mid);
+await sleep(1500);
+genDelay = 0;
+assert.ok(log.includes('T2:REGEN'), log.join(' '));
+const gens = log.filter(l => l.startsWith('unprompted:'));
+assert.deepEqual(gens.slice(0, 2), ['unprompted:true:now', 'unprompted:false:'], log.join(' '));
+assert.ok(log.some(l => l.startsWith('ids:') && l.includes(mid.shortId)));
+
+// 9. a reaction plus a saved thought: its own reaction does not block the pause line
+log.length = 0;
+const V4 = 'v4@g.us';
+repo.setBrainVersion(V4, 'v2');
+const four = harness(V4);
+v2Gate.decision = 'REACT';
+v2Gate.react = { target_message_id: 'm1', emoji: '😂' };
+for (const t of ['he missed', 'AGAIN', 'unreal']) four.arb.onMessage(msg(V4, 'a', t));
+await sleep(600);
+assert.ok(log.includes('T1v2:REACT'));
+n += 1;
+repo.insertMessage({ id: `id${n}`, shortId: `m${n}`, chatJid: V4, senderJid: 'me', senderName: 'ForceAI', fromMe: true, isBot: true, isOwner: false,
+  type: 'reaction', text: '😂', quotedId: 'id1', mentionedJids: [], ts: Date.now(), raw: {} } as any);
+await sleep(1500);
+assert.ok(log.includes('T1v2:PAUSE'), log.join(' '));
+
+// 10. bad news in the chat: the saved joke is never offered at the pause
+log.length = 0;
+const V5 = 'v5@g.us';
+repo.setBrainVersion(V5, 'v2');
+const five = harness(V5);
+v2Gate.decision = 'IGNORE';
+v2Gate.react = null;
+for (const t of ['guys', 'my grandma is in the hospital', 'they say she will be ok']) five.arb.onMessage(msg(V5, 'a', t));
+await sleep(2000);
+assert.ok(log.includes('T1v2:IGNORE') && !log.includes('T1v2:PAUSE'), log.join(' '));
 
 fs.rmSync(dir, { recursive: true, force: true });
 console.log('arbiter routing: all checks passed');

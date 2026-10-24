@@ -5,6 +5,7 @@ import type { AiClient } from '../ai/client.js';
 import type { Gatekeeper } from '../ai/gatekeeper.js';
 import type { Generator } from '../ai/generator.js';
 import type { BrainV2 } from '../ai/v2/brain.js';
+import { seriousHit } from '../ai/v2/signals.js';
 import type { Outbound } from '../wa/outbound.js';
 import type { JidResolver } from '../wa/jid.js';
 import type { ArbiterPhase, BotAction, NormalizedMessage } from '../types.js';
@@ -365,6 +366,8 @@ export class Arbiter {
 
     try {
       let attempt = 0;
+      let ids = addressIds;
+      let ex = extra;
       while (true) {
         const epochAtStart = this.generationEpoch;
         const snapshotTs = this.buffer.length ? this.buffer[this.buffer.length - 1].ts : Date.now();
@@ -372,13 +375,13 @@ export class Arbiter {
         const genInput = {
           chatJid: this.chatJid,
           consumedUpToTs: this.consumedUpToTs,
-          addressIds,
+          addressIds: ids,
           gatekeeperReason: reason,
           operatorInstruction: instruction,
           transcriptLines: wokeThisCycle ? ARBITER.WAKE_TRANSCRIPT_LINES : undefined,
         };
         const plan = v2
-          ? (await this.brainV2!.generate({ ...genInput, thought: extra.thought ?? null, thoughtWhen: extra.thoughtWhen, unprompted: extra.unprompted }))?.plan ?? null
+          ? (await this.brainV2!.generate({ ...genInput, thought: ex.thought ?? null, thoughtWhen: ex.thoughtWhen, unprompted: ex.unprompted }))?.plan ?? null
           : await this.generator.generate(genInput);
 
         if (!plan) {
@@ -396,6 +399,12 @@ export class Arbiter {
           if (significant) {
             attempt += 1;
             this.decision('T2', 'REGEN', `${newMsgs.length} significant new messages mid-generation`);
+            // v2: someone talked to it while it was jumping in, so this is now an answer, not a jump-in
+            const hard = newMsgs.filter(b => this.hardTriggerIds.has(b.shortId)).map(b => b.shortId);
+            if (v2 && hard.length) {
+              ids = [...new Set([...ids, ...hard])];
+              ex = {};
+            }
             continue;
           }
         }
@@ -442,10 +451,12 @@ export class Arbiter {
 
   /** v2 T1: the gatekeeper forms and scores a thought; code (policy.ts) turns it into a decision. */
   private async evaluateV2(forceDecide: boolean): Promise<void> {
+    // messages that arrive while the gate (or a reaction) is in flight stay buffered for the next cycle
+    const seenUpTo = this.buffer.length ? this.buffer[this.buffer.length - 1].ts : undefined;
     const res = await this.brainV2!.gate(this.chatJid, this.consumedUpToTs, forceDecide);
     if (!res) {
       this.decision('T1v2', 'IGNORE', 'gatekeeper failed or unparseable');
-      this.consumeBuffer();
+      this.consumeBuffer(seenUpTo);
       this.setPhase('IDLE');
       return;
     }
@@ -463,13 +474,18 @@ export class Arbiter {
       return;
     }
     this.consecutiveWaits = 0;
+    const hard = [...this.hardTriggerIds]; // someone talked to it while the gate was thinking
+    if (policy.decision === 'RESPOND' && hard.length) {
+      await this.runGeneration([...new Set([...out.address_message_ids, ...hard])], `${out.reason} (and a direct trigger on ${hard.join(', ')})`);
+      return;
+    }
     if (policy.decision === 'RESPOND') {
       // the inner thought seeds the reply, so a jump-in keeps the reason it was made for
       await this.runGeneration(out.address_message_ids, out.reason, { thought: out.thought?.text ?? null, thoughtWhen: 'now', unprompted: !out.addressed });
       return;
     }
     if (policy.decision === 'REACT' && out.react) await this.sendReaction(out.react.target_message_id, out.react.emoji);
-    this.consumeBuffer();
+    this.consumeBuffer(seenUpTo);
     this.setPhase('IDLE');
     this.armLull();
   }
@@ -500,16 +516,26 @@ export class Arbiter {
   private async onLull(): Promise<void> {
     this.lullTimer = null;
     if (!this.isV2() || this.suspended || this.paused || this.superIdle || this.busy || this.buffer.length > 0) return;
-    const now = Date.now();
-    const recent = this.repo.getMessagesBetween(this.chatJid, now - BRAIN_V2.LULL_ACTIVE_WINDOW_MS, now) as any[];
-    const last = recent[recent.length - 1];
-    if (!last || last.is_bot || now - last.ts < BRAIN_V2.LULL_MS - 2000) return; // bot spoke last, or not quiet yet
-    const humans = recent.filter(r => !r.is_bot && !r.is_owner && r.type !== 'reaction').length;
-    if (humans < BRAIN_V2.LULL_MIN_HUMAN_MSGS) return; // the chat was not really alive
-    if (this.ai.isOverBudget() || !this.rate.canAct()) return;
-    const thought = this.brainV2!.takeThought(this.chatJid);
-    if (!thought) return;
-    this.decision('T1v2', 'PAUSE', `chat paused, offering a saved thought: ${thought.text.slice(0, 90)}`);
+    let thought: { text: string } | null = null;
+    try {
+      const now = Date.now();
+      const recent = (this.repo.getMessagesBetween(this.chatJid, now - BRAIN_V2.LULL_ACTIVE_WINDOW_MS, now) as any[]).filter(r => r.type !== 'reaction');
+      const last = recent[recent.length - 1]; // its own reaction does not count as "the bot spoke last"
+      if (!last || last.is_bot || now - last.ts < BRAIN_V2.LULL_MS - 2000) return; // bot spoke last, or not quiet yet
+      const humans = recent.filter(r => !r.is_bot && !r.is_owner).length;
+      if (humans < BRAIN_V2.LULL_MIN_HUMAN_MSGS) return; // the chat was not really alive
+      if (this.ai.isOverBudget() || !this.rate.canAct()) return;
+      if (recent.some(r => !r.is_bot && r.type === 'text' && seriousHit(r.text ?? ''))) {
+        this.brainV2!.takeThought(this.chatJid); // bad news in the chat: the saved joke is dropped
+        return;
+      }
+      thought = this.brainV2!.takeThought(this.chatJid);
+      if (!thought) return;
+      this.decision('T1v2', 'PAUSE', `chat paused, offering a saved thought: ${thought.text.slice(0, 90)}`);
+    } catch (err) {
+      logger.error({ err }, 'brain v2 pause check failed');
+      return;
+    }
     await this.runGeneration([], 'the chat paused; a thought you had earlier', { thought: thought.text, thoughtWhen: 'pause', unprompted: true });
   }
 

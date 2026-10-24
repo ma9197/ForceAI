@@ -6,12 +6,12 @@ import { openDb } from '../src/memory/db.js';
 import { Repo } from '../src/memory/repo.js';
 import { PromptBuilder } from '../src/ai/prompts.js';
 import { BrainV2 } from '../src/ai/v2/brain.js';
-import { lintPlan, phoneStyle, autoFix, scriptOf, splitInTwo } from '../src/ai/v2/lint.js';
+import { lintPlan, phoneStyle, autoFix, overlap, scriptOf, splitInTwo } from '../src/ai/v2/lint.js';
 import { CHATTINESS_SHIFT, decide, roomShift, threshold } from '../src/ai/v2/policy.js';
 import { actualAfter, pickReplayCuts } from '../src/ai/v2/replay.js';
 import {
   botTargets, botTics, callbackKeywords, dynamics, formatDecisionFeedback, formatDynamics, formatGroupLaughs, formatTargets, formatTaste, formatTics,
-  formatBits, formatTakes, groupLaughs, ignoredStreak, laughCounts, landedLines, ownTakes, participation, reception, runningBits, seriousHit,
+  formatBits, formatReactionHabit, formatTakes, groupLaughs, ignoredStreak, laughCounts, landedLines, ownTakes, participation, reception, runningBits, seriousHit,
   styleStats, type MsgRow,
 } from '../src/ai/v2/signals.js';
 import type { GateV2Out } from '../src/ai/v2/schemas.js';
@@ -81,7 +81,7 @@ const lint = lintPlan([
   { type: 'reaction', emoji: '😂', target_message_id: 'm2' },
   { type: 'message', text: 'third text' },
   { type: 'message', text: 'fourth text' },
-], { recentBotTexts: ['bro is cooked 💀'], recentHumanTexts: chat.map(r => r.text ?? ''), medianLen: 14, marker, lowercaseShare: 0.9 });
+], { recentBotTexts: ['bro is cooked 💀'], recentHumanTexts: chat.map(r => r.text ?? ''), medianLen: 14, marker, lowercaseShare: 0.9, unprompted: true });
 assert.deepEqual(lint.actions.map(a => a.type), ['message', 'reaction', 'message']);
 assert.equal((lint.actions[0] as any).text, 'great question! Madrid; obviously', 'phone style applied');
 assert.ok(lint.issues.some(i => i.index === 0 && i.problem.includes('great question')));
@@ -287,6 +287,54 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
   assert.equal(lintPlan([{ type: 'message', text: 'nah he was offside by a mile. the ref needs glasses honestly' }, { type: 'message', text: 'lol' }], bctx).actions.length, 2, 'already two texts: no split');
 }
 
+// ---- round 4: near-repeats, reaction habit ----
+{
+  const words = (t: string) => new Set(t.split(' '));
+  assert.equal(overlap(words('kanan predicted three nil again lol'), words('kanan predicted three nil')), 4 / 6);
+  assert.equal(overlap(words('short one'), words('short one')), 0, 'too short to judge');
+  const near = lintPlan([{ type: 'message', text: 'kanan predicted madrid wins three nil again' }],
+    { recentBotTexts: ['kanan predicted madrid wins three nil'], recentHumanTexts: [], medianLen: 20, marker, unprompted: true });
+  assert.equal(near.actions.length, 0);
+  assert.ok(near.dropped[0].startsWith('too close to something you already said'));
+  // answering someone: a repeat is never dropped (that would leave them unanswered), it is rewritten
+  const asked = lintPlan([{ type: 'reply', text: 'still 2-1 madrid, bellingham scored twice', target_message_id: 'm7' }],
+    { recentBotTexts: ['2-1 madrid, bellingham scored twice'], recentHumanTexts: [], medianLen: 20, marker });
+  assert.equal(asked.actions.length, 1);
+  assert.ok(asked.issues[0].problem.includes('say it in new words'));
+  assert.equal(lintPlan([{ type: 'message', text: 'kanan is late again, classic kanan behaviour' }],
+    { recentBotTexts: ['kanan predicted madrid wins three nil'], recentHumanTexts: [], medianLen: 20, marker }).actions.length, 1, 'same name, different line: fine');
+
+  const re = (e: string, k: number): MsgRow => ({ id: `re${k}`, type: 'reaction', text: e, is_bot: 1, ts: k });
+  assert.ok(formatReactionHabit([re('😂', 1), re('😂', 2), re('💀', 3), re('😂', 4)])!.includes('not 😂 again'));
+  assert.equal(formatReactionHabit([re('😂', 1), re('🔥', 2), re('💀', 3)]), null, 'varied already');
+  assert.equal(formatReactionHabit([re('😂', 1), re('😂', 2)]), null, 'too few');
+}
+
+// ---- review fixes: regexes, reactions, wording ----
+{
+  const T = 1_800_000_000_000;
+  const line: MsgRow = { id: 'L1', short_id: 'm1', sender_jid: 'bot', is_bot: 1, type: 'text', text: 'ref is on the payroll', ts: T };
+  const heart: MsgRow = { id: 'L2', sender_jid: 'a', is_bot: 0, type: 'reaction', text: '❤️', quoted_id: 'L1', ts: T + 1000 };
+  assert.equal(laughCounts([line, heart]).get('L1'), undefined, 'a ❤️ is not a laugh');
+  assert.equal(laughCounts([line, { ...heart, text: '⚰️' }]).get('L1'), 1, 'a ⚰️ is');
+  const p2 = participation([{ sender_jid: 'a', is_bot: 0, type: 'text', text: 'x', ts: T }, { sender_jid: 'bot', is_bot: 1, type: 'reaction', text: '😂', ts: T + 1000 },
+    { sender_jid: 'b', is_bot: 0, type: 'text', text: 'y', ts: T + 2000 }], T + 3000);
+  assert.equal(p2.secondsSinceBot, null, "its own reaction is not speaking");
+  assert.equal(p2.humansSinceBot, 2);
+  assert.ok(formatDecisionFeedback([{ decision: 'REACT', reason: 'r', verdict: 'bad' }])!.includes('should NOT have reacted here'));
+  const ask = (text: string) => dynamics([{ short_id: 'm5', sender_jid: 'a', sender_name: 'a', is_bot: 0, is_owner: 0, type: 'text', text, ts: T }], 'ForceAI', T + 1000).hangingQuestion;
+  assert.ok(ask('who is coming? 🤷‍♂️') && ask('anyone?👍🏻') && ask('really?❤️'), 'emoji after the "?" still a question');
+  assert.equal(ask('score? 2'), null);
+  assert.equal(seriousHit('сумерки были классные'), null);
+  assert.equal(seriousHit('умеренно смешно'), null);
+  assert.ok(seriousHit('дедушка умер'));
+  const sad = lintPlan([{ type: 'reaction', emoji: '😂', target_message_id: 'm1' }, { type: 'reaction', emoji: '❤️', target_message_id: 'm1' }],
+    { recentBotTexts: [], recentHumanTexts: [], medianLen: 20, marker, serious: true });
+  assert.deepEqual(sad.actions.map(a => (a as any).emoji), ['❤️'], 'no laughing reaction on bad news');
+  assert.equal(autoFix('Barca won 3\u20131, and \u2014 honestly \u2014 deserved', marker), 'Barca won 3-1, and, honestly, deserved');
+  assert.equal(phoneStyle('İndi gəlirəm.'), 'indi gəlirəm');
+}
+
 // ---- brain on a throwaway DB with a fake client ----
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forceai-v2-'));
 const db = openDb(path.join(dir, 'forceai.db'));
@@ -307,6 +355,7 @@ add('x@s', 'ForceAI', '🤖 madrid fans in shambles 💀', true);
 add('b@s', 'Kanan', 'madrid will win the league watch');
 
 const calls: any[] = [];
+let gateAnswer = () => gate({ decision: 'IGNORE', s: { timing: 3 } });
 let genAnswer: any;
 let criticAnswer: any = { reason: 'not funny', verdict: 'skip' };
 const fakeAi: any = {
@@ -316,7 +365,7 @@ const fakeAi: any = {
   client: { messages: { parse: async (req: any) => {
     calls.push(req);
     const schema = JSON.stringify(req.output_config.format);
-    if (schema.includes('"addressed"')) return { usage: {}, stop_reason: 'end_turn', parsed_output: gate({ decision: 'IGNORE', s: { timing: 3 } }) };
+    if (schema.includes('"addressed"')) return { usage: {}, stop_reason: 'end_turn', parsed_output: gateAnswer() };
     if (schema.includes('"verdict"')) return { usage: {}, stop_reason: 'end_turn', parsed_output: criticAnswer };
     if (schema.includes('"fixes"')) return { usage: {}, stop_reason: 'end_turn', parsed_output: { fixes: [{ index: 0, text: 'kanan said that last season too' }] } };
     return { usage: {}, stop_reason: 'end_turn', parsed_output: genAnswer };
@@ -350,7 +399,8 @@ genAnswer = {
 };
 assert.equal(repo.setFeedback('x1', 1), false, 'only bot lines can be rated');
 assert.equal(repo.setFeedback(`x${n - 1}`, 1), true);
-assert.deepEqual(repo.getFeedbackLines(1, 5), ['🤖 madrid fans in shambles 💀']);
+assert.deepEqual(repo.getFeedbackLines(G, 1, 5), ['🤖 madrid fans in shambles 💀']);
+assert.deepEqual(repo.getFeedbackLines('other@g.us', 1, 5), [], 'groups never share memory');
 assert.deepEqual([...repo.getFeedbackRatings([`x${n - 1}`, 'x1']).entries()], [[`x${n - 1}`, 1]]);
 const res = await brain.generate({ chatJid: G, consumedUpToTs: Date.now() - 60_000, addressIds: ['m60'], thought: 'kanan predicted 3-0', thoughtWhen: 'pause' });
 assert.ok(res);
@@ -396,7 +446,8 @@ assert.equal(repo.setDecisionFeedback(d1, 'bad'), true);
 assert.equal(repo.setDecisionFeedback(d2, 'bad'), true);
 assert.equal(repo.setDecisionFeedback(d3, 'good'), false, 'only v2 turn-taking decisions can be rated');
 assert.deepEqual([...repo.getDecisionVerdicts([d1, d2, d3]).entries()], [[d1, 'bad'], [d2, 'bad']]);
-const fb = formatDecisionFeedback(repo.getDecisionFeedback(8))!;
+const fb = formatDecisionFeedback(repo.getDecisionFeedback(G, 8))!;
+assert.equal(repo.getDecisionFeedback('other@g.us', 8).length, 0, 'calls stay in their group');
 assert.ok(fb.includes('should have STAYED QUIET here: r | strong thought') && fb.includes('should have SPOKEN here: r | nothing worth adding'));
 prompts.memoryVersion += 1;
 calls.length = 0;
@@ -408,7 +459,7 @@ assert.equal(sb.unprompted, 1, 'not addressed: unprompted');
 assert.equal(sb.quiet, 1);
 assert.ok(sb.rewrites >= 1 || sb.vetoed >= 0);
 assert.equal(repo.setDecisionFeedback(d1, null), true);
-assert.equal(repo.getDecisionFeedback(8).length, 1);
+assert.equal(repo.getDecisionFeedback(G, 8).length, 1);
 
 // replay: the gate sees the chat as it was at that moment, and changes nothing
 const cutRow = repo.getMessageByShortId('m50');
@@ -422,6 +473,22 @@ assert.ok(replayText.includes('#m50 ') && !replayText.includes('#m51 ') && !repl
 assert.ok(!replayText.includes('Your previous read of the scene'), 'no scene from the future');
 assert.equal(brain.lastScene(G), before, 'replay leaves the live state alone');
 assert.equal(brain.hasThought(G), false, 'replay saves no thought');
+
+// a saved thought belongs to its moment: kept while someone is mid-story, let go on a new read, dropped on bad news
+const saveOne = () => { gateAnswer = () => gate({ decision: 'IGNORE', s: { timing: 3 } }); };
+saveOne(); await brain.gate(G, Date.now() - 60_000, false);
+assert.ok(brain.hasThought(G));
+gateAnswer = () => gate({ decision: 'WAIT', thought: null });
+await brain.gate(G, Date.now() - 60_000, false);
+assert.ok(brain.hasThought(G), 'still mid-story: kept');
+gateAnswer = () => gate({ decision: 'IGNORE', thought: null });
+await brain.gate(G, Date.now() - 60_000, false);
+assert.equal(brain.hasThought(G), false, 'the chat moved on: let go');
+saveOne(); await brain.gate(G, Date.now() - 60_000, false);
+gateAnswer = () => gate({ decision: 'WAIT', thought: null, scene: { topic: 'grandma', threads: '', vibe: 'serious', running_bit: null, bit_played_out: false } });
+await brain.gate(G, Date.now() - 60_000, false);
+assert.equal(brain.hasThought(G), false, 'serious moment: dropped even while waiting');
+saveOne();
 
 // per-group chattiness beats the global setting; "default" follows it
 repo.setConfig('v2_chattiness', 'chatty');

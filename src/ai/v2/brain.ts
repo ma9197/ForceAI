@@ -14,7 +14,7 @@ import { CriticSchema, GateV2Schema, PlanV2Schema, RewriteSchema, type GateV2Out
 import {
   botTargets, botTics, callbackKeywords, dynamics, formatDecisionFeedback, formatCallbacks, formatDynamics, formatGroupLaughs, formatLanded,
   formatParticipation, formatStyleStats, formatTargets, formatTaste, formatTics, groupLaughs, landedLines, participation, reception,
-  formatBits, formatTakes, ownTakes, runningBits, stripMarker, styleStats, type Bit, type Dynamics, type MsgRow, type StyleStats,
+  formatBits, formatReactionHabit, formatTakes, ownTakes, runningBits, stripMarker, styleStats, type Bit, type Dynamics, type MsgRow, type StyleStats,
 } from './signals.js';
 
 export interface GateV2Result {
@@ -100,7 +100,7 @@ export class BrainV2 {
       .filter(i => i.category === 'joke' || i.category === 'reference')
       .slice(0, 15).map(i => `- ${i.content}`).join('\n');
     const summary = this.repo.getSummary(chatJid)?.summary;
-    const calls = formatDecisionFeedback(this.repo.getDecisionFeedback(BRAIN_V2.DECISION_EXAMPLES));
+    const calls = formatDecisionFeedback(this.repo.getDecisionFeedback(chatJid, BRAIN_V2.DECISION_EXAMPLES));
     const phrases = formatBits(this.bits(chatJid).slice(0, 4));
     const text = [
       `PEOPLE IN THIS CHAT:\n${who || '(nobody known yet)'}`,
@@ -134,6 +134,7 @@ export class BrainV2 {
       replay ? '' : formatCityTimes(this.repo.getClockCities()),
       formatParticipation(part),
       formatDynamics(dyn, rec) ?? '',
+      formatReactionHabit(history) ?? '',
       part.secondsSinceBot !== null && part.secondsSinceBot < 60 ? `(You last spoke ${part.secondsSinceBot}s ago.)` : '',
       lastScene ? `Your previous read of the scene: ${lastScene.topic} / ${lastScene.vibe}${lastScene.running_bit ? ` / bit: ${lastScene.running_bit}` : ''}` : '',
       forceDecide ? 'You have already waited the maximum amount of time. Decide RESPOND, REACT or IGNORE now: WAIT is not allowed.' : '',
@@ -160,8 +161,11 @@ export class BrainV2 {
       const policy = decide(out, part, forceDecide, CHATTINESS_SHIFT[this.repo.getV2Chattiness(chatJid)] ?? 0, { dyn, rec });
       if (!opts.dryRun && !replay) {
         this.scenes.set(chatJid, out.scene);
-        if (policy.saveThought && out.thought) this.thoughts.set(chatJid, { text: out.thought.text, at: Date.now() });
-        if (policy.decision === 'RESPOND') this.thoughts.delete(chatJid);
+        // a saved thought belongs to the moment it came from: a new read replaces it or lets it go
+        // (kept only while someone is still mid-thought), and bad news always drops it
+        if (dyn.serious || out.scene.vibe === 'serious' || policy.decision === 'RESPOND') this.thoughts.delete(chatJid);
+        else if (policy.saveThought && out.thought) this.thoughts.set(chatJid, { text: out.thought.text, at: Date.now() });
+        else if (policy.decision !== 'WAIT') this.thoughts.delete(chatJid);
       }
       return { out, policy };
     } catch (err) {
@@ -205,8 +209,8 @@ export class BrainV2 {
       formatLanded(landedLines(history, t => stripMarker(t, marker.prefix, marker.suffix))) ?? '',
       formatGroupLaughs(groupLaughs(history)) ?? '',
       formatTaste(
-        this.repo.getFeedbackLines(1, BRAIN_V2.TASTE_LINES).map(t => stripMarker(t, marker.prefix, marker.suffix)),
-        this.repo.getFeedbackLines(-1, BRAIN_V2.TASTE_LINES).map(t => stripMarker(t, marker.prefix, marker.suffix)),
+        this.repo.getFeedbackLines(chatJid, 1, BRAIN_V2.TASTE_LINES).map(t => stripMarker(t, marker.prefix, marker.suffix)),
+        this.repo.getFeedbackLines(chatJid, -1, BRAIN_V2.TASTE_LINES).map(t => stripMarker(t, marker.prefix, marker.suffix)),
       ) ?? '',
       formatTargets(botTargets(history.filter(r => r.is_bot).slice(-BRAIN_V2.TARGET_WINDOW), this.repo.getMembersForChat(chatJid).map(m => m.display_name ?? '').filter(Boolean), id => this.repo.getMessageById(id)?.sender_name ?? null)) ?? '',
       formatParticipation(part),
@@ -279,7 +283,7 @@ export class BrainV2 {
       // the model's read, or bad news spotted in code
       const serious = out.read.sincere || out.read.vibe === 'serious' || !!signals.dyn.serious;
       const lintCtx = {
-        medianLen: signals.medianLen, lowercaseShare: signals.lowercaseShare, serious, marker: this.marker(),
+        medianLen: signals.medianLen, lowercaseShare: signals.lowercaseShare, serious, marker: this.marker(), unprompted: !!input.unprompted,
         textOf: (id: string) => (this.repo.getMessageByShortId(id)?.text as string | undefined) ?? null,
         lastHumanTexts: rows.filter(r => !r.is_bot && r.type === 'text').map(r => r.text ?? ''),
         replyShare: signals.style?.replyShare,
