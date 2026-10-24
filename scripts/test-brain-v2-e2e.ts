@@ -196,6 +196,43 @@ assert.deepEqual(rep.points.find((p: any) => p.lines).lines, ['the replay line']
 assert.equal(calls.filter(c => c.kind === 'plan').length, 2);
 assert.equal(sent.length, 0, 'a replay never sends');
 
+// 7. rounds 14-18 wiring, in a group of their own: people saying goodbye reach the gate and raise the bar;
+// a Turkish answer to an Azerbaijani question gets the one rewrite
+reset();
+const BG = 'e2e-bye@g.us';
+repo.setBrainVersion(BG, 'v2');
+const arbBye = new Arbiter(
+  BG, repo, ai, {} as any, {} as any,
+  { abortCurrentPlan: false, executePlan: async (_jid: string, actions: any[], onSent: any) => { for (const a of actions) { sent.push(a); onSent?.({ action: a }); } } } as any,
+  { isOwnJid: () => false } as any,
+  { onDecision: (tier: string, d: string, reason: string) => decisions.push(`${tier}:${d}:${reason}`), onAction: () => undefined, onPhase: () => undefined },
+  brain,
+);
+const sayIn = (who: 'a@s' | 'b@s', text: string) => {
+  n += 1;
+  const m = { id: `id${n}`, shortId: `m${n}`, chatJid: BG, senderJid: who, senderName: who === 'a@s' ? 'Murad' : 'Kanan', fromMe: false, isBot: false,
+    isOwner: false, type: 'text', text, quotedId: null, mentionedJids: [], ts: Date.now(), raw: {} } as any;
+  repo.insertMessage(m);
+  arbBye.onMessage(m);
+  return m;
+};
+gateOut = { scene: scene('chill'), addressed: false, thought: { text: 'one more joke about the match', why: '' }, scores: scores(7),
+  decision: 'RESPOND', react: null, reason: 'one more joke', address_message_ids: [], wait_ms: null };
+sayIn('a@s', 'yaxşı oyun idi');
+sayIn('b@s', 'gecən xeyrə');
+sayIn('a@s', 'gn');
+await sleep(800);
+assert.ok(calls[0]?.kind === 'gate' && calls[0].text.includes('- winding down: Kanan, Murad said bye or goodnight'), calls[0]?.text);
+assert.ok(decisions.some(d => d.startsWith('T1v2:') && d.includes('winding down +1')), decisions.join('\n'));
+assert.ok(!has('T2v2', 'SEND') && sent.length === 0, 'urge 7 does not clear a bar raised by goodbyes');
+reset();
+const q = sayIn('b@s', 'forceai sən bilirsən kim udacaq?');
+planOut = plan([{ type: 'reply', text: 'yok abi ben bilmiyorum valla, çok zor maç', target_message_id: q.shortId }]);
+await sleep(800);
+assert.deepEqual(calls.map(c => c.kind), ['plan', 'rewrite'], decisions.join('\n'));
+assert.ok(calls[1].text.includes('they write Azerbaijani but this reads Turkish'), calls[1].text);
+assert.equal(sent.length, 1);
+
 fs.rmSync(dir, { recursive: true, force: true });
 console.log('brain v2 end to end: all checks passed');
 process.exit(0);
