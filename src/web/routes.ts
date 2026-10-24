@@ -88,6 +88,13 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     return { ok: true };
   });
 
+  // brain v2 scoreboard for a group, last 24 hours (free: counts decisions already logged)
+  fastify.get<{ Querystring: { jid?: string } }>('/api/brain/stats', async (req, reply) => {
+    const jid = req.query.jid;
+    if (!jid) return reply.code(400).send({ error: 'jid required' });
+    return app.repo.brainV2Stats(jid, Date.now() - 24 * 3_600_000);
+  });
+
   // "Compare v1 / v2": both brains answer the latest messages, nothing is sent or saved (4 AI calls)
   fastify.post<{ Body: { jid?: string } }>('/api/brain/preview', async (req, reply) => {
     if (DEMO_MODE) return { error: 'Not available in the demo: it needs a real chat and an API key.' };

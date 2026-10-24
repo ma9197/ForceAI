@@ -67,7 +67,7 @@ assert.equal(formatTaste([], []), null);
 
 // ---- linter ----
 const marker = { prefix: '🤖 ', suffix: '' };
-assert.equal(autoFix('🤖 he scored — twice', marker), 'he scored, twice');
+assert.equal(autoFix('🤖 he scored \u2014 twice', marker), 'he scored, twice');
 assert.equal(autoFix('"quoted line"', marker), 'quoted line');
 assert.equal(phoneStyle('He scored twice.'), 'he scored twice');
 assert.equal(phoneStyle('LMAO no...'), 'LMAO no...');
@@ -175,7 +175,7 @@ genAnswer = {
   read: { happening: 'kanan doubling down on madrid', subtext: 'bait, he knows it is a reach', vibe: 'banter', sincere: false },
   angles: [{ idea: 'callback to his old prediction', device: 'callback' }, { idea: 'fake agreement', device: 'fake_agreement' }],
   pick: 0,
-  actions: [{ type: 'reply', text: 'Kanan said that last season too — as an AI I remember everything', target_message_id: 'm60' }, { type: 'reaction', emoji: '💀', target_message_id: 'm60' }],
+  actions: [{ type: 'reply', text: 'Kanan said that last season too \u2014 as an AI I remember everything', target_message_id: 'm60' }, { type: 'reaction', emoji: '💀', target_message_id: 'm60' }],
   note: 'callback', observation: null,
 };
 assert.equal(repo.setFeedback('x1', 1), false, 'only bot lines can be rated');
@@ -229,6 +229,11 @@ prompts.memoryVersion += 1;
 calls.length = 0;
 await brain.gate(G, Date.now() - 60_000, false);
 assert.ok(calls[0].system[1].text.includes("YOUR OWNER'S CALLS ON YOUR PAST DECISIONS"), 'owner calls reach the gatekeeper');
+const sb = repo.brainV2Stats(G, 0);
+assert.equal(sb.spoke, 1, 'RESPOND counted');
+assert.equal(sb.unprompted, 1, 'not addressed: unprompted');
+assert.equal(sb.quiet, 1);
+assert.ok(sb.rewrites >= 1 || sb.vetoed >= 0);
 assert.equal(repo.setDecisionFeedback(d1, null), true);
 assert.equal(repo.getDecisionFeedback(8).length, 1);
 

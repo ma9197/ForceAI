@@ -10,7 +10,7 @@ function time(ts: number): string {
 }
 
 /** Distinct, readable member-name colors (WhatsApp-style). Assigned per person by first appearance
- *  so two members never collide — unlike a hash, which could map both to the same hue. */
+ *  so two members never collide, unlike a hash, which could map both to the same hue. */
 const NAME_PALETTE = [
   '#53bdeb', '#e542a3', '#5ad469', '#ffab00', '#a78bfa', '#ff7e6b',
   '#00d5c0', '#f6c445', '#7aa2ff', '#ff8fb1', '#9ad36b', '#f0883e',
@@ -104,7 +104,7 @@ export function LiveFeed({ items, selectedShortId, onSelect }: {
           lastSenderKey = null; // a system row breaks the run
           return (
             <div key={`d${i}`} className="decision-row" title={new Date(item.ts).toLocaleString()}>
-              <b>{item.tier} {item.decision}</b> — {item.reason}
+              <b>{item.tier} {item.decision}</b>: {item.reason}
               {item.tier === 'T1v2' && item.id != null && ['RESPOND', 'IGNORE', 'REACT', 'PAUSE'].includes(item.decision) && (
                 <DecisionRate id={item.id} initial={item.verdict} />
               )}
@@ -147,7 +147,7 @@ export function LiveFeed({ items, selectedShortId, onSelect }: {
           </div>
         );
       })}
-      {items.length === 0 && <p className="muted" style={{ textAlign: 'center', marginTop: 40 }}>No activity yet — messages and bot decisions will appear here live.</p>}
+      {items.length === 0 && <p className="muted" style={{ textAlign: 'center', marginTop: 40 }}>No activity yet. Messages and bot decisions will appear here live.</p>}
     </div>
   );
 }

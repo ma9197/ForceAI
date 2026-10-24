@@ -774,6 +774,26 @@ export class Repo {
     return Number(res.lastInsertRowid);
   }
 
+  /** Brain v2 scoreboard for one group since `sinceTs`: how often it spoke, unprompted, reacted, kept quiet. */
+  brainV2Stats(chatJid: string, sinceTs: number): { spoke: number; unprompted: number; pauses: number; reacted: number; quiet: number; vetoed: number; rewrites: number } {
+    const rows = this.db.prepare("SELECT tier, decision, reason FROM decisions WHERE chat_jid = ? AND ts >= ? AND tier IN ('T1v2', 'T2v2')").all(chatJid, sinceTs) as { tier: string; decision: string; reason: string }[];
+    const s = { spoke: 0, unprompted: 0, pauses: 0, reacted: 0, quiet: 0, vetoed: 0, rewrites: 0 };
+    for (const r of rows) {
+      if (r.tier === 'T1v2') {
+        if (r.decision === 'RESPOND') {
+          s.spoke += 1;
+          if (!/\| addressed/.test(r.reason)) s.unprompted += 1;
+        } else if (r.decision === 'PAUSE') s.pauses += 1;
+        else if (r.decision === 'REACT') s.reacted += 1;
+        else if (r.decision === 'IGNORE') s.quiet += 1;
+      } else {
+        if (r.reason.includes('second opinion said skip')) s.vetoed += 1;
+        if (/rewrote \d/.test(r.reason)) s.rewrites += 1;
+      }
+    }
+    return s;
+  }
+
   /** Owner's call on a brain v2 decision (spoke / stayed quiet): 'good', 'bad', or null to clear. */
   setDecisionFeedback(decisionId: number, verdict: 'good' | 'bad' | null): boolean {
     const d = this.db.prepare('SELECT id, chat_jid, tier, decision, reason FROM decisions WHERE id = ?').get(decisionId) as
