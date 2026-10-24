@@ -61,5 +61,7 @@ A WhatsApp group-chat AI that acts like one of the friends (banter, roasts, foot
 - `post()` in `ui/src/api.ts` must always send a JSON body, or Fastify returns 400.
 - Never put an emoji that carries U+FE0F (like ⚰️ or ❤️) inside a regex character class `[...]`: the selector then matches every ❤️ and ✔️. Use alternation (`/😂|🤣|⚰/u`).
 - Arbiter: after an awaited AI call, consume only the buffer you had before the call (`consumeBuffer(ts)`). Messages that arrived meanwhile can be direct mentions and must stay buffered.
+- The owner's messages are stored with `sender_name` "You". In v2 signals label them with `is_owner` ("Said (owner)", like the transcript) and keep them out of member-name sets; "you" means the bot in ROOM NOW.
+- Brain v2 text cuts that reach a prompt use `cut()` from signals.ts, never a plain `.slice()`: half an emoji (a lone surrogate) can make the API reject the call.
 - Arbiter: Sleep, Pause and shutdown bump `holdEpoch`; a cycle checks `held(hold)` after each awaited AI call and drops its result. Only `runGeneration` may take over the lock: `evaluate()` releases it only if `cycle` is unchanged (a queued Influence runs inside the cycle's `postCycle`), so everything after `busy = true` in `runGeneration` must stay inside its `try`. A queued Influence keeps the epoch it was given at (`pendingHold`).
 - Railway: the domain targets port 8080; after attaching a volume you must click Deploy or it never mounts.
