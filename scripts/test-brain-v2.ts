@@ -11,7 +11,7 @@ import { CHATTINESS_SHIFT, decide, roomShift, threshold } from '../src/ai/v2/pol
 import { actualAfter, pickReplayCuts } from '../src/ai/v2/replay.js';
 import { TasteLearner, readTasteRules } from '../src/ai/v2/taste.js';
 import {
-  botTargets, botTics, callbackKeywords, dynamics, formatDecisionFeedback, formatTeasing, formatTics, teaseReception, formatClockLine, formatLinesThatWorked, formatRoomNow,
+  botTargets, botTics, callbackKeywords, closingText, dynamics, formatDecisionFeedback, formatTeasing, formatTics, teaseReception, formatClockLine, formatLinesThatWorked, formatRoomNow,
   formatBits, formatReactionHabit, formatTakes, groupLaughs, ironyCues, parseDecisionLine, roomMap, ignoredStreak, laughCounts, landedLines, ownTakes, participation, reception, runningBits, seriousHit,
   styleStats, type MsgRow,
 } from '../src/ai/v2/signals.js';
@@ -207,6 +207,19 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
   assert.equal(dynamics(q, 'ForceAI', now).hangingQuestion?.shortId, q[1].short_id);
   assert.equal(dynamics([...q, r('Murad', 'barca', 170)], 'ForceAI', now).hangingQuestion, null, 'answered');
   assert.equal(dynamics([r('Said', 'who is playing tonight?', 160, { is_owner: 1 })], 'ForceAI', now).hangingQuestion, null, "owner's questions are never a cue");
+
+  // the chat winding down: goodbyes in each language; "пока" / "hələlik" only as a whole message, never a question
+  const bye = [r('Murad', 'ok that was a good game', 100), r('Kanan', 'gn guys', 150), r('Murad', 'спокойной', 160)];
+  const wd = dynamics(bye, 'ForceAI', now)!.windingDown;
+  assert.deepEqual(wd, { who: ['Kanan', 'Murad'], shortId: bye[2].short_id }, JSON.stringify(wd));
+  assert.equal(dynamics([...bye, r('Aysel', 'wait who scored the second one', 170), r('Kanan', 'messi', 175)], 'ForceAI', now).windingDown, null, 'they kept talking');
+  assert.ok(dynamics([r('Murad', 'lol', 150), r('Aysel', 'gecən xeyrə', 160)], 'ForceAI', now).windingDown, 'the newest message is a goodbye');
+  assert.deepEqual(dynamics([...bye, r('Aysel', 'lol ok', 170)], 'ForceAI', now).windingDown?.who, ['Kanan', 'Murad'], 'two left, one "lol" after');
+  for (const t of ['iyi geceler', 'görüşürüz', 'yatiram', 'ну пока', 'helelik', 'ok bye', 'gtg', 'İyi geceler 😴']) assert.ok(closingText(t), t);
+  for (const t of ['пока нет', 'helelik yox', 'are you going to sleep?', 'later today we play', 'what a night', 'gnome']) assert.equal(closingText(t), false, t);
+  const shift = roomShift({ dyn: dynamics(bye, 'ForceAI', now) });
+  assert.ok(shift.delta === 1 && shift.notes.includes('winding down +1'), JSON.stringify(shift));
+  assert.ok(formatRoomNow({ dyn: dynamics(bye, 'ForceAI', now), map: roomMap(bye, [], 'ForceAI', now), cues: [] }, 'gate')!.includes(`- winding down: Kanan, Murad said bye or goodnight (#${bye[2].short_id})`));
 
   // bad news, in several languages; slang is not
   assert.ok(seriousHit('my dad passed away this morning'));

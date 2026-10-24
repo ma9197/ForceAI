@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { autoFix, lintPlan, phoneStyle, scriptOf, splitInTwo } from '../src/ai/v2/lint.js';
 import { decide, roomShift } from '../src/ai/v2/policy.js';
 import {
-  botTargets, botTics, callbackKeywords, dynamics, formatBits, formatLinesThatWorked, formatRoomNow, formatTics, groupLaughs, laughCounts, landedLines,
+  botTargets, botTics, callbackKeywords, closingText, dynamics, formatBits, formatLinesThatWorked, formatRoomNow, formatTics, groupLaughs, laughCounts, landedLines,
   formatTeasing, ironyCues, ownTakes, parseDecisionLine, participation, reception, roomMap, runningBits, seriousHit, styleStats, teaseReception, type MsgRow,
 } from '../src/ai/v2/signals.js';
 
@@ -18,7 +18,7 @@ const PIECES = [
   'kanan', 'murad', 'madrid', 'barca', 'bro is cooked', 'hahaha', 'HAHAHAHA', 'lmao', 'xd', '😂', '💀💀💀', '❤️', '🤷‍♂️', '👍🏻', '⚰️',
   'кто играет', 'умер', 'сумерки', 'ахахах', 'çox pis', 'İndi gəlirəm', 'vəfat', 'başın sağolsun', 'not just a game, but a religion',
   'great question', 'as an AI', ';', '—', '–', '3–1', '?', '!!!', '...', '"quoted"', '#hashtag', 'forceai', 'ForceAI', '@123456',
-  'passed away', 'in the hospital', 'will win', 'trust me', '2-1', '\n', '\t', '   ', '', '‍', '️', '🇦🇿', 'a'.repeat(50),
+  'passed away', 'in the hospital', 'gn', 'пока', 'gecən xeyrə', 'iyi geceler', 'bye', 'will win', 'trust me', '2-1', '\n', '\t', '   ', '', '‍', '️', '🇦🇿', 'a'.repeat(50),
   'ha'.repeat(40), '!'.repeat(30), '?'.repeat(30), 'not '.repeat(20), 'is not about x, it is', '(jk)', 'http://x.y/z?q=1',
 ] as const;
 const text = () => Array.from({ length: 1 + Math.floor(rnd() * 8) }, () => pick(PIECES)).join(pick([' ', '', ', ', '. ', '? ']));
@@ -77,6 +77,7 @@ for (let round = 0; round < ROUNDS; round++) {
   timed('formatTeasing', () => formatTeasing(targets, takes, 4, 15));
   for (const t of [...humanTexts, ...botTexts].slice(0, 20)) {
     timed('seriousHit', () => seriousHit(t));
+    timed('closingText', () => closingText(t));
     timed('autoFix', () => autoFix(t, marker));
     timed('phoneStyle', () => phoneStyle(t));
     timed('scriptOf', () => scriptOf(t));

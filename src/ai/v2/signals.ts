@@ -413,6 +413,8 @@ export interface Dynamics {
   hangingQuestion: { shortId: string; who: string } | null;
   /** a message that looks like real bad news, who sent it, and the word that flagged it */
   serious: { shortId: string; word: string; who: string } | null;
+  /** people saying bye or goodnight: the chat is winding down (the newest goodbye's short id) */
+  windingDown: { who: string[]; shortId: string } | null;
 }
 
 /**
@@ -472,7 +474,51 @@ export function dynamics(rows: MsgRow[], botName: string, now = Date.now()): Dyn
     if (word && r.short_id) serious = { shortId: r.short_id, word, who: r.sender_name ?? '?' };
   }
 
-  return { privatePair, storyteller, hangingQuestion, serious };
+  // people saying bye / goodnight (last 15 minutes): the newest human text is a goodbye, or two people
+  // said one and went quiet (someone who says "gn" and keeps talking has not left), with at most one
+  // message after the last goodbye
+  let windingDown: Dynamics['windingDown'] = null;
+  const texts15 = humans.filter(r => r.type === 'text' && now - r.ts < 15 * 60_000);
+  const closers = texts15.slice(-6).filter(r => closingText(r.text ?? ''));
+  const gone = closers.filter(c => !texts15.some(r => r.ts > c.ts && r.sender_jid === c.sender_jid));
+  const lastBye = closers[closers.length - 1];
+  const newestText = texts15[texts15.length - 1];
+  const goneWho = [...new Set(gone.map(r => (r.is_owner ? 'Said (owner)' : r.sender_name ?? '?')))];
+  const afterLast = lastBye ? texts15.filter(r => r.ts > lastBye.ts).length : 0;
+  if (lastBye?.short_id && (lastBye === newestText || (goneWho.length >= 2 && afterLast <= 1))) {
+    windingDown = { who: goneWho.length ? goneWho : [lastBye.sender_name ?? '?'], shortId: lastBye.short_id };
+  }
+
+  return { privatePair, storyteller, hangingQuestion, serious, windingDown };
+}
+
+/**
+ * Goodbyes and goodnights in the group's languages. Only short messages that are not questions ("are
+ * you going to sleep?" is not a goodbye). Words that mean other things too ("пока" is also "while",
+ * "later" is also "later today", "hələlik" is also "for now") count only when they are the whole message, give or take a filler
+ * ("ok bye", "ну пока", "bye guys").
+ */
+const CLOSING_PHRASE = new RegExp('(?<!\\p{L})(?:' + [
+  // English
+  'gn', 'gnight', 'good ?night', 'night all', 'nighty night', 'gtg', 'g2g', 'gotta go', 'ttyl', 'cya', 'see ya', 'see you (?:tomorrow|later|all)',
+  'off to bed', 'going to (?:sleep|bed)', 'heading out', 'peace out', 'bye all', 'bye guys', 'bye everyone',
+  // Russian (and Latin spellings)
+  'спокойной ночи', 'спокойной', 'споки', 'сладких снов', 'всем пока', 'до завтра', 'я спать', 'пошел спать', 'пошёл спать', 'всем спокойной',
+  'spokoynoy nochi', 'spokoinoi nochi', 'spoki', 'vsem poka', 'do zavtra',
+  // Azerbaijani
+  ...['gecən xeyrə', 'gecəniz xeyrə', 'görüşərik', 'yatıram', 'yatmağa gedirəm', 'sabaha qədər', 'sabaha kimi'].map(loose),
+  // Turkish
+  ...['iyi geceler', 'görüşürüz', 'hoşça kal', 'hoşçakal', 'yatıyorum', 'yatıcam', 'kaçtım'].map(loose),
+].join('|') + ')(?!\\p{L})', 'iu');
+const CLOSING_WORD = /^(?:(?:ok(?:ay)?|okey|ну|ладно|hadi|tamam|yaxşı|yaxsi)\s+)?(?:bye+|byee+|bb|пока|poka|night|nite|later|байбай|bye bye|h[əe]l[əe]lik)(?:\s+(?:all|guys|everyone|всем|ребята|hamıya|hamiya|herkese))?$/iu;
+
+export function closingText(text: string): boolean {
+  const t = text.trim();
+  if (!t || t.length > 60 || /\?\s*$/.test(t)) return false;
+  const low = t.toLocaleLowerCase('tr');
+  if (CLOSING_PHRASE.test(t) || CLOSING_PHRASE.test(low)) return true;
+  const bare = low.replace(EMOJI, ' ').replace(/[^\p{L}\p{N}\s']/gu, ' ').replace(/\s+/g, ' ').trim();
+  return CLOSING_WORD.test(bare);
 }
 
 export type Reception = 'laughed' | 'answered' | 'ignored';
@@ -849,6 +895,7 @@ export function formatRoomNow(r: RoomNow, stage: 'gate' | 'writer'): string | nu
   if (q && storyQuestion) lines.push(`- ${q.who}: several messages in a row, the last one a question (#${q.shortId}, may be part of the story)`);
   else if (q) lines.push(`- open question: #${q.shortId} (${q.who}) asked the group, nobody answered yet`);
   if (r.dyn.privatePair) lines.push(`- ${r.dyn.privatePair[0]} and ${r.dyn.privatePair[1]} are going back and forth with each other`);
+  if (r.dyn.windingDown) lines.push(`- winding down: ${r.dyn.windingDown.who.join(', ')} said bye or goodnight (#${r.dyn.windingDown.shortId})`);
   if (stage === 'gate' && r.dyn.storyteller && !storyQuestion) lines.push(`- ${r.dyn.storyteller} is sending several messages in a row (probably not finished)`);
   for (const c of r.cues) lines.push(`- possible irony: #${c.shortId} ${c.who}, ${c.cue}`);
   const moods = r.map.people.filter(p => !p.serious && (p.loud || p.laughing || p.talkingTo.length))
