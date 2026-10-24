@@ -1,5 +1,5 @@
 import type { GateV2Out } from './schemas.js';
-import { ignoredStreak, type Dynamics, type Participation, type Reception } from './signals.js';
+import { coldStreak, type Dynamics, type Participation, type Reception } from './signals.js';
 
 /**
  * Brain v2 turn-taking, in code (the "Inner Thoughts" idea: an agent keeps forming thoughts while it
@@ -24,6 +24,7 @@ export const POLICY = {
   IGNORED_STEP: 0.5,         // each ignored unprompted line after the first raises the bar...
   IGNORED_MAX: 1.0,          // ...up to this much
   LAUGHED: -0.3,             // two recent unprompted lines got laughs: the room is with it
+  BOOED: 0.8,                // its last unprompted line got pushback ("cringe", "not funny", 🙄)
 } as const;
 
 /** Measured room signals (signals.ts) that move the bar for unprompted lines. */
@@ -43,8 +44,12 @@ export function roomShift(room: Room): { delta: number; notes: string[] } {
   if (room.dyn?.storyteller) add(POLICY.STORYTELLER, 'mid-story');
   if (room.dyn?.hangingQuestion) add(POLICY.HANGING_QUESTION, 'open question');
   if (room.dyn?.windingDown) add(POLICY.WINDING_DOWN, 'winding down');
-  const streak = ignoredStreak(room.rec ?? []);
-  if (streak >= 2) add(Math.min(POLICY.IGNORED_MAX, POLICY.IGNORED_STEP * (streak - 1)), `${streak} ignored`);
+  const rec = room.rec ?? [];
+  // lines that landed cold in a row (ignored or pushback): pushback on the last one never lowers the bar
+  const cold = coldStreak(rec);
+  const booed = rec[rec.length - 1] === 'booed';
+  const coldDelta = Math.max(booed ? POLICY.BOOED : 0, cold >= 2 ? Math.min(POLICY.IGNORED_MAX, POLICY.IGNORED_STEP * (cold - 1)) : 0);
+  if (coldDelta > 0) add(coldDelta, booed ? 'pushback on last line' : rec.slice(-cold).includes('booed') ? `${cold} landed cold` : `${cold} ignored`);
   else if ((room.rec ?? []).filter(r => r === 'laughed').length >= 2) add(POLICY.LAUGHED, 'landing');
   return { delta: Math.round(delta * 10) / 10, notes };
 }

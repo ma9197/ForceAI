@@ -6,12 +6,13 @@ import { openDb } from '../src/memory/db.js';
 import { Repo } from '../src/memory/repo.js';
 import { PromptBuilder } from '../src/ai/prompts.js';
 import { BrainV2 } from '../src/ai/v2/brain.js';
-import { lintPlan, phoneStyle, autoFix, overlap, scriptOf, splitInTwo } from '../src/ai/v2/lint.js';
+import { laughEndShare, lintPlan, phoneStyle, autoFix, overlap, scriptOf, splitInTwo } from '../src/ai/v2/lint.js';
+import { azOrTr } from '../src/ai/v2/language.js';
 import { CHATTINESS_SHIFT, decide, roomShift, threshold } from '../src/ai/v2/policy.js';
 import { actualAfter, pickReplayCuts } from '../src/ai/v2/replay.js';
 import { TasteLearner, readTasteRules } from '../src/ai/v2/taste.js';
 import {
-  botTargets, botTics, callbackKeywords, closingText, dynamics, formatDecisionFeedback, formatTeasing, formatTics, teaseReception, formatClockLine, formatLinesThatWorked, formatRoomNow,
+  botTargets, botTics, callbackKeywords, closingText, dynamics, formatDecisionFeedback, formatTeasing, formatTics, teaseReception, formatClockLine, formatLinesThatWorked, formatRoomNow, type Reception,
   formatBits, formatReactionHabit, formatTakes, groupLaughs, ironyCues, parseDecisionLine, roomMap, ignoredStreak, laughCounts, landedLines, ownTakes, participation, reception, runningBits, seriousHit,
   styleStats, type MsgRow,
 } from '../src/ai/v2/signals.js';
@@ -93,6 +94,8 @@ assert.equal(formatTeasing([{ name: 'Murad', count: 2 }], []), null);
   assert.ok(tx.includes('- Aysel pushed back on 2 of your 2 digs: keep it light with them') && tx.includes('- Kanan Aliyev laughed at 2 of your 3 digs: they enjoy it'), tx);
   assert.ok(teaseReception([r('bot', 'murad is washed', 10), r('Murad', 'отстань', 12)], ['Murad'])[0].pushedBack === 1, 'pushback in Russian');
   assert.ok(teaseReception([r('bot', 'murad is washed', 10), r('Murad', 'bəsdir', 12)], ['Murad'])[0].pushedBack === 1, 'pushback in Azerbaijani');
+  const lolNo = teaseReception([r('bot', 'murad is washed', 10), r('Murad', 'shut up 😭😭', 12)], ['Murad'])[0];
+  assert.deepEqual([lolNo.laughed, lolNo.pushedBack], [1, 0], '"shut up 😭😭" means it was funny');
   assert.equal(teaseReception([r('bot', 'that is sus', 10), r('Murad', 'sus', 12)], ['Murad']).length, 0, 'English "sus" is not pushback (and nobody was named)');
   // quoting Kanan and naming him is one person, not two (full name in the member list, first name in the chat)
   const q = r('Kanan', 'i will score tonight', 400);
@@ -141,6 +144,65 @@ assert.ok(lintPlan([{ type: 'message', text: 'it is not just football, it is rel
   { recentBotTexts: [], recentHumanTexts: [], medianLen: 20, marker }).issues.length >= 1, 'contrast template caught');
 assert.equal(lintPlan([{ type: 'message', text: 'not bad, but he still missed the pen' }],
   { recentBotTexts: [], recentHumanTexts: [], medianLen: 20, marker }).issues.length, 0, 'normal "not ... but" speech is fine');
+// round 16: more tells. A question to the room just to keep it going, "ah, the...", stock AI joke phrases
+{
+  const tells = (text: string, humans: string[] = []) => lintPlan([{ type: 'message', text }], { recentBotTexts: [], recentHumanTexts: humans, medianLen: 20, marker }).issues.map(i => i.problem).join(' | ');
+  for (const t of ['madrid fans in shambles, what do you think?', 'thoughts?', 'kanan really did that, а вы как думаете?', 'siz nə düşünürsünüz?', 'ne dersiniz?']) assert.ok(tells(t).includes('keep the chat going'), t);
+  for (const t of ['what do you mean?', 'who won the game?', 'what do you think he meant by that']) assert.ok(!tells(t).includes('keep the chat going'), t);
+  assert.ok(tells('Ah, the classic Kanan move').includes('ah, the'));
+  assert.ok(tells('plot twist: kanan was right').includes('stock AI joke phrase ("plot twist")'));
+  assert.equal(tells('the audacity of this man', ['bro the audacity']), '', 'the group says it itself: fine');
+  // laughing at its own line, only where the group never does
+  const plain = Array.from({ length: 10 }, (_, i) => `plain message ${i}`);
+  const laughy = Array.from({ length: 10 }, (_, i) => `funny one ${i} 😂`);
+  assert.deepEqual([laughEndShare(plain), laughEndShare(laughy), laughEndShare(['a'])], [0, 1, undefined]);
+  const own = (text: string, share: number | undefined) => (lintPlan([{ type: 'message', text }], { recentBotTexts: [], recentHumanTexts: [], medianLen: 20, marker, laughEndShare: share }).actions[0] as { text: string }).text;
+  assert.equal(own('kanan predicted 3-0 again lol', 0), 'kanan predicted 3-0 again');
+  assert.equal(own('madrid in shambles ахахах', 0), 'madrid in shambles');
+  assert.equal(own('kanan predicted 3-0 again 😂', 0), 'kanan predicted 3-0 again 😂', 'emojis are the emoji dial\'s business');
+  assert.equal(own('haha ok', 0), 'haha ok', 'a laugh that is the whole message stays');
+  assert.equal(own('kanan predicted 3-0 again lol', 1), 'kanan predicted 3-0 again lol', 'a group that laughs at its own lines: kept');
+  assert.equal(own('kanan predicted 3-0 again lol', undefined), 'kanan predicted 3-0 again lol', 'unknown: kept');
+  assert.equal(own('kanan predicted 3-0 again, lol', 0), 'kanan predicted 3-0 again', 'no trailing comma');
+  assert.equal(lintPlan([{ type: 'message', text: 'Kanan predicted 3-0 again. lol' }], { recentBotTexts: [], recentHumanTexts: [], medianLen: 20, marker, laughEndShare: 0, lowercaseShare: 0.9 }).actions[0].type === 'message'
+    && (lintPlan([{ type: 'message', text: 'Kanan predicted 3-0 again. lol' }], { recentBotTexts: [], recentHumanTexts: [], medianLen: 20, marker, laughEndShare: 0, lowercaseShare: 0.9 }).actions[0] as { text: string }).text, 'kanan predicted 3-0 again', 'phone style after the cut');
+  assert.equal(own('en iyisi çikolatalı kek', 0), 'en iyisi çikolatalı kek', '"kek" is cake');
+  assert.equal(own('это её новый хахаль', 0), 'это её новый хахаль');
+  // pure laugh replies are not "lines that end on a laugh"
+  assert.equal(laughEndShare([...plain.slice(0, 9), 'ахахах', '😂😂', 'lmao']), 0);
+  assert.equal(laughEndShare(['ахахах', '😂', 'lol', 'hahaha', 'xd', 'ok']), undefined, 'not enough real lines');
+  assert.ok(tells('what do you think? 👀').includes('keep the chat going') && tells('thoughts? 🤔').includes('keep the chat going'), 'emoji after the "?"');
+  for (const t of ["what do y'all think?", 'wdyt?', 'ne düşünüyorsunuz?', 'sizce?', 'siz nə fikirləşirsiz?', 'nə deyirsiz?', 'kak dumaete?']) assert.ok(tells(t).includes('keep the chat going'), t);
+  assert.equal(tells('rent-free in his head', ['he lives rent free there']), '', 'same phrase, other spelling');
+  assert.ok(tells('chef’s kiss').includes('stock AI joke'), 'curly apostrophe');
+}
+// round 18: Azerbaijani or Turkish (models drift from Azerbaijani into Turkish), typed with or without the letters
+for (const t of ['mən bilmirəm ki', 'yox ee bu cox pisdi', 'qardas sen neynirsen', 'bu gun gedirem', 'axi niye bele edirsen', 'cox yaxsi oyun idi', 'hardasan qardas']) assert.equal(azOrTr(t), 'az', t);
+for (const t of ['ben bilmiyorum ya', 'yok ya bu çok kötü', 'kanka ne yapıyorsun', 'nasılsın abi', 'ne diyorsun sen', 'öyle değil abi', 'gelecek misin']) assert.equal(azOrTr(t), 'tr', t);
+for (const t of ['the match was crazy lol', 'madrid wins 2-1', 'ok', 'max taxi next quick', 'sabah ora gedek?', 'ne olur ne olmaz']) assert.equal(azOrTr(t), null, t);
+// review: words both languages have (as typed in chats), and Turkish slang Azerbaijani friends use, decide nothing
+for (const t of ['uçak indi', 'dolar yine indi ya', 'bu oğlan kim ya', 'oğlan haklı']) assert.notEqual(azOrTr(t), 'az', t);
+for (const t of ['bir sey de', 'hec bir sey', 'o sey ne idi', 'neden danisirsiz', 'herkes bilir', 'aynen qaqa', 'kanka gelirsen?', 'abi sen ne deyirsen', 'Kanan, bu şey heç vaxt olmayacaq']) assert.notEqual(azOrTr(t), 'tr', t);
+for (const t of ['qaqa sen deli olmusan', 'ne olub?', 'aynen qaqa']) assert.equal(azOrTr(t), 'az', t);
+assert.equal(azOrTr('nasılsın abi'), 'tr');
+assert.equal(azOrTr('kanka ne yapıyorsun', 4), null, 'one marker is not enough for the stricter check');
+{
+  // the linter: a Turkish answer to an Azerbaijani message (and back) gets the one rewrite; English mixes are left alone
+  const lang = (text: string, opts: { target?: string; room?: string[] }) => lintPlan(
+    [opts.target ? { type: 'reply', text, target_message_id: 'm1' } : { type: 'message', text }],
+    { recentBotTexts: [], recentHumanTexts: [], medianLen: 20, marker, textOf: () => opts.target ?? null, lastHumanTexts: opts.room ?? [] },
+  ).issues.map(i => i.problem).join(' | ');
+  assert.ok(lang('yok abi ben bilmiyorum', { target: 'qardas sen bilirsen ne olub?' }).includes('they write Azerbaijani but this reads Turkish'));
+  assert.equal(lang('yox qardas mən bilmirəm', { target: 'abi sen biliyor musun ne oldu?' }), '', 'never pushed out of Azerbaijani');
+  assert.equal(lang('yox e, mən dedim axı', { room: ['aynen kanka', 'lol', 'abi yok ya', '😂'] }), '', 'a slangy room of Azerbaijani friends');
+  assert.equal(lang('Kanan, bu şey heç vaxt olmayacaq', { room: ['yox ee bu cox pisdi', 'axi niye bele edirsen'] }), '');
+  assert.equal(lang('dolar yine indi ya', { room: ['kanka ne yapıyorsun', 'öyle değil abi'] }), '', 'a Turkish line in a Turkish room');
+  assert.equal(lang('yox qardas mən bilmirəm', { target: 'qardas sen bilirsen ne olub?' }), '', 'same language');
+  assert.equal(lang('bro no idea what happened', { target: 'qardas sen bilirsen ne olub?' }), '', 'English is left alone');
+  assert.ok(lang('yok abi çok kötü oynuyorlar', { room: ['yox ee bu cox pisdi', 'madrid wins', 'axi niye bele edirsen'] }).includes('reads Turkish'), 'plain message: the room decides');
+  assert.equal(lang('yok abi çok kötü oynuyorlar', { room: ['yox ee bu cox pisdi', 'kanka ne yapıyorsun'] }), '', 'a mixed room decides nothing');
+  assert.equal(lang('çok kötü ya', { room: ['yox ee bu cox pisdi', 'axi niye bele edirsen'] }), '', 'one Turkish word is not enough to act');
+}
 const long = lintPlan([{ type: 'message', text: 'x'.repeat(300) }], { recentBotTexts: [], recentHumanTexts: [], medianLen: 20, marker });
 assert.ok(long.issues[0].problem.startsWith('too long'));
 
@@ -244,6 +306,31 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
   assert.deepEqual(reception([r('Murad', 'forceai thoughts?', 0), b('madrid is done', 5), r('Kanan', 'ok', 6), r('Murad', 'ok', 7), r('Aysel', 'ok', 8)], 'ForceAI', T + 100_000), [], 'asked: not judged');
   const funny = b('ref is on the barca payroll', 5);
   assert.deepEqual(reception([r('Murad', 'match', 0), funny, r('Kanan', 'HAHAHA', 8)], 'ForceAI', T + 100_000), ['laughed']);
+  // round 17: pushback is not engagement
+  const flop = b('kanan the human pass master', 5);
+  assert.deepEqual(reception([r('Murad', 'match', 0), flop, r('Kanan', 'cringe', 8)], 'ForceAI', T + 100_000), ['booed'], '"cringe" right after it');
+  assert.deepEqual(reception([r('Murad', 'match', 0), flop, { ...r('Aysel', '🙄', 7), type: 'reaction', quoted_id: flop.id }, r('Kanan', 'anyway', 8)], 'ForceAI', T + 100_000), ['booed'], 'an eye-roll on it');
+  assert.deepEqual(reception([r('Murad', 'match', 0), flop, r('Kanan', 'what time', 8), r('Aysel', 'не смешно', 9, { quoted_id: flop.id })], 'ForceAI', T + 100_000), ['booed'], 'quoting it');
+  assert.deepEqual(reception([r('Murad', 'match', 0), flop, r('Kanan', 'what time', 8), r('Aysel', 'shut up murad', 9), r('Murad', 'lol', 10)], 'ForceAI', T + 100_000), ['ignored'], 'pushback aimed at someone else');
+  assert.deepEqual(reception([r('Murad', 'match', 0), flop, r('Kanan', 'HAHAHA', 7), r('Aysel', 'cringe', 8)], 'ForceAI', T + 100_000), ['laughed'], 'it landed for someone');
+  // review fixes: pushback has to be aimed at the line, a laugh wins, everyday words are not pushback
+  const after1 = (text: string, at = 8, extra: Partial<MsgRow> = {}) => reception([r('Murad', 'match', 0), flop, r('Kanan', text, at, extra), r('Aysel', 'ok', at + 1), r('Murad', 'ok', at + 2)], 'ForceAI', T + 100_000)[0];
+  const aysel = r('Aysel', 'look at my dance', 1);
+  assert.equal(reception([r('Murad', 'match', 0), aysel, flop, r('Kanan', 'cringe', 8, { quoted_id: aysel.id }), r('Aysel', 'ok', 9), r('Murad', 'ok', 10)], 'ForceAI', T + 100_000)[0], 'ignored', 'quoting someone else');
+  for (const t of ['murad shut up', 'his celebration was cringe', 'shut up 😭😭', 'STOP IT 😭😭', 'shut up lmao', 'мне хватит одного пива', 'денег не хватит', 'bu qədər bəsdir', 'işten bıktım ya', 'the stadium is too far', 'komik değil mi 😂', 'how is this not funny 😂'])
+    assert.notEqual(after1(t), 'booed', t);
+  assert.notEqual(after1('cringe', 6 * 3600), 'booed', 'hours later it is about something else');
+  assert.notEqual(after1('komik değil misin'), 'booed', '"aren\'t you funny?"');
+  assert.notEqual(after1('хватит?'), 'booed', '"is it enough?"');
+  for (const t of ['cringy', 'so cringey', 'corny', 'кринж', 'несмешно', 'ne smeshno', 'krinj', 'komik değilsin', 'soğuk espri', 'gülməli deyilsən', 'soyuq zarafat', 'хватит', 'bəsdir', 'who asked', 'who asked?'])
+    assert.equal(after1(t), 'booed', t);
+  assert.equal(reception([r('Murad', 'match', 0), flop, { ...r('Aysel', '🤡', 7), type: 'reaction', quoted_id: flop.id }, r('Kanan', 'anyway', 8)], 'ForceAI', T + 100_000)[0], 'booed', 'a clown on it');
+  // the bar: pushback never lowers it, and a cold run counts both
+  assert.equal(roomShift({ rec: ['ignored', 'ignored', 'ignored', 'booed'] }).delta, 1, 'max, not reset to 0.8');
+  assert.deepEqual(roomShift({ rec: ['booed', 'ignored'] }), { delta: 0.5, notes: ['2 landed cold +0.5'] });
+  const booedRec: Reception[] = ['laughed', 'booed'];
+  assert.deepEqual(roomShift({ rec: booedRec }), { delta: 0.8, notes: ['pushback on last line +0.8'] });
+  assert.ok(formatRoomNow({ dyn: quietDyn, map: emptyMap, cues: [], rec: booedRec }, 'gate')!.includes('- your last unprompted line got pushback'));
 
   // policy: the room moves the bar for unprompted lines only
   const calm = { window: 30, botShare: 0.05, humansSinceBot: 10, secondsSinceBot: 600 };

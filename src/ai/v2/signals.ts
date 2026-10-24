@@ -521,12 +521,13 @@ export function closingText(text: string): boolean {
   return CLOSING_WORD.test(bare);
 }
 
-export type Reception = 'laughed' | 'answered' | 'ignored';
+export type Reception = 'laughed' | 'answered' | 'ignored' | 'booed';
 
 /**
- * How the bot's recent UNPROMPTED lines were received: laughed at, answered, or ignored (three or
- * more human messages later, nobody laughed, replied or said its name). A run of ignored lines means
- * it is misjudging this room right now, so the policy raises its bar (HUMA's reflection step, in code).
+ * How the bot's recent UNPROMPTED lines were received: laughed at, booed ("cringe", "not funny", 🙄),
+ * answered, or ignored (three or more human messages later, nobody laughed, replied or said its name).
+ * A run of ignored lines, or pushback on the last one, means it is misjudging this room right now, so the
+ * policy raises its bar (HUMA's reflection step, in code).
  * A line counts as unprompted when the human message before it did not mention or reply to the bot.
  */
 export function reception(rows: MsgRow[], botName: string, now = Date.now(), last = 4): Reception[] {
@@ -534,6 +535,12 @@ export function reception(rows: MsgRow[], botName: string, now = Date.now(), las
   const laughs = laughCounts(rows);
   const chat = rows.filter(r => r.type !== 'reaction');
   const out: Reception[] = [];
+  // first names of the people here: "cringe" that names one of them is about them, not the bot's line
+  const people = new Set(rows.filter(r => !r.is_bot && r.sender_name).map(r => r.sender_name!.trim().split(/\s+/)[0].toLowerCase()).filter(n => n.length >= 3));
+  const aimedElsewhere = (t: string) => {
+    const w = t.toLowerCase().match(/\p{L}+/gu) ?? [];
+    return w.length > 5 || w.some(x => people.has(x) || OTHER_PERSON.has(x));
+  };
   for (let i = 0; i < chat.length; i++) {
     const b = chat[i];
     if (!b.is_bot || b.type !== 'text' || !b.id) continue;
@@ -543,12 +550,30 @@ export function reception(rows: MsgRow[], botName: string, now = Date.now(), las
     if (prompted) continue;
     const after = chat.slice(i + 1).filter(r => !r.is_bot && !r.is_owner);
     if ((laughs.get(b.id) ?? 0) > 0) { out.push('laughed'); continue; }
+    // pushback is not engagement: a 🙄 / 👎 on it, or "cringe" / "not funny" / "не смешно" aimed at it: a
+    // message that quotes it or names the bot, or a short one right after it (within 5 minutes, quoting
+    // nothing else, naming nobody else)
+    const atIt = (r: MsgRow, k: number) => r.quoted_id === b.id || (r.text ?? '').toLowerCase().includes(bot)
+      || (k === 0 && !r.quoted_id && r.ts - b.ts <= 5 * 60_000 && !aimedElsewhere(r.text ?? ''));
+    const booed = rows.some(r => r.type === 'reaction' && r.quoted_id === b.id && !r.is_bot && !r.is_owner && COLD_REACTION.test(r.text ?? ''))
+      || after.slice(0, 4).some((r, k) => atIt(r, k) && pushback(r.text ?? ''));
+    if (booed) { out.push('booed'); continue; }
     const engaged = after.slice(0, 4).some(r => r.quoted_id === b.id || (r.text ?? '').toLowerCase().includes(bot))
       || rows.some(r => r.type === 'reaction' && r.quoted_id === b.id && !r.is_bot);
     if (engaged) { out.push('answered'); continue; }
     if (after.length >= 3 || (after.length >= 1 && now - b.ts > 5 * 60_000)) out.push('ignored');
   }
   return out.slice(-last);
+}
+
+/** Pronouns that point at someone else ("his celebration was cringe"). */
+const OTHER_PERSON = new Set(['he', 'his', 'him', 'she', 'her', 'they', 'their', 'them', 'он', 'она', 'они', 'его', 'её', 'ее', 'их', 'onun', 'onlar']);
+
+/** How many of the latest judged lines in a row landed cold (ignored or pushback). */
+export function coldStreak(rec: Reception[]): number {
+  let n = 0;
+  for (let i = rec.length - 1; i >= 0 && (rec[i] === 'ignored' || rec[i] === 'booed'); i--) n += 1;
+  return n;
 }
 
 /** How many of the latest judged lines in a row were ignored. */
@@ -904,8 +929,10 @@ export function formatRoomNow(r: RoomNow, stage: 'gate' | 'writer'): string | nu
   const chain = r.map.chains.find(c => c.fresh);
   if (chain) lines.push(`- reply chain: ${chain.ids.map(i => `#${i}`).join(' > ')} (${chain.people.join(', ')})`);
   if (stage === 'gate' && r.rec) {
-    const streak = ignoredStreak(r.rec);
-    if (streak >= 2) lines.push(`- your last ${streak} unprompted lines got no reaction`);
+    const cold = coldStreak(r.rec);
+    const mixed = r.rec.slice(-cold).includes('booed');
+    if (r.rec[r.rec.length - 1] === 'booed') lines.push(`- your last unprompted line got pushback (called cringe, not funny or an eye-roll)${cold >= 2 ? `; your last ${cold} all landed cold` : ''}`);
+    else if (cold >= 2) lines.push(`- your last ${cold} unprompted lines ${mixed ? 'landed cold (no reaction or pushback)' : 'got no reaction'}`);
     else if (r.rec.filter(x => x === 'laughed').length >= 2) lines.push('- your recent unprompted lines got laughs');
   }
   if (r.part) {
@@ -961,12 +988,24 @@ export function formatClockLine(cities: ClockCity[], now = new Date()): string {
 
 /** Pushing back on a dig ("not funny", "отстань", "yeter artık", "bəsdir"...), or a cold reaction. */
 const PUSHBACK = new RegExp('(?<!\\p{L})(?:' + [
-  'not funny', 'shut up', 'stop it', 'stfu', 'leave me alone', 'cringe', 'unfunny', 'too far', 'not cool',
-  'не смешно', 'отстань', 'заткнись', 'хватит', 'завали',
-  ...['komik değil', 'yeter artık', 'kes artık', 'bıktım'].map(loose),
-  ...['gülməli deyil', 'bəsdir', 'əl çək'].map(loose),
+  'not funny', 'shut up', 'stop it', 'stfu', 'leave me alone', 'cring(?:e|y|ey|eworthy)', 'unfunny', 'corny', 'nobody asked',
+  'went too far', "(?:that['’]?s|this is|it['’]?s) too far", 'not cool',
+  'не ?смешно', 'отстань', 'заткнись', 'хватит уже', 'ну хватит', 'завали', 'кринж\\p{L}*', 'испанский стыд',
+  'ne ?smeshno', 'krin(?:j|zh)\\p{L}*', 'otstan', 'zatknis',
+  // "komik değil mi 😂" is "isn't it funny?": not pushback
+  loose('komik değil') + '(?:s[iı]n)?(?!\\s*m[iıuü])',
+  ...['yeter artık', 'kes artık', 'soğuk espri'].map(loose),
+  loose('gülməli deyil') + '(?:s[əe]n)?',
+  ...['bəsdir də', 'bəsdir artıq', 'əl çək', 'soyuq zarafat'].map(loose),
 ].join('|') + ')(?!\\p{L})', 'iu');
-const COLD_REACTION = /😐|😑|🙄|👎|🖕|😒/u;
+/** Words that mean "enough" / "who asked" only when they are the whole message ("денег не хватит" is not pushback). */
+const PUSHBACK_WHOLE = /^(?:(?:ну\s+)?(?:хватит|hvatit|b[əe]sdi(?:r)?|yeter)[\s!.]*|who asked[\s!.?]*)$/iu;
+const COLD_REACTION = /😐|😑|🙄|👎|🖕|😒|🥱|🤡/u;
+
+/** Pushback on a line, unless it comes with a laugh ("shut up 😭😭" means it was funny). */
+function pushback(text: string): boolean {
+  return (PUSHBACK.test(text) || PUSHBACK_WHOLE.test(text.trim())) && !LAUGH_TEXT.test(text);
+}
 
 export interface TeaseTake { name: string; teased: number; laughed: number; pushedBack: number }
 
@@ -1008,8 +1047,8 @@ export function teaseReception(rows: MsgRow[], names: string[]): TeaseTake[] {
     const reacts = (reactsOn.get(b.id) ?? []).filter(isTarget);
     const theirs = after.filter(isTarget);
     const laughed = reacts.some(r => LAUGH_EMOJI.test(r.text ?? ''))
-      || theirs.some(r => (r.quoted_id === b.id || theirs[0] === r) && LAUGH_TEXT.test(r.text ?? '') && !PUSHBACK.test(r.text ?? ''));
-    const pushed = reacts.some(r => COLD_REACTION.test(r.text ?? '')) || theirs.some(r => PUSHBACK.test(r.text ?? ''));
+      || theirs.some(r => (r.quoted_id === b.id || theirs[0] === r) && LAUGH_TEXT.test(r.text ?? ''));
+    const pushed = reacts.some(r => COLD_REACTION.test(r.text ?? '')) || theirs.some(r => pushback(r.text ?? ''));
     const p = people.get(tFirst) ?? { name: target, teased: 0, laughed: 0, pushedBack: 0 };
     p.teased += 1;
     if (pushed) p.pushedBack += 1;
