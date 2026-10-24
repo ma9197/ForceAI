@@ -9,7 +9,7 @@ import { BrainV2 } from '../src/ai/v2/brain.js';
 import { lintPlan, phoneStyle, autoFix } from '../src/ai/v2/lint.js';
 import { CHATTINESS_SHIFT, decide, threshold } from '../src/ai/v2/policy.js';
 import {
-  botTargets, botTics, callbackKeywords, formatTargets, formatTaste, formatTics, landedLines, participation, styleStats, type MsgRow,
+  botTargets, botTics, callbackKeywords, formatDecisionFeedback, formatTargets, formatTaste, formatTics, landedLines, participation, styleStats, type MsgRow,
 } from '../src/ai/v2/signals.js';
 import type { GateV2Out } from '../src/ai/v2/schemas.js';
 
@@ -143,6 +143,7 @@ add('b@s', 'Kanan', 'madrid will win the league watch');
 
 const calls: any[] = [];
 let genAnswer: any;
+let criticAnswer: any = { reason: 'not funny', verdict: 'skip' };
 const fakeAi: any = {
   gatekeeperModel: 'claude-haiku-5-5', generationModel: 'claude-sonnet-5-5',
   tuning: (_m: string, mt: number) => ({ max_tokens: mt, effort: 'low' }),
@@ -151,6 +152,7 @@ const fakeAi: any = {
     calls.push(req);
     const schema = JSON.stringify(req.output_config.format);
     if (schema.includes('"addressed"')) return { usage: {}, stop_reason: 'end_turn', parsed_output: gate({ decision: 'IGNORE', s: { timing: 3 } }) };
+    if (schema.includes('"verdict"')) return { usage: {}, stop_reason: 'end_turn', parsed_output: criticAnswer };
     if (schema.includes('"fixes"')) return { usage: {}, stop_reason: 'end_turn', parsed_output: { fixes: [{ index: 0, text: 'kanan said that last season too' }] } };
     return { usage: {}, stop_reason: 'end_turn', parsed_output: genAnswer };
   } } },
@@ -195,6 +197,40 @@ assert.ok(!genReq.system[0].text.includes('great question'), 'no banned phrase p
 assert.deepEqual(res.plan.actions.map(a => a.type), ['reply', 'reaction']);
 assert.equal((res.plan.actions[0] as any).text, 'kanan said that last season too');
 assert.ok(res.plan.note.includes('angle: callback') && res.plan.note.includes('rewrote 1'));
+
+// second opinion: only for unprompted lines; "skip" means silence, "send" keeps the plan
+calls.length = 0;
+const vetoed = await brain.generate({ chatJid: G, consumedUpToTs: Date.now() - 60_000, unprompted: true });
+assert.equal(calls.length, 3, 'generator + rewrite + second opinion');
+assert.deepEqual(vetoed!.plan.actions, []);
+assert.ok(vetoed!.plan.note.includes('second opinion said skip: not funny'));
+criticAnswer = { reason: 'lands', verdict: 'send' };
+const sent = await brain.generate({ chatJid: G, consumedUpToTs: Date.now() - 60_000, unprompted: true });
+assert.equal(sent!.plan.actions.length, 2);
+repo.setConfig('v2_second_opinion', '0');
+calls.length = 0;
+await brain.generate({ chatJid: G, consumedUpToTs: Date.now() - 60_000, unprompted: true });
+assert.equal(calls.length, 2, 'second opinion off: no extra call');
+calls.length = 0;
+await brain.generate({ chatJid: G, consumedUpToTs: Date.now() - 60_000, addressIds: ['m60'] });
+assert.equal(calls.length, 2, 'answers when addressed never get a second opinion');
+
+// owner's calls on v2 decisions reach the v2 gatekeeper as examples of when to talk
+const d1 = repo.insertDecision(G, 'T1v2', 'RESPOND', 'r | strong thought | urge 7 vs bar 6.5 | thought: roast kanan again');
+const d2 = repo.insertDecision(G, 'T1v2', 'IGNORE', 'r | nothing worth adding | thought: ask about the match');
+const d3 = repo.insertDecision(G, 'T2', 'SEND', 'v1 line');
+assert.equal(repo.setDecisionFeedback(d1, 'bad'), true);
+assert.equal(repo.setDecisionFeedback(d2, 'bad'), true);
+assert.equal(repo.setDecisionFeedback(d3, 'good'), false, 'only v2 turn-taking decisions can be rated');
+assert.deepEqual([...repo.getDecisionVerdicts([d1, d2, d3]).entries()], [[d1, 'bad'], [d2, 'bad']]);
+const fb = formatDecisionFeedback(repo.getDecisionFeedback(8))!;
+assert.ok(fb.includes('should have STAYED QUIET here: r | strong thought') && fb.includes('should have SPOKEN here: r | nothing worth adding'));
+prompts.memoryVersion += 1;
+calls.length = 0;
+await brain.gate(G, Date.now() - 60_000, false);
+assert.ok(calls[0].system[1].text.includes("YOUR OWNER'S CALLS ON YOUR PAST DECISIONS"), 'owner calls reach the gatekeeper');
+assert.equal(repo.setDecisionFeedback(d1, null), true);
+assert.equal(repo.getDecisionFeedback(8).length, 1);
 
 // v1 is untouched: its frozen block has no v2 text
 assert.ok(!prompts.getBlockA().includes('HOW A REAL FRIEND TEXTS'));

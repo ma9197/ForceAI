@@ -9,10 +9,10 @@ import type { GenerateInput } from '../generator.js';
 import type { PromptBuilder } from '../prompts.js';
 import { lintPlan, type LintResult } from './lint.js';
 import { CHATTINESS_SHIFT, decide, type PolicyResult } from './policy.js';
-import { GATEKEEPER_V2_SYSTEM, REWRITE_SYSTEM } from './prompts.js';
-import { GateV2Schema, PlanV2Schema, RewriteSchema, type GateV2Out, type PlanV2Out } from './schemas.js';
+import { CRITIC_SYSTEM, GATEKEEPER_V2_SYSTEM, REWRITE_SYSTEM } from './prompts.js';
+import { CriticSchema, GateV2Schema, PlanV2Schema, RewriteSchema, type GateV2Out, type PlanV2Out } from './schemas.js';
 import {
-  botTargets, botTics, callbackKeywords, formatCallbacks, formatLanded, formatParticipation, formatStyleStats,
+  botTargets, botTics, callbackKeywords, formatDecisionFeedback, formatCallbacks, formatLanded, formatParticipation, formatStyleStats,
   formatTargets, formatTaste, formatTics, landedLines, participation, stripMarker, styleStats, type MsgRow,
 } from './signals.js';
 
@@ -25,6 +25,8 @@ export interface GenerateV2Input extends GenerateInput {
   /** the gatekeeper's inner thought: 'now' = the reason it decided to talk, 'pause' = saved earlier, offered at a pause */
   thought?: string | null;
   thoughtWhen?: 'now' | 'pause';
+  /** nobody asked: the text gets a second opinion before it is sent (Settings, on by default) */
+  unprompted?: boolean;
   /** preview: no observations saved, nothing recorded besides token usage */
   dryRun?: boolean;
 }
@@ -34,6 +36,8 @@ export interface GenerateV2Result {
   out: PlanV2Out;
   lint: LintResult;
   rewritten: number;
+  /** set when the second opinion vetoed an unprompted line */
+  vetoed?: string;
 }
 
 /** A thought that came at the wrong moment, kept for the next pause. */
@@ -94,11 +98,13 @@ export class BrainV2 {
       .filter(i => i.category === 'joke' || i.category === 'reference')
       .slice(0, 15).map(i => `- ${i.content}`).join('\n');
     const summary = this.repo.getSummary(chatJid)?.summary;
+    const calls = formatDecisionFeedback(this.repo.getDecisionFeedback(BRAIN_V2.DECISION_EXAMPLES));
     const text = [
       `PEOPLE IN THIS CHAT:\n${who || '(nobody known yet)'}`,
       protectedPeople ? `PROTECTED PEOPLE (owner's absolute boundaries; never plan a joke that crosses them):\n${protectedPeople}` : '',
       bits ? `RUNNING JOKES AND REFERENCES OF THIS GROUP:\n${bits}` : '',
       summary ? `WHAT HAS BEEN GOING ON LATELY:\n${summary}` : '',
+      calls ?? '',
     ].filter(Boolean).join('\n\n');
     this.contextCache.set(chatJid, { text, version: this.prompts.memoryVersion, at: Date.now() });
     return text;
@@ -252,6 +258,17 @@ export class BrainV2 {
         }
       }
       actions = lint.actions;
+
+      // second opinion: an unprompted text has to convince a sharp friend, or the bot stays quiet
+      let vetoed: string | undefined;
+      if (input.unprompted && this.repo.getConfig('v2_second_opinion') !== '0' && actions.some(a => a.type === 'message' || a.type === 'reply' || a.type === 'voice')) {
+        const verdict = await this.critic(input.chatJid, rows, actions);
+        if (verdict && verdict.verdict === 'skip') {
+          vetoed = verdict.reason;
+          actions = [];
+        }
+      }
+
       const angle = out.angles[out.pick] ?? out.angles[0];
       const note = [
         out.note,
@@ -259,10 +276,33 @@ export class BrainV2 {
         out.read.sincere ? 'sincere moment' : '',
         lint.dropped.length ? `dropped ${lint.dropped.length}` : '',
         rewritten ? `rewrote ${rewritten}` : '',
+        vetoed ? `second opinion said skip: ${vetoed}` : '',
       ].filter(Boolean).join(' | ');
-      return { plan: { actions, note }, out, lint, rewritten };
+      return { plan: { actions, note }, out, lint, rewritten, vetoed };
     } catch (err) {
       logger.error({ err }, 'brain v2 generator call failed, staying silent');
+      return null;
+    }
+  }
+
+  /** "Would a sharp friend send this right now?" One small call; null (= send) if it fails. */
+  private async critic(chatJid: string, rows: MsgRow[], actions: BotAction[]): Promise<{ verdict: 'send' | 'skip'; reason: string } | null> {
+    const transcript = this.prompts.formatTranscript(rows.slice(-BRAIN_V2.CRITIC_LINES), null);
+    const draft = actions.map(a => ('text' in a ? `${a.type}: ${a.text}` : a.type)).join('\n');
+    try {
+      const model = this.ai.gatekeeperModel;
+      const { max_tokens, effort } = this.ai.tuning(model, 300, 'quick');
+      const response = await this.ai.client.messages.parse({
+        model,
+        max_tokens,
+        system: CRITIC_SYSTEM,
+        messages: [{ role: 'user', content: `LAST MESSAGES:\n${transcript}\n\nWHAT IT WANTS TO SEND:\n${draft}` }],
+        output_config: { format: zodOutputFormat(CriticSchema), ...(effort ? { effort } : {}) },
+      });
+      this.ai.recordUsage(model, response.usage, 't2', chatJid);
+      return response.parsed_output ?? null;
+    } catch (err) {
+      logger.warn({ err }, 'brain v2 second opinion failed, sending as planned');
       return null;
     }
   }

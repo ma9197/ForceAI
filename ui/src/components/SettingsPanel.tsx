@@ -23,6 +23,7 @@ interface Settings {
   voice_id: string;
   voice_provider: 'gemini' | 'elevenlabs';
   v2_chattiness: string;
+  v2_second_opinion: boolean;
   gemini_voice: string;
   voice_style: string;
   gemini_voices: { value: string; label: string }[];
@@ -248,6 +249,19 @@ export function SettingsPanel({ onSaved }: { onSaved: () => void }) {
           <option value="balanced">Balanced</option>
           <option value="chatty">Chatty</option>
         </select>
+      </div>
+
+      <div className="settings-row">
+        <div>
+          <label>Brain v2 second opinion</label>
+          <div className="hint">Only for groups on brain v2. Before it jumps in when nobody asked, a quick check asks "would a sharp friend send this?" and drops it if not. One small extra call per unprompted line.</div>
+        </div>
+        <input
+          type="checkbox"
+          checked={settings.v2_second_opinion}
+          onChange={e => update({ v2_second_opinion: e.target.checked })}
+          style={{ width: 18, height: 18 }}
+        />
       </div>
 
       <div className="settings-row">

@@ -3,7 +3,7 @@ import { post } from '../api';
 
 export type FeedItem =
   | { kind: 'message'; id: string; shortId: string; senderName: string; isBot: boolean; isOwner: boolean; type: string; text: string; quotedText?: string; reactionEmoji?: string; ts: number; rating?: number }
-  | { kind: 'decision'; ts: number; tier: string; decision: string; reason: string };
+  | { kind: 'decision'; ts: number; tier: string; decision: string; reason: string; id?: number; verdict?: string };
 
 function time(ts: number): string {
   return new Date(ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
@@ -56,6 +56,22 @@ function RateButtons({ id, initial }: { id: string; initial?: number }) {
   );
 }
 
+/** Owner's call on a brain v2 decision: 👍 = right call, 👎 = wrong call (spoke when it should not, or the reverse). */
+function DecisionRate({ id, initial }: { id: number; initial?: string }) {
+  const [verdict, setVerdict] = useState<string | null>(initial ?? null);
+  const rate = (v: 'good' | 'bad') => {
+    const next = verdict === v ? null : v;
+    setVerdict(next);
+    void post('/api/decision-feedback', { id, verdict: next }).catch(() => setVerdict(verdict));
+  };
+  return (
+    <span className="rate" title="Was this the right call? Brain v2 learns when to talk from these.">
+      <span className={`rate-btn ${verdict === 'good' ? 'on' : ''}`} onClick={() => rate('good')}>👍</span>
+      <span className={`rate-btn ${verdict === 'bad' ? 'on' : ''}`} onClick={() => rate('bad')}>👎</span>
+    </span>
+  );
+}
+
 export function LiveFeed({ items, selectedShortId, onSelect }: {
   items: FeedItem[];
   selectedShortId?: string | null;
@@ -89,6 +105,9 @@ export function LiveFeed({ items, selectedShortId, onSelect }: {
           return (
             <div key={`d${i}`} className="decision-row" title={new Date(item.ts).toLocaleString()}>
               <b>{item.tier} {item.decision}</b> — {item.reason}
+              {item.tier === 'T1v2' && item.id != null && ['RESPOND', 'IGNORE', 'REACT', 'PAUSE'].includes(item.decision) && (
+                <DecisionRate id={item.id} initial={item.verdict} />
+              )}
             </div>
           );
         }

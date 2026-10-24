@@ -5,7 +5,7 @@ export type WsEvent =
   | { kind: 'qr'; dataUrl: string }
   | { kind: 'connection'; state: string }
   | { kind: 'message'; chatJid: string; message: import('./api').FeedMessage }
-  | { kind: 'decision'; chatJid: string; ts: number; tier: string; decision: string; reason: string }
+  | { kind: 'decision'; chatJid: string; ts: number; tier: string; decision: string; reason: string; id?: number }
   | { kind: 'action'; chatJid: string; ts: number; action: { type: string; text?: string; emoji?: string } }
   | { kind: 'stats'; stats: Record<string, number> }
   | { kind: 'fact'; chatJid: string; memberJid: string; fact: string; category: string | null }

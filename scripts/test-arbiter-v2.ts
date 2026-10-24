@@ -40,6 +40,7 @@ function harness(chatJid: string) {
     },
     generate: async (input: any) => {
       log.push(`v2gen:${chatJid}:${input.thought ?? ''}`);
+      log.push(`unprompted:${!!input.unprompted}:${input.thoughtWhen ?? ''}`);
       return { plan: { actions: [{ type: 'message', text: 'v2 says hi' }], note: 'v2' } };
     },
     hasThought: () => true,
@@ -78,6 +79,7 @@ await sleep(700);
 assert.ok(log.includes(`v2gate:${V2}`) && log.includes(`v2gen:${V2}:saved line`), 'the inner thought seeds the reply');
 assert.ok(!log.includes(`v1gate:${V2}`) && log.includes('T1v2:RESPOND') && log.includes('T2v2:SEND'));
 assert.deepEqual(two.sent.map(a => a.text), ['v2 says hi']);
+assert.ok(log.includes('unprompted:true:now'), 'nobody addressed it: the reply gets a second opinion');
 
 // 3. v2 REACT: one reaction, no generator call
 log.length = 0;
@@ -100,6 +102,7 @@ assert.ok(log.includes('T1v2:IGNORE'));
 await sleep(1500);
 assert.ok(log.includes('T1v2:PAUSE'), log.join(' '));
 assert.ok(log.includes(`v2gen:${V2}:saved line`), 'generator gets the saved thought');
+assert.ok(log.includes('unprompted:true:pause'));
 
 // 5. a new message cancels a pending pause
 log.length = 0;

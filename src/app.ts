@@ -689,8 +689,8 @@ export class App {
     this.arbiters.set(chatJid, new Arbiter(
       chatJid, this.repo, this.ai, this.gatekeeper, this.generator, this.outbound, this.jids,
       {
-        onDecision: (tier, decision, reason) =>
-          this.bus.publish({ kind: 'decision', chatJid, ts: Date.now(), tier, decision, reason }),
+        onDecision: (tier, decision, reason, id) =>
+          this.bus.publish({ kind: 'decision', chatJid, ts: Date.now(), tier, decision, reason, id }),
         onAction: (action) => {
           this.bus.publish({ kind: 'action', chatJid, ts: Date.now(), action });
           this.bus.publish({ kind: 'stats', stats: this.repo.getStats() });
@@ -868,6 +868,7 @@ export class App {
       voice_id: this.repo.getConfig('voice_id') || ELEVENLABS.DEFAULT_VOICE_ID,
       voice_provider: voiceProvider(this.repo),
       v2_chattiness: this.repo.getConfig('v2_chattiness') ?? 'balanced',
+      v2_second_opinion: this.repo.getConfig('v2_second_opinion') !== '0', // default ON
       gemini_voice: this.repo.getConfig('gemini_voice') || GEMINI_TTS.DEFAULT_VOICE,
       voice_style: this.repo.getConfig('voice_style') ?? GEMINI_TTS.DEFAULT_STYLE,
       persona_mode: this.repo.getConfig('persona_mode') ?? 'default',

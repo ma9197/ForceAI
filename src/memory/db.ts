@@ -198,6 +198,15 @@ export function openDb(file: string = DB_PATH): Database.Database {
       rating     INTEGER NOT NULL,   -- 1 = more like this, -1 = not like this
       ts         INTEGER
     );
+    -- owner's call on brain v2 turn-taking decisions (spoke / stayed quiet): examples for the v2 gatekeeper
+    CREATE TABLE IF NOT EXISTS decision_feedback (
+      decision_id INTEGER PRIMARY KEY,
+      chat_jid    TEXT,
+      decision    TEXT,
+      reason      TEXT,
+      verdict     TEXT NOT NULL,   -- 'good' | 'bad'
+      ts          INTEGER
+    );
     CREATE TABLE IF NOT EXISTS initiative_principles (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
       content       TEXT NOT NULL,

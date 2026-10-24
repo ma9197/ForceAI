@@ -107,6 +107,17 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     return { ok: true };
   });
 
+  // owner's call on a brain v2 decision (spoke / stayed quiet): examples for the v2 gatekeeper
+  fastify.post<{ Body: { id?: number; verdict?: string | null } }>('/api/decision-feedback', async (req, reply) => {
+    const { id, verdict } = req.body ?? {};
+    if (typeof id !== 'number' || (verdict !== 'good' && verdict !== 'bad' && verdict !== null)) {
+      return reply.code(400).send({ error: 'id and verdict (good, bad or null) required' });
+    }
+    if (!app.repo.setDecisionFeedback(id, verdict)) return reply.code(404).send({ error: 'not a brain v2 decision' });
+    app.prompts.memoryVersion += 1;
+    return { ok: true };
+  });
+
   fastify.post<{ Body: { jid: string } }>('/api/resume', async (req, reply) => {
     const { jid } = req.body ?? {};
     if (!jid) return reply.code(400).send({ error: 'jid required' });
@@ -427,13 +438,14 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     const decisions = app.repo.getRecentDecisions(limit, jid);
     const mentions = app.repo.getMentionNameMap();
     const ratings = app.repo.getFeedbackRatings(messages.filter(r => r.is_bot).map(r => r.id));
+    const verdicts = app.repo.getDecisionVerdicts(decisions.filter(d => d.tier === 'T1v2').map(d => d.id));
     return {
       messages: messages.map(r => ({
         id: r.id, shortId: r.short_id, senderName: r.sender_name, isBot: !!r.is_bot,
         isOwner: !!r.is_owner, type: r.type, text: applyMentions(r.text ?? '', mentions), ts: r.ts,
         ...(ratings.has(r.id) ? { rating: ratings.get(r.id) } : {}),
       })),
-      decisions,
+      decisions: decisions.map(d => (verdicts.has(d.id) ? { ...d, verdict: verdicts.get(d.id) } : d)),
     };
   });
 
@@ -504,7 +516,7 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
   fastify.post<{ Body: {
     gatekeeper_model?: string; generation_model?: string; effort?: string; daily_budget_usd?: number;
     msg_prefix?: string; msg_suffix?: string; voice_enabled?: boolean; voice_id?: string;
-    voice_provider?: string; gemini_voice?: string; voice_style?: string; v2_chattiness?: string;
+    voice_provider?: string; gemini_voice?: string; voice_style?: string; v2_chattiness?: string; v2_second_opinion?: boolean;
     persona_mode?: string; persona_custom?: string;
     sticker_freq?: string; voice_freq?: string; emoji_freq?: string;
     intro_message?: string; intro_enabled?: boolean; rate_per_min?: number; rate_per_hour?: number;
@@ -551,6 +563,7 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
       }
       if (b.gemini_voice && b.gemini_voice in GEMINI_TTS.VOICES) app.repo.setConfig('gemini_voice', b.gemini_voice);
       if (b.v2_chattiness && ['quiet', 'balanced', 'chatty'].includes(b.v2_chattiness)) app.repo.setConfig('v2_chattiness', b.v2_chattiness);
+      if (b.v2_second_opinion !== undefined) app.repo.setConfig('v2_second_opinion', b.v2_second_opinion ? '1' : '0');
       if (b.voice_style !== undefined) app.repo.setConfig('voice_style', b.voice_style.trim().slice(0, 300));
       if (b.persona_mode !== undefined) {
         app.repo.setConfig('persona_mode', b.persona_mode);

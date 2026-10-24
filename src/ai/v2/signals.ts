@@ -313,3 +313,18 @@ export function formatTargets(targets: { name: string; count: number }[], min = 
   if (heavy.length === 0) return null;
   return `EASY ON: ${heavy.map(t => `${t.name} (in ${t.count} of your last ${window} messages)`).join(', ')}. You keep going at the same person; give them a break unless they start it.`;
 }
+
+/**
+ * The owner's calls on past v2 decisions (rated in the dashboard feed), as examples of when to talk.
+ * A "bad" on a spoken line means it should have stayed quiet, and the other way round.
+ */
+export function formatDecisionFeedback(rows: { decision: string; reason: string; verdict: string }[]): string | null {
+  if (rows.length === 0) return null;
+  const spoke = (d: string) => d === 'RESPOND' || d === 'PAUSE';
+  const lines = rows.map(r => {
+    const what = r.reason.slice(0, 200);
+    if (spoke(r.decision)) return r.verdict === 'good' ? `- speaking was RIGHT here: ${what}` : `- should have STAYED QUIET here: ${what}`;
+    return r.verdict === 'good' ? `- staying quiet was RIGHT here: ${what}` : `- should have SPOKEN here: ${what}`;
+  });
+  return `YOUR OWNER'S CALLS ON YOUR PAST DECISIONS (learn when to talk from these):\n${lines.join('\n')}`;
+}
