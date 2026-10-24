@@ -180,6 +180,12 @@ assert.equal(lintPlan([{ type: 'message', text: 'not bad, but he still missed th
 for (const t of ['mən bilmirəm ki', 'yox ee bu cox pisdi', 'qardas sen neynirsen', 'bu gun gedirem', 'axi niye bele edirsen', 'cox yaxsi oyun idi', 'hardasan qardas']) assert.equal(azOrTr(t), 'az', t);
 for (const t of ['ben bilmiyorum ya', 'yok ya bu çok kötü', 'kanka ne yapıyorsun', 'nasılsın abi', 'ne diyorsun sen', 'öyle değil abi', 'gelecek misin']) assert.equal(azOrTr(t), 'tr', t);
 for (const t of ['the match was crazy lol', 'madrid wins 2-1', 'ok', 'max taxi next quick', 'sabah ora gedek?', 'ne olur ne olmaz']) assert.equal(azOrTr(t), null, t);
+// review: words both languages have (as typed in chats), and Turkish slang Azerbaijani friends use, decide nothing
+for (const t of ['uçak indi', 'dolar yine indi ya', 'bu oğlan kim ya', 'oğlan haklı']) assert.notEqual(azOrTr(t), 'az', t);
+for (const t of ['bir sey de', 'hec bir sey', 'o sey ne idi', 'neden danisirsiz', 'herkes bilir', 'aynen qaqa', 'kanka gelirsen?', 'abi sen ne deyirsen', 'Kanan, bu şey heç vaxt olmayacaq']) assert.notEqual(azOrTr(t), 'tr', t);
+for (const t of ['qaqa sen deli olmusan', 'ne olub?', 'aynen qaqa']) assert.equal(azOrTr(t), 'az', t);
+assert.equal(azOrTr('nasılsın abi'), 'tr');
+assert.equal(azOrTr('kanka ne yapıyorsun', 4), null, 'one marker is not enough for the stricter check');
 {
   // the linter: a Turkish answer to an Azerbaijani message (and back) gets the one rewrite; English mixes are left alone
   const lang = (text: string, opts: { target?: string; room?: string[] }) => lintPlan(
@@ -187,11 +193,15 @@ for (const t of ['the match was crazy lol', 'madrid wins 2-1', 'ok', 'max taxi n
     { recentBotTexts: [], recentHumanTexts: [], medianLen: 20, marker, textOf: () => opts.target ?? null, lastHumanTexts: opts.room ?? [] },
   ).issues.map(i => i.problem).join(' | ');
   assert.ok(lang('yok abi ben bilmiyorum', { target: 'qardas sen bilirsen ne olub?' }).includes('they write Azerbaijani but this reads Turkish'));
-  assert.ok(lang('yox qardas mən bilmirəm', { target: 'abi sen biliyor musun ne oldu?' }).includes('they write Turkish but this reads Azerbaijani'));
+  assert.equal(lang('yox qardas mən bilmirəm', { target: 'abi sen biliyor musun ne oldu?' }), '', 'never pushed out of Azerbaijani');
+  assert.equal(lang('yox e, mən dedim axı', { room: ['aynen kanka', 'lol', 'abi yok ya', '😂'] }), '', 'a slangy room of Azerbaijani friends');
+  assert.equal(lang('Kanan, bu şey heç vaxt olmayacaq', { room: ['yox ee bu cox pisdi', 'axi niye bele edirsen'] }), '');
+  assert.equal(lang('dolar yine indi ya', { room: ['kanka ne yapıyorsun', 'öyle değil abi'] }), '', 'a Turkish line in a Turkish room');
   assert.equal(lang('yox qardas mən bilmirəm', { target: 'qardas sen bilirsen ne olub?' }), '', 'same language');
   assert.equal(lang('bro no idea what happened', { target: 'qardas sen bilirsen ne olub?' }), '', 'English is left alone');
-  assert.ok(lang('kanka çok kötü oynadılar ya', { room: ['yox ee bu cox pisdi', 'madrid wins', 'axi niye bele edirsen'] }).includes('reads Turkish'), 'plain message: the room decides');
-  assert.equal(lang('kanka çok kötü oynadılar ya', { room: ['yox ee bu cox pisdi', 'kanka ne yapıyorsun'] }), '', 'a mixed room decides nothing');
+  assert.ok(lang('yok abi çok kötü oynuyorlar', { room: ['yox ee bu cox pisdi', 'madrid wins', 'axi niye bele edirsen'] }).includes('reads Turkish'), 'plain message: the room decides');
+  assert.equal(lang('yok abi çok kötü oynuyorlar', { room: ['yox ee bu cox pisdi', 'kanka ne yapıyorsun'] }), '', 'a mixed room decides nothing');
+  assert.equal(lang('çok kötü ya', { room: ['yox ee bu cox pisdi', 'axi niye bele edirsen'] }), '', 'one Turkish word is not enough to act');
 }
 const long = lintPlan([{ type: 'message', text: 'x'.repeat(300) }], { recentBotTexts: [], recentHumanTexts: [], medianLen: 20, marker });
 assert.ok(long.issues[0].problem.startsWith('too long'));
@@ -310,7 +320,9 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
   for (const t of ['murad shut up', 'his celebration was cringe', 'shut up 😭😭', 'STOP IT 😭😭', 'shut up lmao', 'мне хватит одного пива', 'денег не хватит', 'bu qədər bəsdir', 'işten bıktım ya', 'the stadium is too far', 'komik değil mi 😂', 'how is this not funny 😂'])
     assert.notEqual(after1(t), 'booed', t);
   assert.notEqual(after1('cringe', 6 * 3600), 'booed', 'hours later it is about something else');
-  for (const t of ['cringy', 'so cringey', 'corny', 'кринж', 'несмешно', 'ne smeshno', 'krinj', 'komik değilsin', 'soğuk espri', 'gülməli deyilsən', 'soyuq zarafat', 'хватит', 'bəsdir', 'who asked'])
+  assert.notEqual(after1('komik değil misin'), 'booed', '"aren\'t you funny?"');
+  assert.notEqual(after1('хватит?'), 'booed', '"is it enough?"');
+  for (const t of ['cringy', 'so cringey', 'corny', 'кринж', 'несмешно', 'ne smeshno', 'krinj', 'komik değilsin', 'soğuk espri', 'gülməli deyilsən', 'soyuq zarafat', 'хватит', 'bəsdir', 'who asked', 'who asked?'])
     assert.equal(after1(t), 'booed', t);
   assert.equal(reception([r('Murad', 'match', 0), flop, { ...r('Aysel', '🤡', 7), type: 'reaction', quoted_id: flop.id }, r('Kanan', 'anyway', 8)], 'ForceAI', T + 100_000)[0], 'booed', 'a clown on it');
   // the bar: pushback never lowers it, and a cold run counts both

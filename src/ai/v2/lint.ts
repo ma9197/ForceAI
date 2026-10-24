@@ -162,8 +162,8 @@ export function phoneStyle(text: string): string {
 
 /**
  * A reply in another language than the person it answers. Script first: they wrote Russian, it answers in
- * Latin letters, or the other way round. Then Azerbaijani versus Turkish (both Latin; models drift from
- * Azerbaijani into Turkish), only when both sides are clear. For a plain message the room decides: the
+ * Latin letters, or the other way round. Then Azerbaijani answered in Turkish (both Latin; models drift
+ * from Azerbaijani into Turkish), only when both sides are clear. For a plain message the room decides: the
  * last three human texts (script) or the last four with a clear verdict, at least two (Azerbaijani/Turkish).
  * English mixed with either is left alone.
  */
@@ -185,18 +185,16 @@ function languageMismatch(a: BotAction, text: string, ctx: LintContext): string 
     }
   }
   if (mine === 'cyrillic') return null;
-  const myTk = azOrTr(text);
-  if (!myTk) return null;
-  let theirTk: 'az' | 'tr' | null = null;
-  if (target !== null) theirTk = azOrTr(target);
+  // only the drift models have: Azerbaijani answered in Turkish. A Turkish-looking room of Azerbaijani friends
+  // is usually borrowed slang ("aynen kanka"), so the other direction is never flagged.
+  if (azOrTr(text, 4) !== 'tr') return null;
+  let theirs: 'az' | 'tr' | null = null;
+  if (target !== null) theirs = azOrTr(target);
   else {
-    const clear = (ctx.lastHumanTexts ?? []).slice(-4).map(azOrTr).filter((x): x is 'az' | 'tr' => !!x);
-    if (clear.length >= 2 && clear.every(x => x === clear[0])) theirTk = clear[0];
+    const clear = (ctx.lastHumanTexts ?? []).slice(-4).map(t => azOrTr(t)).filter((x): x is 'az' | 'tr' => !!x);
+    if (clear.length >= 2 && clear.every(x => x === clear[0])) theirs = clear[0];
   }
-  if (!theirTk || theirTk === myTk) return null;
-  return theirTk === 'az'
-    ? 'they write Azerbaijani but this reads Turkish: write it in Azerbaijani, the way they type it'
-    : 'they write Turkish but this reads Azerbaijani: write it in Turkish, the way they type it';
+  return theirs === 'az' ? 'they write Azerbaijani but this reads Turkish: write it in Azerbaijani, the way they type it' : null;
 }
 
 export interface LintResult {

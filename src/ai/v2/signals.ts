@@ -993,13 +993,13 @@ const PUSHBACK = new RegExp('(?<!\\p{L})(?:' + [
   'не ?смешно', 'отстань', 'заткнись', 'хватит уже', 'ну хватит', 'завали', 'кринж\\p{L}*', 'испанский стыд',
   'ne ?smeshno', 'krin(?:j|zh)\\p{L}*', 'otstan', 'zatknis',
   // "komik değil mi 😂" is "isn't it funny?": not pushback
-  loose('komik değil') + '(?:s[iı]n)?(?!\\s*m[iıuü](?!\\p{L}))',
+  loose('komik değil') + '(?:s[iı]n)?(?!\\s*m[iıuü])',
   ...['yeter artık', 'kes artık', 'soğuk espri'].map(loose),
   loose('gülməli deyil') + '(?:s[əe]n)?',
   ...['bəsdir də', 'bəsdir artıq', 'əl çək', 'soyuq zarafat'].map(loose),
 ].join('|') + ')(?!\\p{L})', 'iu');
 /** Words that mean "enough" / "who asked" only when they are the whole message ("денег не хватит" is not pushback). */
-const PUSHBACK_WHOLE = /^(?:ну\s+)?(?:хватит|hvatit|b[əe]sdi(?:r)?|yeter|who asked)[\s!.]*$/iu;
+const PUSHBACK_WHOLE = /^(?:(?:ну\s+)?(?:хватит|hvatit|b[əe]sdi(?:r)?|yeter)[\s!.]*|who asked[\s!.?]*)$/iu;
 const COLD_REACTION = /😐|😑|🙄|👎|🖕|😒|🥱|🤡/u;
 
 /** Pushback on a line, unless it comes with a laugh ("shut up 😭😭" means it was funny). */
