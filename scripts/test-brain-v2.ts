@@ -75,9 +75,13 @@ assert.ok(worked.startsWith('LINES THAT WORKED HERE'));
 assert.ok(worked.includes('- "good one 🔥" (your owner liked it)') && !worked.includes('(2 laughs)'), 'deduped: the owner-liked version wins');
 assert.ok(!worked.includes('kanan is cooked'), 'a line with a current tic or aimed at an easy-on person is left out');
 assert.ok(worked.includes('- Aysel: "he drives like he takes pens" (2 laughing)'));
-assert.ok(formatLinesThatWorked(['kanan is cooked 💀'], [], [], { emojis: ['💀'] })!.includes('kanan is cooked'), 'kept when nothing else is left');
+assert.ok(formatLinesThatWorked(['ref is cooked 💀'], [], [], { emojis: ['💀'] })!.includes('- "ref is cooked" (your owner liked it)'), 'a liked line keeps its words; only the tic emoji is taken out');
+assert.equal(formatLinesThatWorked(['kanan is cooked'], [], [], { names: ['Kanan'] }), null, 'never a dig at an easy-on person, even as the only example');
+const capped = formatLinesThatWorked(['one a', 'two b', 'three c', 'four d'], [{ text: 'landed line', laughs: 2 }], [{ who: 'Aysel', text: 'group line', laughs: 2 }])!;
+assert.equal((capped.match(/your owner liked it/g) ?? []).length, 2, 'at most 2 liked lines');
+assert.ok(capped.includes('landed line') && capped.includes('group line'), 'the other kinds still get a place');
 assert.equal(formatLinesThatWorked([], [], []), null);
-assert.ok(/^Time now \(read off, never calculate\): \S/.test(formatClockLine([{ label: 'Baku', offset: 4 }], new Date(Date.UTC(2026, 9, 24, 3, 5)))));
+assert.ok(formatClockLine([{ label: 'Baku', offset: 4 }]).startsWith('Time now (read off, never calculate; mention it only when the time or date matters): '));
 assert.ok(formatClockLine([{ label: 'Baku', offset: 4 }], new Date(Date.UTC(2026, 9, 24, 3, 5))).includes('Baku Sat 24 Oct 2026, 07:05'));
 
 // ---- linter ----
@@ -388,6 +392,17 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
   const qMap = roomMap([r('Aysel', 'who is coming to dinner?', 100), r('Leyla', 'my grandpa is in the hospital', 101)], [], 'ForceAI', T + 110_000);
   const once = formatRoomNow({ dyn: qDyn, map: qMap, cues: [] }, 'writer')!;
   assert.equal(once.split('bad news').length - 1, 1, once);
+  assert.ok(once.includes('(Leyla) may be real'), 'says who sent the bad news');
+  // a question at the end of someone's run is shown as possibly part of the story, and the policy stays neutral
+  const run = [r('Kanan', 'so yesterday im at the gym', 100), r('Kanan', 'and this guy walks in', 105), r('Kanan', 'you know what he did?', 110)];
+  const runDyn = dynamics(run, 'ForceAI', T + 115_000);
+  assert.ok(runDyn.storyteller === 'Kanan' && runDyn.hangingQuestion, 'both facts kept for the policy');
+  const runTxt = formatRoomNow({ dyn: runDyn, map: roomMap(run, [], 'ForceAI', T + 115_000), cues: [] }, 'gate')!;
+  assert.ok(runTxt.includes('- Kanan: several messages in a row, the last one a question') && !runTxt.includes('open question:'), runTxt);
+  // the writer, when nobody asked and it has talked a lot
+  const loudPart = { window: 30, botShare: 0.4, humansSinceBot: 1, secondsSinceBot: 20 };
+  assert.ok(formatRoomNow({ dyn: noDyn, map: { people: [], chains: [] }, cues: [], part: loudPart }, 'writer')!.includes('(a lot lately: say less)'));
+  assert.ok(formatRoomNow({ dyn: noDyn, map: { people: [], chains: [] }, cues: [], part: loudPart, asked: true }, 'writer')!.includes('(answer, and keep it short)'));
   assert.equal(roomMap([r('Murad', 'old', 0)], [], 'ForceAI', T + 20 * 60_000).people.length, 0, 'only recent minutes');
   const lone = roomMap([r('Aysel', 'who is coming to dinner?', 40)], [], 'ForceAI', T + 60_000);
   assert.equal(lone.people[0].openQuestion, `m${k}`);
@@ -525,7 +540,7 @@ assert.equal(brain.lastScene(G)?.topic, 'football');
 const gateReq = calls[0];
 assert.ok(gateReq.system[1].text.includes('Murad'), 'gatekeeper gets who is in the chat');
 assert.ok(gateReq.messages[0].content.includes('ROOM NOW (facts counted in code):') && /- you: \d+% of the last \d+ messages, \d+ human messages since you last spoke/.test(gateReq.messages[0].content), 'gatekeeper gets the talk share in ROOM NOW');
-assert.ok(gateReq.messages[0].content.includes('Time now (read off, never calculate):'), 'one-line clock');
+assert.ok(gateReq.messages[0].content.includes('Time now (read off, never calculate; mention it only when the time or date matters):'), 'one-line clock');
 assert.equal(brain.takeThought(G)?.text, 'kanan predicted 3-0 last week too');
 assert.equal(brain.takeThought(G), null, 'a thought is offered once');
 
@@ -557,6 +572,7 @@ assert.ok(userText.includes('"kanan tax": Murad, Kanan, 3 times over 3 days'), '
 assert.ok(userText.includes('2 days ago: "madrid wins 2-1 sunday, trust me"'), 'own takes reach the generator, marker stripped');
 assert.ok(userText.includes('LINES THAT WORKED HERE') && userText.includes('- "madrid fans in shambles 💀" (your owner liked it)'), 'owner taste reaches the generator, marker stripped');
 assert.ok(genReq.system[0].text.includes('HOW A REAL FRIEND TEXTS'), 'v2 craft block in the system prompt');
+assert.ok(genReq.system[0].text.includes('bad news in ROOM NOW, if it is real, means no jokes'), 'the writer knows bad news works like a rule');
 assert.ok(!genReq.system[0].text.includes('great question'), 'no banned phrase planted in the prompt');
 assert.deepEqual(res.plan.actions.map(a => a.type), ['message', 'reaction'], 'nobody quotes here and m60 is the newest: plain message');
 assert.equal((res.plan.actions[0] as any).text, 'kanan said that last season too');

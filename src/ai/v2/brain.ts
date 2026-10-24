@@ -217,8 +217,8 @@ export class BrainV2 {
     const dyn = dynamics(rows, BOT_NAME);
 
     const newRows = consumedUpToTs === null ? rows.slice(-6) : rows.filter(r => r.ts > consumedUpToTs);
-    // callbacks come from earlier days, not from today's session (that is in the transcript anyway)
-    const before = Math.min(rows.length ? rows[0].ts : Date.now(), Date.now() - 6 * 3_600_000);
+    // callbacks come from before the transcript and at least an hour back (not the last few minutes)
+    const before = Math.min(rows.length ? rows[0].ts : Date.now(), Date.now() - 3_600_000);
     const callbacks = formatCallbacks((this.repo.searchOlderMessages(chatJid, before, callbackKeywords(newRows), BRAIN_V2.CALLBACKS) as MsgRow[])
       .map(r => (r.is_bot ? { ...r, text: strip(r.text ?? '') } : r))
       .filter(r => !r.is_bot || notDisliked(r.text ?? '')));

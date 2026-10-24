@@ -416,8 +416,8 @@ export interface Dynamics {
   storyteller: string | null;
   /** a question to the group that nobody has answered yet */
   hangingQuestion: { shortId: string; who: string } | null;
-  /** a message that looks like real bad news, and the word that flagged it */
-  serious: { shortId: string; word: string } | null;
+  /** a message that looks like real bad news, who sent it, and the word that flagged it */
+  serious: { shortId: string; word: string; who: string } | null;
 }
 
 /**
@@ -474,11 +474,9 @@ export function dynamics(rows: MsgRow[], botName: string, now = Date.now()): Dyn
   let serious: Dynamics['serious'] = null;
   for (const r of recent.slice(-8)) {
     const word = r.type === 'text' ? seriousHit(r.text ?? '') : null;
-    if (word && r.short_id) serious = { shortId: r.short_id, word };
+    if (word && r.short_id) serious = { shortId: r.short_id, word, who: r.sender_name ?? '?' };
   }
 
-  // a question ends a run: the last message cannot be both "not finished yet" and "asked the group"
-  if (storyteller && hangingQuestion && lastHuman?.short_id === hangingQuestion.shortId) storyteller = null;
   return { privatePair, storyteller, hangingQuestion, serious };
 }
 
@@ -846,13 +844,17 @@ export interface RoomNow {
 
 export function formatRoomNow(r: RoomNow, stage: 'gate' | 'writer'): string | null {
   const lines: string[] = [];
-  const sadPeople = r.map.people.filter(p => p.serious).map(p => p.name);
-  if (r.dyn.serious) lines.push(`- bad news: #${r.dyn.serious.shortId} may be real ("${r.dyn.serious.word}")${sadPeople.length ? `, from ${sadPeople.join(', ')}` : ''}`);
-  else if (sadPeople.length) lines.push(`- bad news: ${sadPeople.join(', ')} may be going through something real`);
+  const s = r.dyn.serious;
+  const others = r.map.people.filter(p => p.serious && p.name !== s?.who).map(p => p.name);
+  if (s) lines.push(`- bad news: #${s.shortId} (${s.who}) may be real ("${s.word}")${others.length ? `; ${others.join(', ')} may be going through something real too` : ''}`);
+  else if (others.length) lines.push(`- bad news: ${others.join(', ')} may be going through something real`);
   const q = r.dyn.hangingQuestion;
-  if (q) lines.push(`- open question: #${q.shortId} (${q.who}) asked the group, nobody answered yet`);
+  // a question at the end of someone's run of messages is often part of the story ("guess what he did?")
+  const storyQuestion = !!(q && r.dyn.storyteller && r.dyn.storyteller === q.who);
+  if (q && storyQuestion) lines.push(`- ${q.who}: several messages in a row, the last one a question (#${q.shortId}, may be part of the story)`);
+  else if (q) lines.push(`- open question: #${q.shortId} (${q.who}) asked the group, nobody answered yet`);
   if (r.dyn.privatePair) lines.push(`- ${r.dyn.privatePair[0]} and ${r.dyn.privatePair[1]} are going back and forth with each other`);
-  if (stage === 'gate' && r.dyn.storyteller) lines.push(`- ${r.dyn.storyteller} is sending several messages in a row (probably not finished)`);
+  if (stage === 'gate' && r.dyn.storyteller && !storyQuestion) lines.push(`- ${r.dyn.storyteller} is sending several messages in a row (probably not finished)`);
   for (const c of r.cues) lines.push(`- possible irony: #${c.shortId} ${c.who}, ${c.cue}`);
   const moods = r.map.people.filter(p => !p.serious && (p.loud || p.laughing || p.talkingTo.length))
     .map(p => [p.name, p.loud ? 'loud' : '', p.laughing ? 'laughing' : '', p.talkingTo.length ? `talking to ${p.talkingTo.join(', ')}` : ''].filter(Boolean).join(' '));
@@ -870,7 +872,8 @@ export function formatRoomNow(r: RoomNow, stage: 'gate' | 'writer'): string | nu
       const ago = r.part.secondsSinceBot !== null && r.part.secondsSinceBot < 120 ? ` (${r.part.secondsSinceBot}s ago)` : '';
       lines.push(`- you: ${share}% of the last ${r.part.window} messages, ${r.part.humansSinceBot} human messages since you last spoke${ago}`);
     } else {
-      lines.push(`- you: ${share}% of the last ${r.part.window} messages${r.asked && share >= 20 ? ' (answer, and keep it short)' : ''}`);
+      const note = r.asked ? (share >= 20 ? ' (answer, and keep it short)' : '') : share >= 35 ? ' (a lot lately: say less)' : '';
+      lines.push(`- you: ${share}% of the last ${r.part.window} messages${note}`);
     }
   }
   return lines.length ? `ROOM NOW (facts counted in code):\n${lines.join('\n')}` : null;
@@ -886,20 +889,24 @@ export function formatLinesThatWorked(
   liked: string[], landed: { text: string; laughs: number }[], group: { who: string; text: string; laughs: number }[],
   avoid: { emojis?: string[]; names?: string[] } = {}, max = 4,
 ): string | null {
-  const all: { key: string; line: string; text: string }[] = [];
-  const seen = new Set<string>();
-  const add = (text: string, line: string) => {
-    const key = text.toLowerCase().replace(EMOJI, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
-    if (!key || seen.has(key)) return;
-    seen.add(key);
-    all.push({ key, line, text });
-  };
-  for (const t of liked.filter(Boolean)) add(t, `- "${t.slice(0, 140)}" (your owner liked it)`);
-  for (const l of landed) add(l.text, `- "${l.text.slice(0, 140)}" (${l.laughs} laugh${l.laughs > 1 ? 's' : ''})`);
-  for (const g of group) add(g.text, `- ${g.who}: "${g.text.slice(0, 140)}" (${g.laughs} laughing)`);
   const firstNames = (avoid.names ?? []).map(n => n.trim().split(/\s+/)[0].toLowerCase()).filter(n => n.length >= 3);
-  const clean = all.filter(x => !(avoid.emojis ?? []).some(e => x.text.includes(e)) && !firstNames.some(n => x.key.split(' ').includes(n)));
-  const pick = (clean.length ? clean : all.slice(0, 2)).slice(0, max);
+  // the bot's current emoji tics are taken out of the example, not the whole example
+  const untic = (t: string) => (avoid.emojis ?? []).reduce((acc, e) => acc.split(e).join(''), t).replace(/\s{2,}/g, ' ').trim();
+  const all: { line: string; liked: boolean }[] = [];
+  const seen = new Set<string>();
+  const add = (raw: string, line: (t: string) => string, liked = false) => {
+    const text = untic(raw);
+    const key = text.toLowerCase().replace(EMOJI, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+    if (!key || seen.has(key) || firstNames.some(n => key.split(' ').includes(n))) return; // never a dig at an easy-on person
+    seen.add(key);
+    all.push({ line: line(text.slice(0, 140)), liked });
+  };
+  for (const t of liked.filter(Boolean)) add(t, x => `- "${x}" (your owner liked it)`, true);
+  for (const l of landed) add(l.text, x => `- "${x}" (${l.laughs} laugh${l.laughs > 1 ? 's' : ''})`);
+  for (const g of group) add(g.text, x => `- ${g.who}: "${x}" (${g.laughs} laughing)`);
+  // at most 2 of the owner's liked lines, then the rest, so one kind never crowds out the others
+  const likedPick = all.filter(x => x.liked).slice(0, 2);
+  const pick = [...likedPick, ...all.filter(x => !x.liked)].slice(0, max);
   if (pick.length === 0) return null;
   return `LINES THAT WORKED HERE (learn the kind of humor and use new words; never repeat them):\n${pick.map(x => x.line).join('\n')}`;
 }
@@ -907,5 +914,5 @@ export function formatLinesThatWorked(
 /** The time in each clock city, on one line (the model reads it off; no math, no time zones). */
 export function formatClockLine(cities: ClockCity[], now = new Date()): string {
   const list = cities?.length ? cities : DEFAULT_CLOCK_CITIES;
-  return `Time now (read off, never calculate): ${list.map(c => `${c.label} ${cityNow(c, now)}`).join('; ')}`;
+  return `Time now (read off, never calculate; mention it only when the time or date matters): ${list.map(c => `${c.label} ${cityNow(c, now)}`).join('; ')}`;
 }
