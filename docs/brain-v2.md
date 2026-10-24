@@ -96,6 +96,10 @@ Measuring: Inverse Turing Bench, arXiv 2606.21844; Collective Turing Test, arXiv
 
 Note: the research agent could only open GitHub and Anthropic pages directly; most paper facts come from abstracts.
 
+## Speed (measured, fake AI, 112k-message chat)
+
+v2's own code per turn: about 13 ms in the thinking stage and 16 ms in the writer once warm. The first turn after 30 minutes also counts the group's running phrases (about 40 to 80 ms, then cached). A replay moment costs about 60 ms of code (nothing cached, by design). The AI calls themselves take far longer; these numbers are the time the bot's single event loop is busy.
+
 ## Files
 
 - `src/ai/v2/brain.ts`: the v2 gatekeeper and generator, context assembly, lint and rewrite.
