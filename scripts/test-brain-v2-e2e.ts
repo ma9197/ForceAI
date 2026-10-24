@@ -87,6 +87,7 @@ planOut = plan([{ type: 'reply', text: 'Kanan said that last season too — as a
 await sleep(800);
 assert.ok(has('T1v2', 'RESPOND') && has('T2v2', 'SEND'), decisions.join('\n'));
 assert.deepEqual(calls.map(c => c.kind), ['gate', 'plan', 'rewrite', 'critic']);
+assert.ok(calls[0].text.includes('WHO IS DOING WHAT') && calls[1].text.includes('WHO IS DOING WHAT'), 'the room map reaches both stages');
 assert.ok(calls[1].text.includes('YOUR INNER THOUGHT WHILE READING') && calls[1].text.includes('kanan says this every season'), 'thought reaches the writer');
 assert.ok(!calls[1].text.includes('Someone talked to you'), 'a jump-in is not told it was asked');
 assert.equal(sent.length, 1);
