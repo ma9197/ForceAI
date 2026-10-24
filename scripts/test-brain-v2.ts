@@ -12,7 +12,7 @@ import { CHATTINESS_SHIFT, decide, motivation, roomShift, threshold } from '../s
 import { actualAfter, pickReplayCuts } from '../src/ai/v2/replay.js';
 import { TasteLearner, readTasteRules } from '../src/ai/v2/taste.js';
 import {
-  botTargets, botTics, callbackKeywords, closingText, cut, dynamics, rhetoricalText, formatDecisionFeedback, formatTeasing, formatTics, teaseReception, formatClockLine, formatLinesThatWorked, formatRoomNow, type Reception,
+  botTargets, botTics, callbackKeywords, closingText, cut, dynamics, formatCallbacks, rankCallbacks, rhetoricalText, formatDecisionFeedback, formatTeasing, formatTics, teaseReception, formatClockLine, formatLinesThatWorked, formatRoomNow, type Reception,
   formatBits, formatReactionHabit, formatTakes, groupLaughs, ironyCues, parseDecisionLine, roomMap, ignoredStreak, laughCounts, landedLines, ownTakes, participation, reception, runningBits, seriousHit,
   styleStats, type MsgRow,
 } from '../src/ai/v2/signals.js';
@@ -54,6 +54,29 @@ assert.equal(participation(chat).secondsSinceBot, null);
 
 const kw = callbackKeywords([row('a', 'remember the penalty miss against madrid'), row('b', 'madrid again lol')]);
 assert.equal(kw[0], 'madrid');
+
+// round 25: callbacks to moments that got laughs back then come first, inside the same relevance tier
+{
+  const T = 1_700_000_000_000;
+  const c = (id: string, text: string, hits: number, at: number) => ({ id, short_id: id, sender_jid: 'a', sender_name: 'Murad', is_bot: 0, type: 'text', text, ts: T + at, hits }) as any;
+  const plain = c('c1', 'madrid lost the final', 2, 1000);
+  const landedOne = c('c2', 'madrid fans crying in the rain', 2, 500);
+  const weak = c('c3', 'madrid', 1, 900);
+  const laughs = [
+    { id: 'r1', sender_jid: 'b', sender_name: 'Kanan', is_bot: 0, type: 'reaction', text: '😂', quoted_id: 'c2', ts: T + 600 },
+    { id: 'r2', sender_jid: 'd', sender_name: 'Aysel', is_bot: 0, type: 'text', text: 'HAHAHA', quoted_id: 'c2', ts: T + 610 },
+    { id: 'r3', sender_jid: 'b', sender_name: 'Kanan', is_bot: 0, type: 'reaction', text: '😂', quoted_id: 'c3', ts: T + 950 },
+  ] as any[];
+  const top = rankCallbacks([plain, landedOne, weak], laughs, 1);
+  assert.deepEqual(top.map(x => [x.id, x.laughs]), [['c2', 2]], 'the one that landed');
+  assert.deepEqual(rankCallbacks([plain, landedOne, weak], laughs, 2).map(x => x.id), ['c2', 'c1'], 'a laughed 1-word match does not beat a real match; chat order');
+  assert.ok(formatCallbacks(top)!.includes('madrid fans crying in the rain (got laughs from 2)'));
+  // review: on a list with gaps a laugh is only counted when it quotes the line (no "laughed right after")
+  // (the search does not return quoted_id, so a candidate laughing at someone else looks like a laugh "right after")
+  const late = c('c4', 'kanan is late again', 2, 2000);
+  const laughCand = { ...c('c5', 'kanan 😂😂', 1, 2030), sender_jid: 'e', sender_name: 'Rashad' };
+  assert.deepEqual(rankCallbacks([late, laughCand], [], 2).map(x => [x.id, x.laughs]), [['c4', 0], ['c5', 0]]);
+}
 
 const bot1 = row('bot', '🤖 kanan predicted 3-0 and got 0-3', { is_bot: 1, id: 'b1' });
 const bot2 = row('bot', '🤖 fair', { is_bot: 1, id: 'b2' });
@@ -174,6 +197,12 @@ assert.equal(lintPlan([{ type: 'message', text: 'not bad, but he still missed th
   assert.ok(tells('what do you think? 👀').includes('keep the chat going') && tells('thoughts? 🤔').includes('keep the chat going'), 'emoji after the "?"');
   for (const t of ["what do y'all think?", 'wdyt?', 'ne düşünüyorsunuz?', 'sizce?', 'siz nə fikirləşirsiz?', 'nə deyirsiz?', 'kak dumaete?']) assert.ok(tells(t).includes('keep the chat going'), t);
   assert.equal(tells('rent-free in his head', ['he lives rent free there']), '', 'same phrase, other spelling');
+  // round 25: a callback copied word for word is a repeat (dropped when nobody asked, rewritten when asked)
+  const old = 'madrid fans crying in the rain again';
+  const cb = (text: string, unprompted: boolean) => lintPlan([{ type: 'message', text }], { recentBotTexts: [], recentHumanTexts: [], medianLen: 20, marker, unprompted, callbackTexts: [old] });
+  assert.equal(cb('Madrid fans crying in the rain again!', true).actions.length, 0);
+  assert.ok(cb('madrid fans crying in the rain again', false).issues.some(i => i.problem.includes('old line from this chat word for word')));
+  assert.equal(cb('rain check for madrid fans again lol', true).actions.length, 1, 'a callback in new words is fine');
   assert.ok(tells('chef’s kiss').includes('stock AI joke'), 'curly apostrophe');
 }
 // round 18: Azerbaijani or Turkish (models drift from Azerbaijani into Turkish), typed with or without the letters
@@ -778,6 +807,17 @@ const userText = typeof genReq.messages[0].content === 'string' ? genReq.message
 assert.ok(userText.includes('SCENE RIGHT NOW: football'), 'scene from the gatekeeper reaches the generator');
 assert.ok(userText.includes('HOW THIS CHAT TEXTS RIGHT NOW'), 'style numbers');
 assert.ok(userText.includes('OLDER MOMENTS'), 'callback candidates found');
+{
+  // the laughs on older lines come from the DB, and a replay never sees laughs that came after its moment
+  const base = { chatJid: G, senderJid: 'k@s', senderName: 'Kanan', fromMe: false, isBot: false, isOwner: false, mentionedJids: [], raw: {} };
+  repo.insertMessage({ ...base, id: 'cb1', shortId: 'cb1', type: 'text', text: 'madrid fans crying in the rain', quotedId: null, ts: 1_000 } as any);
+  repo.insertMessage({ ...base, id: 'cb2', shortId: 'cb2', senderJid: 'm@s', senderName: 'Murad', type: 'reaction', text: '😂', quotedId: 'cb1', ts: 5_000 } as any);
+  assert.equal(repo.getRepliesTo(G, ['cb1']).length, 1);
+  assert.equal(repo.getRepliesTo(G, ['cb1'], 4_000).length, 0, 'not after the replayed moment');
+  assert.equal(repo.getRepliesTo('other@g.us', ['cb1']).length, 0, 'groups never share memory');
+  const plan = (db.prepare("EXPLAIN QUERY PLAN SELECT id FROM messages WHERE quoted_id IN (?) AND +chat_jid = ? AND +ts <= ?").all('cb1', G, 9e15) as any[]).map(r => r.detail).join(' ');
+  assert.ok(plan.includes('idx_msg_quoted'), `uses the quoted_id index, never a chat scan: ${plan}`);
+}
 assert.ok(!userText.includes('you: 🤖'), 'callbacks show the bot lines without its marker');
 assert.ok(userText.includes('A THOUGHT YOU HAD A MOMENT AGO'), 'saved thought offered');
 assert.ok(userText.includes('Someone talked to you: answer them'), 'the writer knows it was asked');

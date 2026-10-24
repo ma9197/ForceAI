@@ -145,6 +145,8 @@ export interface LintContext {
   p80Len?: number;
   /** share of human texts that end on a laugh; under 0.1 the bot does not laugh at its own line either */
   laughEndShare?: number;
+  /** older lines shown as callbacks: copying one word for word is a repeat, not a callback */
+  callbackTexts?: string[];
   /** 2+ people are shouting right now (a goal, big news) and nobody asked it anything: a long line reads like a bot */
   hype?: boolean;
 }
@@ -215,6 +217,7 @@ export function lintPlan(actions: BotAction[], ctx: LintContext): LintResult {
   const avoidSeen = new Set((ctx.avoidTexts ?? []).map(normalize).filter(s => s.length > 3));
   const avoidWords = (ctx.avoidTexts ?? []).map(contentWords);
   const humanSeen = new Set(ctx.recentHumanTexts.map(normalize).filter(s => s.length > 8));
+  const oldSeen = new Set((ctx.callbackTexts ?? []).map(normalize).filter(s => s.length > 8));
   const out: BotAction[] = [];
 
   for (const a of actions) {
@@ -242,7 +245,8 @@ export function lintPlan(actions: BotAction[], ctx: LintContext): LintResult {
     const mine = contentWords(fixed);
     const repeat = norm && botSeen.has(norm) ? 'repeats something you already said'
       : botWords.some(w => overlap(mine, w) >= 0.6) ? 'too close to something you already said'
-        : (norm && avoidSeen.has(norm)) || avoidWords.some(w => overlap(mine, w) >= 0.6) ? 'too close to a line your owner disliked' : null;
+        : (norm && avoidSeen.has(norm)) || avoidWords.some(w => overlap(mine, w) >= 0.6) ? 'too close to a line your owner disliked'
+          : norm && oldSeen.has(norm) ? 'repeats an old line from this chat word for word' : null;
     if (repeat && ctx.unprompted) { dropped.push(`${repeat}: "${fixed.slice(0, 60)}"`); continue; }
     if (norm && humanSeen.has(norm)) { dropped.push(`parrots a member word for word: "${fixed.slice(0, 60)}"`); continue; }
 
