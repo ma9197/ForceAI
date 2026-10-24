@@ -122,7 +122,9 @@ export class BrainV2 {
       return `- ${name}${gist ? `: ${gist}` : ''}`;
     }).join('\n');
     const protectedPeople = this.repo.getBoundariesForChat(chatJid).map(b => `- ${b.name}: ${b.instructions}`).join('\n');
-    const jokes = this.repo.getVoiceItems(chatJid).filter(i => i.category === 'joke' || i.category === 'reference').slice(0, 15);
+    // the newest 15 (a replay: only ones learned by then)
+    const jokes = this.repo.getVoiceItems(chatJid).filter(i => (i.category === 'joke' || i.category === 'reference') && (!replay || i.created_at <= untilTs!))
+      .sort((a, b) => b.created_at - a.created_at).slice(0, 15);
     const bits = jokes.map(i => `- ${i.content}`).join('\n');
     const summary = this.repo.getSummary(chatJid)?.summary;
     const calls = replay ? null : formatDecisionFeedback(this.repo.getDecisionFeedback(chatJid, BRAIN_V2.DECISION_EXAMPLES));
@@ -389,7 +391,8 @@ export class BrainV2 {
         const fixed = await this.rewrite(input.chatJid, lint, tier);
         if (fixed) {
           rewritten = fixed.count;
-          lint = { ...lintPlan(fixed.actions, { ...lintCtx, recentBotTexts: [], recentHumanTexts: [] }), dropped: lint.dropped };
+          const pass2 = lintPlan(fixed.actions, { ...lintCtx, recentBotTexts: [], recentHumanTexts: [] });
+          lint = { ...pass2, dropped: [...lint.dropped, ...pass2.dropped] };
         }
       }
       actions = lint.actions;

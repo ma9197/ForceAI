@@ -53,7 +53,7 @@ READ:
 | Always answers when asked | When someone talks to it, the reply writer is told so: it answers (a reaction is enough if they only laughed). Silence is only an option for lines nobody asked for. | Prompt review, round 5 |
 | Calibrated scores | The thinking stage gets 6 short worked examples (mid-story: wait, strong callback: speak, private logistics: ignore, a friend's great roast: react, a rhetorical question: a deadpan take, a goal shout: react) so its 0-10 scores mean the same thing every time. Humor and novelty are judged harshly, the rest plainly. | Few-shot calibration |
 | Your dials win | Your emoji dial, character adjustment and boundaries win over v2's own style rules. | Prompt review, round 5 |
-| Shadow mode | v1 acts, v2 thinks along on the same messages (dry run, never sends) and logs what it would have done. When it would speak, it also writes the line it would have sent (Settings toggle, on by default; 2 to 3 AI calls each: reply, second opinion, sometimes a quick fix). You can rate those rows too. A whole day of comparison with zero risk. | Off-policy evaluation, the usual way to test a new policy safely |
+| Shadow mode | v1 acts, v2 thinks along on the same messages (dry run, never sends) and logs what it would have done. When it would speak, it also writes the line it would have sent (Settings toggle, on by default; 2 to 3 AI calls each: reply, second opinion, sometimes a quick fix). You can rate its decision rows ("v2 shadow would ...") too; the lines it would say are for reading. A whole day of comparison with zero risk. | Off-policy evaluation, the usual way to test a new policy safely |
 | Blind A/B test | Both brains answer the same moment; you see A and B without labels and pick. The tally removes "I know which one is new" bias. | Pairwise preference judging (arXiv 2603.12520) |
 | One compact "ROOM NOW" block | All measured facts about the room (bad news, an open question, who talks with whom, possible irony, moods, your share and reception) in one block of facts, each said once; what they mean is explained once in the cached system prompt. One "lines that worked here" list instead of three. One-line clock. About 30% smaller thinking-stage message, 14% smaller reply-writer message. | Prompt audit, round 11 |
 | Anti-cringe linter (code) | Fixes or flags AI tells before sending: assistant phrases, "not just X but Y", semicolons, hashtags, long dashes, essays, repeats, parroting, 3+ texts in a row, ending on a question to the room just to keep it going ("thoughts?", "а вы как думаете?", "siz nə düşünürsünüz?"), the "ah, the..." opener, stock AI joke phrases ("plot twist", "the audacity") unless the group says them itself. In a group that never ends its own lines on a laugh, a typed "lol" / "hahaha" at the end of its line is cut. One cheap rewrite only when needed. In serious moments it holds back stickers, voice notes and polls. When the group types lowercase, so does it. | Antislop (ICLR 2026), Wikipedia's signs of AI writing, LLMafia |
@@ -95,6 +95,10 @@ Top techniques found, ranked by impact on "feels like a real, funny friend" agai
 Measuring: Inverse Turing Bench, arXiv 2606.21844; Collective Turing Test, arXiv 2511.08592; MUCA (what, when, who for group bots), arXiv 2401.04883.
 
 Note: the research agent could only open GitHub and Anthropic pages directly; most paper facts come from abstracts.
+
+## Speed (measured, fake AI, 112k-message chat)
+
+v2's own code per turn: about 13 ms in the thinking stage and 16 ms in the writer once warm. The first turn after 30 minutes also counts the group's running phrases (about 40 to 80 ms, then cached). A replay moment costs about 60 ms of code (nothing cached, by design). The AI calls themselves take far longer; these numbers are the time the bot's single event loop is busy.
 
 ## Files
 

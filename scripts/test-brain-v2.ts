@@ -117,6 +117,10 @@ assert.equal(formatTeasing([{ name: 'Murad', count: 2 }], []), null);
   assert.ok(tx.includes('- Aysel pushed back on 2 of your 2 digs: keep it light with them') && tx.includes('- Kanan Aliyev laughed at 2 of your 3 digs: they enjoy it'), tx);
   assert.ok(teaseReception([r('bot', 'murad is washed', 10), r('Murad', 'отстань', 12)], ['Murad'])[0].pushedBack === 1, 'pushback in Russian');
   assert.ok(teaseReception([r('bot', 'murad is washed', 10), r('Murad', 'bəsdir', 12)], ['Murad'])[0].pushedBack === 1, 'pushback in Azerbaijani');
+  assert.equal(teaseReception([r('bot', 'murad is washed', 10), r('Murad', 'not funny', 12), r('Murad', 'jk 😂', 14)], ['Murad'])[0].pushedBack, 0, 'pushback taken back with "jk"');
+  // EASY ON wins over "they enjoy it"
+  const both = formatTeasing([{ name: 'Kanan Aliyev', count: 5 }], [{ name: 'Kanan Aliyev', teased: 4, laughed: 3, pushedBack: 0 }])!;
+  assert.ok(both.includes('EASY ON: Kanan Aliyev') && !both.includes('they enjoy it'), both);
   const lolNo = teaseReception([r('bot', 'murad is washed', 10), r('Murad', 'shut up 😭😭', 12)], ['Murad'])[0];
   assert.deepEqual([lolNo.laughed, lolNo.pushedBack], [1, 0], '"shut up 😭😭" means it was funny');
   assert.equal(teaseReception([r('bot', 'that is sus', 10), r('Murad', 'sus', 12)], ['Murad']).length, 0, 'English "sus" is not pushback (and nobody was named)');
@@ -197,6 +201,10 @@ assert.equal(lintPlan([{ type: 'message', text: 'not bad, but he still missed th
   assert.ok(tells('what do you think? 👀').includes('keep the chat going') && tells('thoughts? 🤔').includes('keep the chat going'), 'emoji after the "?"');
   for (const t of ["what do y'all think?", 'wdyt?', 'ne düşünüyorsunuz?', 'sizce?', 'siz nə fikirləşirsiz?', 'nə deyirsiz?', 'kak dumaete?']) assert.ok(tells(t).includes('keep the chat going'), t);
   assert.equal(tells('rent-free in his head', ['he lives rent free there']), '', 'same phrase, other spelling');
+  // final review: answering a yes/no question with their own words is rewritten, never dropped (the asker gets an answer)
+  const echo = (unprompted: boolean) => lintPlan([{ type: 'message', text: 'kanan gəlir' }], { recentBotTexts: [], recentHumanTexts: ['kanan gəlir?'], medianLen: 20, marker, unprompted });
+  assert.ok(echo(false).actions.length === 1 && echo(false).issues.some(i => i.problem.includes('repeats their message')), 'asked: rewrite');
+  assert.equal(echo(true).actions.length, 0, 'unprompted: dropped as before');
   // round 25: a callback copied word for word is a repeat (dropped when nobody asked, rewritten when asked)
   const old = 'madrid fans crying in the rain again';
   const cb = (text: string, unprompted: boolean) => lintPlan([{ type: 'message', text }], { recentBotTexts: [], recentHumanTexts: [], medianLen: 20, marker, unprompted, callbackTexts: [old] });
@@ -307,6 +315,24 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
   dynamics([...q, r('Kanan', 'nvm ' + 'a'.repeat(50_000) + '!', 170)], 'ForceAI', now);
   assert.ok(performance.now() - longT0 < 100, 'no slow backtracking');
   assert.equal(dynamics([r('Said', 'who is playing tonight?', 160, { is_owner: 1 })], 'ForceAI', now).hangingQuestion, null, "owner's questions are never a cue");
+  // final review: the owner (stored as "You") is labelled like the transcript, never "You" (that reads as the bot)
+  const own = (text: string, at: number) => r('You', text, at, { is_owner: 1, sender_jid: 'owner' });
+  const ownerPair = [own('you owe me 20', 100), r('Kanan', 'for what', 110), own('the pizza', 120), r('Kanan', 'that was you', 130), own('no it was not', 140), r('Kanan', 'send proof', 150)];
+  assert.deepEqual(dynamics(ownerPair, 'ForceAI', now).privatePair?.slice().sort(), ['Kanan', 'Said (owner)']);
+  const ownerStory = [own('ok so yesterday', 190), own('i go to the shop', 195), own('and guess who is there', 198)];
+  assert.equal(dynamics(ownerStory, 'ForceAI', now).storyteller, 'Said (owner)');
+  assert.equal(dynamics([own('my dad passed away this morning', 150)], 'ForceAI', now).serious?.who, 'Said (owner)');
+  // a question inside a private back-and-forth is to the other person, not the group
+  const slides = [r('Murad', 'did u finish', 120), r('Kanan', 'almost', 125), r('Murad', 'nice', 130), r('Kanan', 'u?', 135), r('Murad', 'yes', 140), r('Murad', 'can u send me the slides?', 145)];
+  const sd = dynamics(slides, 'ForceAI', now);
+  assert.ok(sd.privatePair && sd.hangingQuestion === null, JSON.stringify(sd));
+  // "jk" right after a question takes it back
+  assert.equal(dynamics([r('Murad', 'yo', 150), r('Kanan', 'who is buying the tickets?', 160), r('Kanan', 'jk 😂', 165)], 'ForceAI', now).hangingQuestion, null);
+  // one person shouting three times during a goal burst is hype, not a story
+  const burst = [r('Murad', 'LETS GOOO!!', 190), r('Kanan', 'GOOOOL', 196), r('Kanan', 'WHAT A STRIKE!!', 197), r('Kanan', 'VINIIII!!', 198)];
+  const bd = dynamics(burst, 'ForceAI', now);
+  assert.ok(bd.hype && bd.storyteller === null, JSON.stringify(bd));
+
   // round 19: a rhetorical question is not an open question (no lower bar, and the room is told)
   const rq = [r('Murad', 'yo', 150), r('Kanan', 'who even watches the conference league?', 160)];
   const rd = dynamics(rq, 'ForceAI', now);
@@ -414,6 +440,8 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
   // the bar: pushback never lowers it, and a cold run counts both
   assert.equal(roomShift({ rec: ['ignored', 'ignored', 'ignored', 'booed'] }).delta, 1, 'max, not reset to 0.8');
   assert.deepEqual(roomShift({ rec: ['booed', 'ignored'] }), { delta: 0.5, notes: ['2 landed cold +0.5'] });
+  assert.equal(reception([r('You', 'match tonight', 0, { is_owner: 1, sender_jid: 'owner' }), flop, r('Kanan', "you're not funny", 8), r('Aysel', 'ok', 9), r('Murad', 'ok', 10)], 'ForceAI', T + 100_000)[0], 'booed', 'the owner\'s "You" is not a member name');
+  assert.notEqual(reception([r('Murad', 'match', 0), flop, r('Kanan', 'not funny', 8), r('Kanan', 'jk 😂', 9), r('Aysel', 'ok', 10), r('Murad', 'ok', 11)], 'ForceAI', T + 100_000)[0], 'booed', 'they took it back');
   const booedRec: Reception[] = ['laughed', 'booed'];
   assert.deepEqual(roomShift({ rec: booedRec }), { delta: 0.8, notes: ['pushback on last line +0.8'] });
   assert.ok(formatRoomNow({ dyn: quietDyn, map: emptyMap, cues: [], rec: booedRec }, 'gate')!.includes('- your last unprompted line got pushback'));
@@ -426,6 +454,15 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
   assert.equal(decide(ok, calm, false, 0, pairRoom).decision, 'IGNORE', 'two people talking: a 7 is not enough');
   assert.deepEqual(decide(ok, calm, false, 0, pairRoom).room, ['pair talking +0.8']);
   assert.equal(decide(gate({ addressed: true }), calm, false, 0, pairRoom).decision, 'RESPOND', 'still answers when asked');
+  // final review: code never overrules IGNORE where the room says hold back (goodbyes, pushback, bad news)
+  const tooGood = gate({ decision: 'IGNORE', s: { relevance: 9, novelty: 9, humor: 9, timing: 7, fit: 8 } });
+  assert.equal(decide(tooGood, calm, false).decision, 'RESPOND', 'normally a strong thought is upgraded');
+  const byeDyn = { privatePair: null, storyteller: null, hangingQuestion: null, serious: null, windingDown: { who: ['Kanan'], shortId: 'm1' }, rhetorical: null, hype: null };
+  assert.equal(decide(tooGood, calm, false, 0, { dyn: byeDyn as any }).decision, 'IGNORE', 'people are saying bye');
+  assert.equal(decide(tooGood, calm, false, 0, { rec: ['booed'] }).decision, 'IGNORE', 'just got called cringe');
+  // ⚰️ is a laugh ("dead"): never on bad news
+  const coffin = gate({ decision: 'REACT', react: { target_message_id: 'm8', emoji: '⚰️' }, scene: { topic: 't', threads: '', vibe: 'serious', running_bit: null, bit_played_out: false } });
+  assert.notEqual(decide(coffin, calm, false).decision, 'REACT');
   assert.equal(decide(ok, calm, false, 0, { rec: ['ignored', 'ignored', 'ignored'] }).decision, 'IGNORE', 'ignored three times: holds back');
   assert.equal(roomShift({ rec: ['ignored', 'ignored', 'ignored', 'ignored'] }).delta, 1, 'capped');
   assert.equal(roomShift({ rec: ['laughed', 'answered', 'laughed'] }).delta, -0.3);
@@ -916,6 +953,11 @@ assert.ok(sb.rewrites >= 1 || sb.vetoed >= 0);
   assert.deepEqual([sy.spoke, sy.unprompted], [2, 0], JSON.stringify(sy));
   // round 24: failures and fallbacks are counted, so a v2 that breaks against the real API shows up
   assert.deepEqual([sy.failed, sy.fallbacks], [2, 1], 'writer SILENT + shadow writer failure, one fallback (other T0 rows ignored)');
+  // final review: the commonest failure (v2 writer failed on a direct question, v1 answered) counts as failed, not as v2 speaking
+  const GZ = 'stats3@g.us';
+  repo.insertDecision(GZ, 'T2v2', 'SEND', 'brain v2 failed, v1 answered | v1 note');
+  const sz = repo.brainV2Stats(GZ, 0);
+  assert.deepEqual([sz.failed, sz.spoke], [1, 0]);
   assert.equal(st.failed, 1, 'a failed gate');
 }
 assert.equal(repo.setDecisionFeedback(d1, null), true);

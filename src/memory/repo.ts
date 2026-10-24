@@ -870,7 +870,9 @@ export class Repo {
     for (const r of rows) {
       // v2 calls that failed (API error or unparseable output), live or in shadow, and safety-net fallbacks to v1
       if (r.tier === 'T0') { s.fallbacks += 1; continue; }
-      if (r.decision === 'FAILED' || (r.tier === 'T2v2' && r.decision === 'SILENT') || (r.tier === 'S2v2' && r.reason === 'the reply writer failed')) s.failed += 1;
+      // the most common failure: the v2 writer failed on a direct question and v1 answered (logged as a T2v2 SEND)
+      const v1Answered = r.tier === 'T2v2' && r.reason.startsWith('brain v2 failed, v1 answered');
+      if (r.decision === 'FAILED' || v1Answered || (r.tier === 'T2v2' && r.decision === 'SILENT') || (r.tier === 'S2v2' && r.reason === 'the reply writer failed')) s.failed += 1;
       if (r.tier === 'S2v2') {
         if (r.decision === 'WOULD_SAY') s.shadow.wrote += 1;
       } else if (r.tier === 'S1v2') {
@@ -885,7 +887,7 @@ export class Repo {
         else if (r.decision === 'IGNORE') s.quiet += 1;
       } else if (r.tier === 'T2v2') {
         // "spoke" = what was really sent: direct answers too (they skip T1v2), not lines the second opinion stopped
-        if (r.decision === 'SEND') {
+        if (r.decision === 'SEND' && !v1Answered) {
           s.spoke += 1;
           if (started === 'unprompted') s.unprompted += 1;
           if (started === 'pause') s.pauses += 1;

@@ -60,7 +60,7 @@ export function laughEndShare(texts: string[]): number | undefined {
 }
 
 const EMOJI = /\p{Extended_Pictographic}/gu;
-const LAUGHING = /😂|🤣|💀|😭|😹/u;
+const LAUGHING = /😂|🤣|💀|😭|😹|⚰/u;
 
 function textOf(a: BotAction): string | null {
   switch (a.type) {
@@ -248,11 +248,15 @@ export function lintPlan(actions: BotAction[], ctx: LintContext): LintResult {
         : (norm && avoidSeen.has(norm)) || avoidWords.some(w => overlap(mine, w) >= 0.6) ? 'too close to a line your owner disliked'
           : norm && oldSeen.has(norm) ? 'repeats an old line from this chat word for word' : null;
     if (repeat && ctx.unprompted) { dropped.push(`${repeat}: "${fixed.slice(0, 60)}"`); continue; }
-    if (norm && humanSeen.has(norm)) { dropped.push(`parrots a member word for word: "${fixed.slice(0, 60)}"`); continue; }
+    // parroting a member: dropped when nobody asked; when answering someone ("kanan gəlir?" -> "kanan gəlir")
+    // it goes back for new words instead, so the person who asked is never left without an answer
+    const parrot = !!norm && humanSeen.has(norm);
+    if (parrot && ctx.unprompted !== false) { dropped.push(`parrots a member word for word: "${fixed.slice(0, 60)}"`); continue; }
 
     const index = out.length;
     out.push(withText(a, fixed));
     if (repeat) issues.push({ index, problem: `${repeat}: say it in new words` });
+    if (parrot) issues.push({ index, problem: 'repeats their message word for word: answer in your own words' });
     for (const tell of AI_TELLS) if (tell.re.test(fixed)) issues.push({ index, problem: tell.label });
     const stock = fixed.match(STOCK_JOKES);
     if (stock && !ctx.recentHumanTexts.some(t => normalize(t).includes(normalize(stock[0])))) {
