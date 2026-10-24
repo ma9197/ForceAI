@@ -35,7 +35,7 @@ The owner will tell the friends that ForceAI restarted from scratch. It keeps le
 ## Brain v2 (built 2026-10-24 night, owner's /goal)
 
 - Owner asked for a smarter, more human, less cringe brain that also jumps in unprompted, as "version 2", testable per group while every group stays on v1.
-- Built and deployed in four PRs (#5 base, #6 second opinion + owner calls + scoreboard, #7 room check + reception + replay, #8 running bits + own takes + natural texting): see `docs/brain-v2.md` (research, design, testing plan). v1 parity proven with `scripts/v1-request-dump.ts` before every merge.
+- Built and deployed in 12 PRs (#5 to #16): base, second opinion, room check, replay, running bits, review fixes, safety net to v1, fuzz test, shadow mode + blind test, room map, learning loop (house rules), irony cues. See `docs/brain-v2.md` (research, design, testing plan). Seven independent reviews (code, prompts, languages) found 58 issues, all fixed, most with a regression test; v1 parity proven with `scripts/v1-request-dump.ts` before every merge.
 - Not yet run against real Claude: the cloud has no API key. The first real test is the owner's.
 - Owner's morning test: open one active group, Compare v1 / v2, click "Replay last hours with v2" (6 small calls). Then put that group on "v1 + v2 shadow" for a day (v1 answers, v2 logs what it would do) and run a few "Blind test"s. If v2 wins, switch that group to Brain v2 (beta). Rate lines and `T1v2` / shadow decisions with 👍 / 👎.
 - What to watch in the feed: `T1v2` lines show urge vs bar and what moved the bar (`pair talking +0.8`, `2 ignored +0.5`). `T2v2` notes show the angle, rewrites, `split in 2`, and "second opinion said skip".

@@ -1,20 +1,16 @@
 # Brain v2: research and plan
 
 READ:
-- Every group still runs **brain v1** by default. Nothing changes until you switch a group.
-- Safest first step: top bar, choose **v1 + v2 shadow (watch only)**. v1 keeps answering; v2 only thinks along, and the feed shows what it would have done (grey "v2 shadow would ..." rows). Costs one cheap extra call per decision.
-- To try v2 in a group: open the group, top bar, choose **Brain v2 (beta)**. Switch back the same way.
-- Fair verdict: **Blind test** in the Compare panel shows both brains' lines as A and B. You pick, then it tells you which was which. The panel keeps the tally.
-- To compare before switching: **Compare v1 / v2** under the chat. It shows what each brain would send right now. Nothing is sent.
-- v2's goal: talk less but better, get irony, sound like a friend, jump in only when it has something good.
-- Teach it your taste: tap 👍 or 👎 on the bot's lines in the live feed. v2 reads your latest likes and dislikes in that group.
-- Too chatty or too quiet: Settings, **Brain v2 chattiness** (quiet, balanced, chatty). One group only: the Compare panel has its own chattiness box.
-- Judge its calls: on `T1v2` lines in the live feed, tap 👍 (good call) or 👎 (bad call). v2's thinking stage reads your latest calls.
-- It learns from your ratings: every 8 ratings in a group (lines and calls), one small call turns them into 3 to 6 "house rules" for that group. See, relearn or clear them in the Compare panel.
-- Scoreboard: the Compare panel shows what v2 did in that group in the last 24 hours.
-- Best first test: **Replay last hours with v2** in the Compare panel. It shows what v2 would have done at 6 moments of the last 3 hours, next to what really happened. About 6 small AI calls. Nothing is sent.
-- Cost: a v2 group costs a bit more per message read (a longer thinking step). Pick Haiku 5.5 for the thinking stage to keep it cheap.
-- Safety net: if v2 fails 3 times in a row (for example the API rejects something), that group answers with v1 for 30 minutes. The top bar then shows "on v1 until ..." and the feed shows `BRAIN_FALLBACK`. A direct question v2 fails to answer is answered by v1 right away.
+- Every group runs **brain v1** until you change it. Nothing changes by itself.
+- **Morning test (10 min), in one active group:**
+  1. Under the chat: **Compare v1 / v2**, then **Replay last hours with v2**. You see what v2 would have done, next to what really happened. Nothing is sent.
+  2. Top bar: **v1 + v2 shadow (watch only)**. v1 keeps answering; grey "v2 shadow would ..." rows show v2's calls all day.
+  3. Now and then: **Blind test** in the Compare panel. Pick A or B; it tracks which brain wins.
+  4. If v2 wins: top bar, **Brain v2 (beta)**. Switch back the same way any time.
+- **Teach it**: tap 👍 / 👎 on its lines and on its `T1v2` / shadow rows. Every 8 ratings it learns a few "house rules" for that group (Compare panel: see, relearn, clear).
+- **Too loud or too quiet**: chattiness in the Compare panel (this group) or Settings (all groups).
+- **Safety net**: if v2 keeps failing, that group answers with v1 for 30 minutes ("on v1 until ..." in the top bar). Direct questions are always answered.
+- **Cost**: a bit more per message than v1; shadow adds one cheap call per decision. Use Haiku 5.5 for the thinking stage.
 
 ## What v2 does differently
 
