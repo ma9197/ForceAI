@@ -784,6 +784,11 @@ export const demoData = {
   "freshStart": {
     "demo": true,
     "running": false,
+    "job": {
+      "state": "idle",
+      "step": "",
+      "message": null
+    },
     "blocked": null,
     "counts": {
       "facts": 4,

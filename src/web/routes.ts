@@ -452,9 +452,9 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     if ((req.body?.confirm ?? '').trim().toUpperCase() !== CONFIRM_PHRASE) {
       return reply.code(400).send({ error: `Type ${CONFIRM_PHRASE} to confirm.` });
     }
-    const res = await app.freshStart();
-    if (res.status !== 'ok') return reply.code(res.status === 'busy' ? 409 : 500).send({ error: res.message });
-    return { ok: true, ...res };
+    const res = app.startFreshStart(); // runs in the background; Settings polls GET for progress
+    if (res.status !== 'ok') return reply.code(409).send({ error: res.message });
+    return { ok: true, started: true };
   });
 
   fastify.get('/api/settings', async () => settingsPayload(app));
