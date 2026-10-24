@@ -865,9 +865,9 @@ export class Repo {
         else if (r.decision === 'WAIT') s.shadow.waited += 1;
         else if (r.decision !== 'FAILED') s.shadow.quiet += 1;
       } else if (r.tier === 'T1v2') {
-        if (r.decision === 'RESPOND') started = /\| addressed/.test(r.reason) ? 'asked' : 'unprompted';
-        else if (r.decision === 'PAUSE') started = 'pause';
-        else if (r.decision === 'REACT') s.reacted += 1;
+        // any other row (REACT, IGNORE, WAIT, FAILED, DROPPED) means no writer runs for the RESPOND before it
+        started = r.decision === 'RESPOND' ? (/\| addressed/.test(r.reason) ? 'asked' : 'unprompted') : r.decision === 'PAUSE' ? 'pause' : null;
+        if (r.decision === 'REACT') s.reacted += 1;
         else if (r.decision === 'IGNORE') s.quiet += 1;
       } else if (r.tier === 'T2v2') {
         // "spoke" = what was really sent: direct answers too (they skip T1v2), not lines the second opinion stopped

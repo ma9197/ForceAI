@@ -38,6 +38,7 @@ let genFail = false;
 let v1GateDelay = 0;
 let v1GenDelay = 0;
 let inFlight = 0;
+let throwOnPhase: string | null = null;
 let maxInFlight = 0;
 const track = async <T>(f: () => Promise<T>): Promise<T> => {
   inFlight += 1;
@@ -75,7 +76,8 @@ function harness(chatJid: string) {
     { generate: async () => track(async () => { log.push(`v1gen:${chatJid}`); if (v1GenDelay) await sleep(v1GenDelay); return { actions: [{ type: 'message', text: 'v1 says hi' }], note: 'v1' }; }) } as any,
     { abortCurrentPlan: false, executePlan: async (_jid: string, actions: any[], onSent: any) => { for (const a of actions) { sent.push(a); onSent?.({ action: a }); } } } as any,
     { isOwnJid: () => false } as any,
-    { onDecision: (tier: string, d: string) => log.push(`${tier}:${d}`), onAction: () => undefined, onPhase: () => undefined },
+    { onDecision: (tier: string, d: string) => log.push(`${tier}:${d}`), onAction: () => undefined,
+      onPhase: (p: string) => { if (p === throwOnPhase) { throwOnPhase = null; throw new Error('dashboard push failed'); } } },
     fakeBrain,
   );
   return { arb, sent };
@@ -397,6 +399,64 @@ repo.setBrainVersion(VS, 'v1');
   v2Gate.react = null;
   assert.ok(h.sent.length === 0 && log.includes('T1v2:DROPPED'), log.join(' '));
   h.arb.setPaused(false);
+}
+
+// Influence queued behind a reply, then Sleep or a shutdown: the queued Influence is cancelled with it
+{
+  const VS2 = 'vs2@g.us';
+  const h = harness(VS2);
+  log.length = 0;
+  v1GenDelay = 600;
+  h.arb.onMessage(msg(VS2, 'a', 'who won'));
+  await sleep(450);
+  h.arb.forceGenerate('roast kanan');
+  await sleep(50);
+  h.arb.sleep();
+  await sleep(1200);
+  assert.ok(h.sent.length === 0 && h.arb.asleep && !h.arb.working, log.join(' '));
+  assert.equal(log.filter(l => l.endsWith(':DROPPED')).length, 2, 'the reply and the queued Influence');
+  const VS3 = 'vs3@g.us';
+  const g = harness(VS3);
+  log.length = 0;
+  g.arb.onMessage(msg(VS3, 'a', 'who won'));
+  await sleep(450);
+  g.arb.forceGenerate('roast kanan');
+  await sleep(50);
+  g.arb.suspend();
+  await sleep(1200);
+  v1GenDelay = 0;
+  assert.ok(g.sent.length === 0 && !g.arb.working && !log.some(l => l.endsWith(':DROPPED')), `shut down: nothing sent, nothing logged: ${log.join(' ')}`);
+  g.arb.resume();
+}
+
+// people saying goodbye: the saved thought is not offered at the pause (round 15)
+{
+  const VW = 'vw@g.us';
+  repo.setBrainVersion(VW, 'v2');
+  const h = harness(VW);
+  log.length = 0;
+  v2Gate.decision = 'IGNORE';
+  v2Gate.react = null;
+  h.arb.onMessage(msg(VW, 'a', 'good game tonight'));
+  h.arb.onMessage(msg(VW, 'b', 'yeah madrid cooked'));
+  h.arb.onMessage(msg(VW, 'a', 'ok gn guys'));
+  h.arb.onMessage(msg(VW, 'b', 'спокойной'));
+  await sleep(2200);
+  assert.ok(log.includes('T1v2:IGNORE') && !log.includes('T1v2:PAUSE') && h.sent.length === 0, log.join(' '));
+}
+
+// a throw in the setup of a reply (here: the dashboard push of the phase) must not leave the lock on forever
+{
+  const VT = 'vt@g.us';
+  const h = harness(VT);
+  log.length = 0;
+  throwOnPhase = 'GENERATING';
+  h.arb.onMessage(msg(VT, 'a', 'forceai who wins tonight'));
+  await sleep(700);
+  assert.ok(!h.arb.working && h.sent.length === 1, `lock released, the message retried and answered: ${log.join(' ')}`);
+  h.arb.onMessage(msg(VT, 'b', 'forceai you there?'));
+  await sleep(700);
+  assert.equal(h.sent.length, 2, log.join(' '));
 }
 
 fs.rmSync(dir, { recursive: true, force: true });

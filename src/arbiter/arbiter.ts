@@ -1,11 +1,11 @@
-import { ARBITER, BRAIN_V2 } from '../config.js';
+import { ARBITER, BOT_NAME, BRAIN_V2 } from '../config.js';
 import { logger } from '../logger.js';
 import type { Repo } from '../memory/repo.js';
 import type { AiClient } from '../ai/client.js';
 import type { Gatekeeper } from '../ai/gatekeeper.js';
 import type { Generator } from '../ai/generator.js';
 import type { BrainV2 } from '../ai/v2/brain.js';
-import { seriousHit } from '../ai/v2/signals.js';
+import { dynamics, seriousHit, type MsgRow } from '../ai/v2/signals.js';
 import { describeAction } from '../ai/v2/describe.js';
 import type { Outbound } from '../wa/outbound.js';
 import type { JidResolver } from '../wa/jid.js';
@@ -42,6 +42,8 @@ export class Arbiter {
   private superIdle = false;
   private justWoke = false; // set on wake → the next reply gets a bigger catch-up transcript, then cleared
   private pendingInfluence: string | null = null;
+  /** holdEpoch when the queued instruction was given: Sleep / Pause / shutdown after it cancels it */
+  private pendingHold = 0;
   private busy = false; // single in-flight lock for T1/T2 cycles
   /** bumped by every runGeneration: evaluate() must not release a lock a newer generation took over */
   private cycle = 0;
@@ -319,6 +321,7 @@ export class Arbiter {
     if (this.suspended) return; // bot is shut down
     this.decision('T0', label, instruction.slice(0, 200));
     this.pendingInfluence = instruction;
+    this.pendingHold = this.holdEpoch;
     if (this.busy) return; // applied right after the in-flight cycle finishes
     void this.runGeneration([], 'operator');
   }
@@ -448,18 +451,20 @@ export class Arbiter {
     this.cycle += 1;
     // Sleep / Pause pressed after this cycle started (even during its gatekeeper call): drop the result
     const hold = extra.hold ?? this.holdEpoch;
-    this.clearTimer();
-    this.clearLull();
-    this.setPhase('GENERATING');
-    const v2 = this.isV2();
-
-    // consume the operator instruction up front so a failed generation can't loop on it
-    const instruction = this.pendingInfluence;
-    this.pendingInfluence = null;
-    const wokeThisCycle = this.justWoke; // just woke from sleep → give this reply a bigger catch-up window
-    this.justWoke = false;
 
     try {
+      // inside the try: if any of this throws, the finally still releases the lock
+      this.clearTimer();
+      this.clearLull();
+      this.setPhase('GENERATING');
+      const v2 = this.isV2();
+
+      // consume the operator instruction up front so a failed generation can't loop on it
+      const instruction = this.pendingInfluence;
+      this.pendingInfluence = null;
+      const wokeThisCycle = this.justWoke; // just woke from sleep → give this reply a bigger catch-up window
+      this.justWoke = false;
+
       let attempt = 0;
       let ids = addressIds;
       let ex = extra;
@@ -488,7 +493,7 @@ export class Arbiter {
         }
 
         if (!plan) {
-          this.decision('T2', 'SILENT', 'generation failed or unparseable');
+          this.decision(v2 ? 'T2v2' : 'T2', 'SILENT', 'generation failed or unparseable');
           this.consumeBuffer(snapshotTs);
           return;
         }
@@ -538,7 +543,8 @@ export class Arbiter {
           });
 
           this.lastBotActionTs = Date.now();
-          if (this.holdEpoch === hold) this.engage(); // responding keeps it awake (unless Sleep was pressed meanwhile)
+          if (this.holdEpoch === hold) this.engage(); // responding keeps it awake
+          else this.lastEngagedTs = Date.now(); // Sleep / Pause pressed meanwhile: do not wake it back up
         }
 
         this.consumeBuffer(snapshotTs);
@@ -643,6 +649,10 @@ export class Arbiter {
         this.brainV2!.takeThought(this.chatJid); // bad news in the chat: the saved joke is dropped
         return;
       }
+      if (dynamics(recent as MsgRow[], BOT_NAME, now).windingDown) {
+        this.brainV2!.takeThought(this.chatJid); // people are saying goodbye: the moment has passed
+        return;
+      }
       thought = this.brainV2!.takeThought(this.chatJid);
       if (!thought) return;
       this.decision('T1v2', 'PAUSE', `chat paused, offering a saved thought: ${thought.text.slice(0, 90)}`);
@@ -667,11 +677,14 @@ export class Arbiter {
   /** After any cycle: deal with leftovers / queued operator instructions. */
   private postCycle(): void {
     this.setPhase('IDLE');
-    if (this.paused) return;
+    // an instruction queued before Sleep / Pause / shutdown is cancelled with it (one given after still runs,
+    // like Influence while asleep or paused always did)
+    if (this.pendingInfluence && this.held(this.pendingHold, 'T2')) this.pendingInfluence = null;
     if (this.pendingInfluence) {
-      void this.runGeneration([], 'operator');
+      void this.runGeneration([], 'operator', { hold: this.pendingHold });
       return;
     }
+    if (this.paused) return;
     if (this.buffer.length > 0) {
       this.setPhase('ACCUMULATING');
       const hard = this.hardTriggerIds.size > 0;

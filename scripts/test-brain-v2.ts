@@ -689,6 +689,16 @@ assert.ok(sb.rewrites >= 1 || sb.vetoed >= 0);
   repo.insertDecision(GX, 'T1v2', 'DROPPED', 'put to sleep or paused while thinking: nothing sent');
   const st = repo.brainV2Stats(GX, 0);
   assert.deepEqual([st.spoke, st.unprompted, st.pauses, st.vetoed, st.quiet], [3, 0, 1, 1, 0], JSON.stringify(st));
+  // a jump-in that was dropped or whose writer failed does not make the next direct answer "unprompted"
+  const GY = 'stats2@g.us';
+  repo.insertDecision(GY, 'T1v2', 'RESPOND', 'r | strong thought | urge 7 vs bar 6.5');
+  repo.insertDecision(GY, 'T1v2', 'DROPPED', 'put to sleep or paused while thinking: nothing sent');
+  repo.insertDecision(GY, 'T2v2', 'SEND', 'answered a mention');
+  repo.insertDecision(GY, 'T1v2', 'RESPOND', 'r | strong thought | urge 7 vs bar 6.5');
+  repo.insertDecision(GY, 'T2v2', 'SILENT', 'generation failed or unparseable');
+  repo.insertDecision(GY, 'T2v2', 'SEND', 'answered a mention');
+  const sy = repo.brainV2Stats(GY, 0);
+  assert.deepEqual([sy.spoke, sy.unprompted], [2, 0], JSON.stringify(sy));
 }
 assert.equal(repo.setDecisionFeedback(d1, null), true);
 assert.equal(repo.getDecisionFeedback(G, 8).length, 1);
