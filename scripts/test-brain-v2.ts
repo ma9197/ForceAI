@@ -201,6 +201,11 @@ assert.equal(lintPlan([{ type: 'message', text: 'not bad, but he still missed th
   assert.ok(tells('what do you think? 👀').includes('keep the chat going') && tells('thoughts? 🤔').includes('keep the chat going'), 'emoji after the "?"');
   for (const t of ["what do y'all think?", 'wdyt?', 'ne düşünüyorsunuz?', 'sizce?', 'siz nə fikirləşirsiz?', 'nə deyirsiz?', 'kak dumaete?']) assert.ok(tells(t).includes('keep the chat going'), t);
   assert.equal(tells('rent-free in his head', ['he lives rent free there']), '', 'same phrase, other spelling');
+  // round 26: answering something the chat moved past quotes it
+  const quoteIt = (actions: any[], olderTarget: string | null) => lintPlan(actions, { recentBotTexts: [], recentHumanTexts: [], medianLen: 20, marker, olderTarget });
+  assert.deepEqual(quoteIt([{ type: 'message', text: 'barca by two' }], 'm4').actions, [{ type: 'reply', text: 'barca by two', target_message_id: 'm4' }]);
+  assert.deepEqual(quoteIt([{ type: 'reply', text: 'barca by two', target_message_id: 'm2' }], 'm4').actions[0], { type: 'reply', text: 'barca by two', target_message_id: 'm2' }, 'its own quote stays');
+  assert.deepEqual(quoteIt([{ type: 'message', text: 'barca by two' }], null).actions[0].type, 'message', 'the newest message: no quote needed');
   // final review: answering a yes/no question with their own words is rewritten, never dropped (the asker gets an answer)
   const echo = (unprompted: boolean) => lintPlan([{ type: 'message', text: 'kanan gəlir' }], { recentBotTexts: [], recentHumanTexts: ['kanan gəlir?'], medianLen: 20, marker, unprompted });
   assert.ok(echo(false).actions.length === 1 && echo(false).issues.some(i => i.problem.includes('repeats their message')), 'asked: rewrite');
