@@ -5,7 +5,7 @@ import type { AiClient } from '../ai/client.js';
 import type { Gatekeeper } from '../ai/gatekeeper.js';
 import type { Generator } from '../ai/generator.js';
 import type { BrainV2 } from '../ai/v2/brain.js';
-import { dynamics, seriousHit, type MsgRow } from '../ai/v2/signals.js';
+import { cut, dynamics, seriousHit, type MsgRow } from '../ai/v2/signals.js';
 import { describeAction } from '../ai/v2/describe.js';
 import type { Outbound } from '../wa/outbound.js';
 import type { JidResolver } from '../wa/jid.js';
@@ -98,7 +98,7 @@ export class Arbiter {
       if (!res) { this.decision('S1v2', 'FAILED', 'thinking stage failed or unparseable'); return; }
       const { out, policy } = res;
       const room = policy.room?.length ? ` (${policy.room.join(', ')})` : '';
-      const thought = out.thought ? ` | thought: ${out.thought.text.slice(0, 90)}` : '';
+      const thought = out.thought ? ` | thought: ${cut(out.thought.text, 90)}` : '';
       const react = policy.decision === 'REACT' && out.react ? ` ${out.react.emoji}` : '';
       this.decision('S1v2', policy.decision, `${out.reason}${react} | ${policy.why} | urge ${policy.motivation} vs bar ${policy.threshold}${room}${thought}`);
       // it would speak: also write the line it would send (dry run, never sent), so the owner can read
@@ -576,7 +576,7 @@ export class Arbiter {
     }
     const { out, policy } = res;
     const hard = [...this.hardTriggerIds]; // someone talked to it while the gate was thinking
-    const thought = out.thought ? ` | thought: ${out.thought.text.slice(0, 90)}` : '';
+    const thought = out.thought ? ` | thought: ${cut(out.thought.text, 90)}` : '';
     const room = policy.room?.length ? ` (${policy.room.join(', ')})` : '';
     // the logged "why" says what really happens: a RESPOND that also answers a direct trigger is an answer
     const why = policy.decision === 'RESPOND' && hard.length ? `addressed: direct trigger on ${hard.join(', ')}` : policy.why;
@@ -655,7 +655,7 @@ export class Arbiter {
       }
       thought = this.brainV2!.takeThought(this.chatJid);
       if (!thought) return;
-      this.decision('T1v2', 'PAUSE', `chat paused, offering a saved thought: ${thought.text.slice(0, 90)}`);
+      this.decision('T1v2', 'PAUSE', `chat paused, offering a saved thought: ${cut(thought.text, 90)}`);
     } catch (err) {
       logger.error({ err }, 'brain v2 pause check failed');
       return;

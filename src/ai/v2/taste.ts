@@ -4,7 +4,7 @@ import { BOT_NAME, BRAIN_V2, DEFAULT_MSG_PREFIX, DEFAULT_MSG_SUFFIX } from '../.
 import { logger } from '../../logger.js';
 import type { Repo } from '../../memory/repo.js';
 import type { AiClient } from '../client.js';
-import { parseDecisionLine, stripMarker } from './signals.js';
+import { cut, parseDecisionLine, stripMarker } from './signals.js';
 
 /**
  * Brain v2 learning loop: the owner's 👍 / 👎 on lines and decisions in a group are distilled into a
@@ -90,12 +90,12 @@ export class TasteLearner {
       const current = this.rules(chatJid);
       const decisions = calls.map(c => {
         const { reason, thought } = parseDecisionLine(c.reason);
-        return `- ${c.verdict === 'good' ? 'RIGHT' : 'WRONG'} to ${WHAT[c.decision] ?? 'speak'}: ${reason}${thought ? ` (its idea: ${thought})` : ''}`.slice(0, 220);
+        return cut(`- ${c.verdict === 'good' ? 'RIGHT' : 'WRONG'} to ${WHAT[c.decision] ?? 'speak'}: ${reason}${thought ? ` (its idea: ${thought})` : ''}`, 220);
       });
       const content = [
         `CURRENT HOUSE RULES:\n${current.length ? current.map(r => `- ${r}`).join('\n') : '(none yet)'}`,
-        `LINES THE OWNER LIKED:\n${liked.length ? liked.map(t => `- ${strip(t).slice(0, 160)}`).join('\n') : '(none)'}`,
-        `LINES THE OWNER DISLIKED:\n${disliked.length ? disliked.map(t => `- ${strip(t).slice(0, 160)}`).join('\n') : '(none)'}`,
+        `LINES THE OWNER LIKED:\n${liked.length ? liked.map(t => `- ${cut(strip(t), 160)}`).join('\n') : '(none)'}`,
+        `LINES THE OWNER DISLIKED:\n${disliked.length ? disliked.map(t => `- ${cut(strip(t), 160)}`).join('\n') : '(none)'}`,
         `DECISIONS THE OWNER JUDGED:\n${decisions.length ? decisions.join('\n') : '(none)'}`,
       ].join('\n\n');
       const model = this.ai.gatekeeperModel;

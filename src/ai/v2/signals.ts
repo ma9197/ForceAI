@@ -61,6 +61,15 @@ export interface StyleStats {
   replyShare: number;  // share of human messages sent as a quote-reply
 }
 
+/**
+ * The first `n` characters of a text, never splitting an emoji in half. A plain slice can leave half of a
+ * surrogate pair at the end, and a prompt with a lone surrogate can be rejected by the API.
+ */
+export function cut(text: string, n: number): string {
+  const s = text.slice(0, n);
+  return /[\uD800-\uDBFF]$/.test(s) ? s.slice(0, -1) : s;
+}
+
 /** How the HUMANS in this chat text right now, from their recent text messages. */
 export function styleStats(rows: MsgRow[]): StyleStats | null {
   const human = rows.filter(r => !r.is_bot && r.type === 'text' && (r.text ?? '').trim().length > 0);
@@ -249,7 +258,7 @@ export function formatCallbacks(rows: MsgRow[]): string | null {
     const d = new Date(r.ts);
     const when = `${d.toISOString().slice(0, 10)}`;
     const who = r.is_bot ? 'you' : (r.sender_name ?? '?');
-    return `- [${when}] ${who}: ${(r.text ?? '').slice(0, 160)}`;
+    return `- [${when}] ${who}: ${cut(r.text ?? '', 160)}`;
   });
   return `OLDER MOMENTS FROM THIS CHAT (matched on today's topic; a callback to one of these can be the funniest move, but only if it genuinely connects. never force it):\n${lines.join('\n')}`;
 }
@@ -375,7 +384,7 @@ export function formatDecisionFeedback(rows: { decision: string; reason: string;
   const lines = rows.map(r => {
     const { reason, why, thought } = parseDecisionLine(r.reason);
     // the gatekeeper only knows its own reason and thought, not the code's numbers
-    const what = [reason, thought ? `thought: ${thought}` : ''].filter(Boolean).join(' / ').slice(0, 200);
+    const what = cut([reason, thought ? `thought: ${thought}` : ''].filter(Boolean).join(' / '), 200);
     const addressed = why.startsWith('addressed');
     if (spoke(r.decision) && addressed) return r.verdict === 'good' ? `- your answer was RIGHT here: ${what}` : `- your answer MISSED here (answering was right, the line was not): ${what}`;
     if (spoke(r.decision)) return r.verdict === 'good' ? `- speaking was RIGHT here: ${what}` : `- should have STAYED QUIET here: ${what}`;
@@ -471,7 +480,9 @@ export function dynamics(rows: MsgRow[], botName: string, now = Date.now()): Dyn
       if (q.short_id && now - q.ts < 5 * 60_000) rhetorical = { shortId: q.short_id, who: q.sender_name ?? '?' };
       break;
     }
-    const answered = recent.slice(i + 1).some(r => r.sender_jid !== q.sender_jid) || rows.some(r => r.is_bot && r.ts > q.ts);
+    // answered by someone else or the bot, or taken back by the asker ("nvm found it", "забей", "boş ver")
+    const takenBack = (t: string) => RETRACT.test(t.trim()) || RETRACT.test(t.trim().toLocaleLowerCase('tr'));
+    const answered = recent.slice(i + 1).some(r => r.sender_jid !== q.sender_jid || takenBack(r.text ?? '')) || rows.some(r => r.is_bot && r.ts > q.ts);
     if (!answered && q.short_id) hangingQuestion = { shortId: q.short_id, who: q.sender_name ?? '?' };
     break;
   }
@@ -739,7 +750,7 @@ export function formatTakes(takes: { text: string; ts: number }[], now = Date.no
     const d = Math.round(h / 24);
     return h < 24 ? `${h}h ago` : d === 1 ? '1 day ago' : `${d} days ago`;
   };
-  return `YOUR OWN TAKES FROM THE LAST DAYS (stay consistent: double down, own a miss with style, or say you called it. never contradict one by accident):\n${takes.map(t => `- ${ago(t.ts)}: "${t.text.slice(0, 140)}"`).join('\n')}`;
+  return `YOUR OWN TAKES FROM THE LAST DAYS (stay consistent: double down, own a miss with style, or say you called it. never contradict one by accident):\n${takes.map(t => `- ${ago(t.ts)}: "${cut(t.text, 140)}"`).join('\n')}`;
 }
 
 /** The bot's recent emoji reactions: tapping the same one every time is a bot tell. */
@@ -917,6 +928,18 @@ export function ironyCues(rows: MsgRow[], now = Date.now(), max = 3): IronyCue[]
   const found: (IronyCue & { strength: number; ts: number })[] = [];
   for (const r of recent) {
     const raw = r.text ?? '';
+    // "jk" / "шучу" / "zarafat edirəm" right after their own line (or quoting it): that line was the joke.
+    // A voice note or photo in between gets it, not the text before; another "jk" is never the joke.
+    const jk = JK.exec(raw.trim()) ?? JK.exec(raw.trim().toLocaleLowerCase('tr'));
+    if (jk) {
+      const own = (x: MsgRow) => x.sender_jid === r.sender_jid && x.ts < r.ts && x.type !== 'reaction' && x.type !== 'sticker' && !JK.test((x.text ?? '').trim());
+      const quoted = r.quoted_id ? rows.find(x => x.id === r.quoted_id && own(x)) : undefined;
+      const prev = quoted ?? rows.filter(own).pop();
+      if (prev?.short_id && prev.type === 'text' && (quoted || r.ts - prev.ts <= 2 * 60_000)) {
+        found.push({ shortId: prev.short_id, who: prev.sender_name ?? '?', cue: `their own "${jk[1].replace(/\s+/g, ' ')}" right after it (they say it was a joke)`, strength: 3, ts: prev.ts });
+      }
+      continue;
+    }
     const t = `${raw}\n${raw.toLocaleLowerCase('tr')}`; // Turkish İ / I lowercase properly
     let cue: string | null = null;
     let strength = 0;
@@ -940,9 +963,28 @@ export function ironyCues(rows: MsgRow[], now = Date.now(), max = 3): IronyCue[]
     }
     if (cue && r.short_id) found.push({ shortId: r.short_id, who: r.sender_name ?? '?', cue, strength, ts: r.ts });
   }
-  return found.sort((a, b) => b.strength - a.strength || b.ts - a.ts).slice(0, max)
+  // one cue per message (the strongest), strongest first, then shown in chat order
+  const best = [...new Map(found.sort((a, b) => a.strength - b.strength).map(c => [c.shortId, c])).values()];
+  return best.sort((a, b) => b.strength - a.strength || b.ts - a.ts).slice(0, max)
     .sort((a, b) => a.ts - b.ts).map(({ strength: _s, ts: _t, ...c }) => c);
 }
+
+/** "jk" and friends as the whole message, with laughs or a wink around it ("lol jk", "шучу шучу 😂"). Not "no kidding". */
+const JK_PAD = '(?:[\\s!.,)]|ha|ah|ха|ах|lol|lmao|xd|😂|🤣|😅|😜|😉|💀|😭)*'; // each token starts differently: one parse, linear
+const JK_WORD = '(?:' + ['(?:jk)+', 'j/k', 'just kidding', 'just joking', "i['’]?m (?:just )?(?:kidding|joking)", 'kidding', 'joking',
+  'шучу', 'я шучу', 'да шучу', 'шутка', 'я пошутил', 'пошутил', 'прикалываюсь', 'shuchu', 'shutka',
+  ...['şaka', 'şaka lan', 'şaka yaptım', 'şaka yapıyorum', 'şaka yapıyom', 'şakaydı', 'zarafat', 'zarafat edirəm', 'zarafat eliyirəm', 'zarafatdı', 'zarafat idi', 'zarafat elədim'].map(loose)].join('|') + ')';
+const JK = new RegExp('^' + JK_PAD + '(' + JK_WORD + '(?:[\\s,]+' + JK_WORD + ')?)' + JK_PAD + '$', 'iu');
+
+/**
+ * Taking a question back ("oh nvm found it", "ладно, забей", "boş ver", "neyse"), with at most a few words
+ * after and a laugh or emoji at the end. "забей гол" is "score a goal", not "never mind".
+ */
+const RETRACT = new RegExp('^(?:(?:oh|ah|ok|okay|actually|lol|а|ой|ну|да|ладно|всё|все|tamam|hə)[\\s,!.]+){0,2}(?:' + [
+  'nvm+', 'never ?mind', 'forget it', 'ignore (?:that|it|me)', 'found it', 'неважно', 'забей(?![\\s,]+(?:гол|мяч|пенальти))', 'проехали', 'нашел', 'нашёл',
+  'nevazhno', 'zabe[yi](?![\\s,]+(?:gol|myach|penalti))',
+  ...['boş ver', 'boşver', 'unut gitsin', 'fərqi yoxdur', 'unut getsin', 'neyse', 'nəysə', 'buldum', 'tapdım'].map(loose),
+].join('|') + ")(?:[\\s!.,)]+[\\p{L}\\p{N}'’]+){0,4}(?:[\\s!.,)]|\\p{Extended_Pictographic}|\\u{FE0F}|\\u{200D}|\\p{EMod})*$", 'iu');
 
 /** Same rule as the linter's scriptOf, kept local so signals stay independent of lint. */
 function scriptOfText(text: string): 'cyrillic' | 'latin' | null {
@@ -1031,7 +1073,7 @@ export function formatLinesThatWorked(
     const key = text.toLowerCase().replace(EMOJI, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
     if (!key || seen.has(key) || firstNames.some(n => key.split(' ').includes(n))) return; // never a dig at an easy-on person
     seen.add(key);
-    all.push({ line: line(text.slice(0, 140)), liked });
+    all.push({ line: line(cut(text, 140)), liked });
   };
   for (const t of liked.filter(Boolean)) add(t, x => `- "${x}" (your owner liked it)`, true);
   for (const l of landed) add(l.text, x => `- "${x}" (${l.laughs} laugh${l.laughs > 1 ? 's' : ''})`);

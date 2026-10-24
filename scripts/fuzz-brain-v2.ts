@@ -20,7 +20,7 @@ const PIECES = [
   'кто играет', 'умер', 'сумерки', 'ахахах', 'çox pis', 'İndi gəlirəm', 'vəfat', 'başın sağolsun', 'not just a game, but a religion',
   'great question', 'as an AI', ';', '—', '–', '3–1', '?', '!!!', '...', '"quoted"', '#hashtag', 'forceai', 'ForceAI', '@123456',
   'passed away', 'in the hospital', 'gn', 'пока', 'gecən xeyrə', 'iyi geceler', 'bye', 'will win', 'trust me', '2-1', '\n', '\t', '   ', '', '‍', '️', '🇦🇿', 'a'.repeat(50),
-  'ha'.repeat(40), '!'.repeat(30), '?'.repeat(30), 'not '.repeat(20), 'is not about x, it is', '(jk)', 'http://x.y/z?q=1', 'thoughts?', 'plot twist', 'lol', 'ахахах', 'yox qardas', 'kanka çok', 'geliyorum', 'gedirəm', 'cringe', 'хватит', 'who even', '???', 'ne alaka', 'GOOOOL', 'ГОЛЛЛ', 'gollll', 'HAHAHAHA',
+  'ha'.repeat(40), '!'.repeat(30), '?'.repeat(30), 'not '.repeat(20), 'is not about x, it is', '(jk)', 'http://x.y/z?q=1', 'thoughts?', 'plot twist', 'lol', 'ахахах', 'yox qardas', 'kanka çok', 'geliyorum', 'gedirəm', 'cringe', 'хватит', 'who even', '???', 'ne alaka', 'GOOOOL', 'ГОЛЛЛ', 'gollll', 'HAHAHAHA', 'jk', 'nvm', 'шучу', 'забей',
 ] as const;
 const text = () => Array.from({ length: 1 + Math.floor(rnd() * 8) }, () => pick(PIECES)).join(pick([' ', '', ', ', '. ', '? ']));
 const huge = () => Array.from({ length: 400 }, () => pick(PIECES)).join(' '); // ~5k chars
