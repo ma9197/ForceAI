@@ -346,6 +346,7 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
   let k = 0;
   const r = (who: string, text: string, at: number, extra: Partial<MsgRow> = {}): MsgRow =>
     ({ id: `w${++k}`, short_id: `m${k}`, sender_jid: who, sender_name: who, text, type: 'text', is_bot: 0, is_owner: 0, ts: T + at * 1000, ...extra });
+  const at = T + 120_000;
   const a1 = r('Murad', 'REF IS BLIND', 10);
   const a2 = r('Kanan', 'murad calm down', 20, { quoted_id: a1.id });
   const a3 = r('Murad', 'NO!! he saw it', 30, { quoted_id: a2.id });
@@ -353,22 +354,48 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
   const c1 = r('Kanan', 'hahaha', 45);
   const own = r('Said', 'anyone up?', 50, { is_owner: 1 });
   const bad = r('Leyla', 'my grandpa is in the hospital', 55);
-  const map = roomMap([a1, a2, a3, b1, c1, own, bad], ['Murad', 'Kanan', 'Aysel', 'Leyla'], 'ForceAI', T + 120_000);
+  const map = roomMap([a1, a2, a3, b1, c1, own, bad], ['Murad', 'Kanan', 'Aysel', 'Leyla'], 'ForceAI', at);
   const who = Object.fromEntries(map.people.map(p => [p.name, p]));
-  assert.ok(who.Murad.heated && who.Murad.talkingTo.includes('Kanan'), JSON.stringify(who.Murad));
-  assert.ok(who.Kanan.talkingTo.includes('Murad') && !who.Kanan.heated);
+  assert.ok(who.Murad.loud && who.Murad.talkingTo.includes('Kanan'), JSON.stringify(who.Murad));
+  assert.ok(who.Kanan.talkingTo.includes('Murad') && !who.Kanan.loud);
   assert.equal(who.Aysel.openQuestion, null, 'others spoke after her question, so it is not "open" any more');
-  assert.equal(who['the owner'].openQuestion, null, "the owner's questions are never a cue");
+  assert.equal(who['Said (owner)'].openQuestion, null, "the owner's questions are never a cue (labelled like the transcript)");
   assert.ok(who.Leyla.serious);
   assert.deepEqual(map.chains, [{ ids: [a1.short_id, a2.short_id, a3.short_id], people: ['Murad', 'Kanan'] }]);
+  const txt = formatRoomMap(map)!;
+  assert.ok(txt.includes('- Murad: 2 messages, loud (shouting, arguing or hyped), talking to Kanan') && txt.includes('may be going through something real') && txt.includes('REPLY CHAINS RUNNING'), txt);
+  assert.ok(txt.startsWith('WHO IS DOING WHAT (recent messages, measured):'));
+  assert.equal(formatRoomMap(roomMap([], [], 'ForceAI', T)), null);
+  assert.equal(roomMap([r('Murad', 'old', 0)], [], 'ForceAI', T + 20 * 60_000).people.length, 0, 'only recent minutes');
   const lone = roomMap([r('Aysel', 'who is coming to dinner?', 40)], [], 'ForceAI', T + 60_000);
   assert.equal(lone.people[0].openQuestion, `m${k}`);
-  const laughing = roomMap([r('Kanan', 'hahahaha', 1), r('Kanan', '💀💀', 2), r('Kanan', 'ok', 3)], [], 'ForceAI', T + 10_000);
-  assert.ok(laughing.people[0].laughing);
-  const txt = formatRoomMap(map)!;
-  assert.ok(txt.includes('- Murad: 2 messages, worked up, talking to Kanan') && txt.includes('may be going through something real') && txt.includes('REPLY CHAINS RUNNING'), txt);
-  assert.equal(formatRoomMap(roomMap([], [], 'ForceAI', T)), null);
-  assert.equal(roomMap([r('Murad', 'old', 0)], [], 'ForceAI', T + 20 * 60_000).people.length, 0, 'only the last 15 minutes');
+
+  // review fixes
+  const botLine = r('bot', 'madrid by two', 5, { is_bot: 1 });
+  const ownerQuote = r('Said', 'lmao true', 8, { is_owner: 1, quoted_id: botLine.id });
+  const ownerCmd = r('Said', 'forceai, roast kanan', 9, { is_owner: 1 });
+  const m1 = roomMap([botLine, ownerQuote, ownerCmd], [], 'ForceAI', at);
+  assert.deepEqual(m1.people.find(p => p.name === 'Said (owner)')!.talkingTo, [], "the owner's lines never point at anyone");
+  const asked = r('Kanan', 'forceai, who wins?', 10);
+  const answered = r('bot', 'barca', 12, { is_bot: 1 });
+  assert.deepEqual(roomMap([asked], [], 'ForceAI', at).people[0].talkingTo, ['ForceAI'], 'unanswered: talking to it');
+  assert.deepEqual(roomMap([asked, answered], [], 'ForceAI', at).people[0].talkingTo, [], 'answered: not any more');
+  const grief = roomMap([r('Leyla', 'my grandpa passed away', 10), r('Kanan', 'condolences 🙏', 11), r('Murad', 'başın sağ olsun qardaş', 12), r('Aysel', 'başsağlığı', 13)], [], 'ForceAI', at);
+  assert.deepEqual(grief.people.filter(p => p.serious).map(p => p.name), ['Leyla'], 'only the one with the loss');
+  const tickets = r('Murad', 'i bought the tickets', 10);
+  const howMuch = r('Kanan', 'for how much?', 11, { quoted_id: tickets.id });
+  assert.equal(roomMap([tickets, howMuch], [], 'ForceAI', at).people.find(p => p.name === 'Kanan')!.openQuestion, null, 'a question to a friend is not a question to the group');
+  assert.equal(roomMap([tickets, r('Kanan', 'murad, how much?', 11)], [], 'ForceAI', at).people.find(p => p.name === 'Kanan')!.openQuestion, null);
+  const caps = roomMap([r('Kanan', 'HAHAHAHAHAHAHAHAHAHAHAHAHAHAHA', 10), r('Kanan', 'ХАХАХАХА', 11)], [], 'ForceAI', at).people[0];
+  assert.ok(caps.laughing && !caps.loud, 'laughing in caps is laughing, not loud');
+  const crowd = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7'].flatMap((n, i) => [r(n, 'yo', 20 + i), r(n, 'yo yo', 30 + i)]);
+  assert.ok(roomMap([r('Leyla', 'my mom is in the hospital', 10), ...crowd], [], 'ForceAI', at).people.some(p => p.name === 'Leyla'), 'someone going through something is never cut off the list');
+  assert.deepEqual(roomMap([r('Murad', 'can someone grab ice', 10)], ['Can Yilmaz'], 'ForceAI', at).people[0].talkingTo, [], '"can someone" is not aimed at Can');
+  assert.deepEqual(roomMap([r('Murad', 'can, grab ice', 10)], ['Can Yilmaz'], 'ForceAI', at).people[0].talkingTo, ['Can Yilmaz']);
+  const reacts = roomMap([r('Kanan', '👍', 10, { type: 'reaction', quoted_id: 'x' }), r('Kanan', '', 11, { type: 'reaction', quoted_id: 'x' }), r('Kanan', 'ok', 12)], [], 'ForceAI', at).people[0];
+  assert.equal(reacts.msgs, 1, 'reactions are not messages');
+  const twins = roomMap([r('Murad', 'hi?', 10, { sender_jid: 'm1@s' }), r('Murad', 'yo', 11, { sender_jid: 'm2@s' })], [], 'ForceAI', at).people;
+  assert.equal(twins.length, 2, 'two people with the same name stay two people');
 }
 
 // ---- brain on a throwaway DB with a fake client ----
