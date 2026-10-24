@@ -268,7 +268,7 @@ export function SettingsPanel({ onSaved }: { onSaved: () => void }) {
       <div className="settings-row">
         <div>
           <label>Brain v2 shadow: write its lines</label>
-          <div className="hint">Only for groups on "v1 + v2 shadow". When the shadow would speak, it also writes the line it would send, so you can read it in the feed next to v1's. Nothing is sent. One reply call each time.</div>
+          <div className="hint">Only for groups on "v1 + v2 shadow". When the shadow would speak, it also writes the line it would send, so you can read it in the feed next to v1's. Nothing is sent. 2 to 3 AI calls each time (the reply, the second opinion, sometimes a quick fix).</div>
         </div>
         <input
           type="checkbox"

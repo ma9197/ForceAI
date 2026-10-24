@@ -10,7 +10,7 @@ import { Arbiter } from '../src/arbiter/arbiter.js';
 // The arbiter routes each group to the right brain: v1 groups never touch brain v2, v2 groups use the
 // v2 gatekeeper + generator, a v2 REACT sends one reaction, and a saved thought is offered at a pause.
 // All fakes, short timers, a throwaway DB.
-Object.assign(ARBITER as any, { DEBOUNCE_BASE: 150, DEBOUNCE_PER_MSG: 0, DEBOUNCE_MAX: 300, SAME_SENDER_EXTRA: 0, HARD_TRIGGER_DEBOUNCE: 150 });
+Object.assign(ARBITER as any, { DEBOUNCE_BASE: 150, DEBOUNCE_PER_MSG: 0, DEBOUNCE_MAX: 300, SAME_SENDER_EXTRA: 0, HARD_TRIGGER_DEBOUNCE: 150, WAIT_MIN: 150, WAIT_MAX: 200 });
 Object.assign(BRAIN_V2 as any, { LULL_MS: 1200, LULL_MIN_HUMAN_MSGS: 3 });
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'forceai-arb-'));
@@ -31,6 +31,7 @@ const v2Gate: any = { decision: 'IGNORE', react: null };
 let gateDelay = 0;
 let genDelay = 0;
 let gateFail = false;
+let v1Decision = 'RESPOND';
 let genFail = false;
 function harness(chatJid: string) {
   const sent: any[] = [];
@@ -59,7 +60,7 @@ function harness(chatJid: string) {
   const arb = new Arbiter(
     chatJid, repo,
     { isOverBudget: () => false } as any,
-    { decide: async () => { log.push(`v1gate:${chatJid}`); return { decision: 'RESPOND', reason: 'v1', address_message_ids: [], heat: 'low' }; } } as any,
+    { decide: async () => { log.push(`v1gate:${chatJid}`); return { decision: v1Decision, reason: 'v1', address_message_ids: [], heat: 'low', wait_ms: 150 }; } } as any,
     { generate: async () => { log.push(`v1gen:${chatJid}`); return { actions: [{ type: 'message', text: 'v1 says hi' }], note: 'v1' }; } } as any,
     { abortCurrentPlan: false, executePlan: async (_jid: string, actions: any[], onSent: any) => { for (const a of actions) { sent.push(a); onSent?.({ action: a }); } } } as any,
     { isOwnJid: () => false } as any,
@@ -279,6 +280,21 @@ shadow.arb.onMessage(msg(VS, 'b', 'another one'));
 await sleep(700);
 assert.ok(log.includes('S1v2:RESPOND') && !log.includes('S2v2:WOULD_SAY'), 'setting off: decisions only');
 repo.setConfig('v2_shadow_lines', '1');
+// v1 waits and re-checks the same moment: the shadow writes its line once, not on every re-check
+log.length = 0;
+v1Decision = 'WAIT';
+shadow.arb.onMessage(msg(VS, 'c', 'so anyway'));
+await sleep(1500);
+v1Decision = 'RESPOND';
+assert.ok(log.filter(l => l === `v1gate:${VS}`).length >= 2, log.join(' '));
+assert.equal(log.filter(l => l === `dry:${VS}:shadow`).length, 1, 'one line per moment');
+// the writer fails: the feed says so instead of leaving the "would speak" row hanging
+log.length = 0;
+genFail = true;
+shadow.arb.onMessage(msg(VS, 'a', 'one more thing'));
+await sleep(700);
+genFail = false;
+assert.ok(log.includes('S2v2:WOULD_SKIP'), log.join(' '));
 repo.setBrainVersion(VS, 'v1');
 log.length = 0;
 shadow.arb.onMessage(msg(VS, 'a', 'back to plain v1'));
