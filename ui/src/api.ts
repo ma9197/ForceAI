@@ -7,6 +7,7 @@ export interface GroupStatus {
   asleep: boolean;
   phase: string;
   brain?: 'v1' | 'v2';
+  brain_fallback_until?: number | null;
   stats: {
     messages_read: number;
     messages_sent: number;

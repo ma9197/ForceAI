@@ -48,6 +48,9 @@ export class Arbiter {
   // brain v2 only (never set for v1 groups)
   private lullTimer: NodeJS.Timeout | null = null;
   private lastReactTs = 0;
+  /** brain v2 safety net: failed v2 calls in a row, and until when this group runs on v1 instead */
+  private v2Failures = 0;
+  private v2FallbackUntil = 0;
 
   constructor(
     private chatJid: string,
@@ -70,8 +73,30 @@ export class Arbiter {
   }
 
   /** This group answers with brain v2 (opt-in per group in the dashboard; v1 is the default). */
+  /** When v2 is on but failing, until when this group runs on v1 (null = not falling back). */
+  get v2FallbackUntilTs(): number | null {
+    return this.v2FallbackUntil > Date.now() ? this.v2FallbackUntil : null;
+  }
+
   private isV2(): boolean {
-    return !!this.brainV2 && this.repo.getBrainVersion(this.chatJid) === 'v2';
+    return !!this.brainV2 && this.repo.getBrainVersion(this.chatJid) === 'v2' && Date.now() >= this.v2FallbackUntil;
+  }
+
+  /**
+   * Brain v2 has never been wrong-footed by the real API in tests, so it gets a safety net: after
+   * FALLBACK_AFTER failed v2 calls in a row (API error or unparseable output) the group runs on v1 for
+   * FALLBACK_MS, and says so in the feed. A success resets the count.
+   */
+  private v2Result(ok: boolean): void {
+    if (ok) { this.v2Failures = 0; return; }
+    this.v2Failures += 1;
+    if (this.v2Failures < BRAIN_V2.FALLBACK_AFTER) return;
+    this.v2Failures = 0;
+    this.v2FallbackUntil = Date.now() + BRAIN_V2.FALLBACK_MS;
+    this.clearLull();
+    const mins = Math.round(BRAIN_V2.FALLBACK_MS / 60_000);
+    logger.warn({ chat: this.chatJid }, 'brain v2 keeps failing, falling back to v1');
+    this.decision('T0', 'BRAIN_FALLBACK', `brain v2 failed ${BRAIN_V2.FALLBACK_AFTER} times in a row: using v1 here for ${mins} minutes`);
   }
 
   /** Clear the rolling rate-limit window (Settings "reset" button). */
@@ -380,9 +405,17 @@ export class Arbiter {
           operatorInstruction: instruction,
           transcriptLines: wokeThisCycle ? ARBITER.WAKE_TRANSCRIPT_LINES : undefined,
         };
-        const plan = v2
+        let plan = v2
           ? (await this.brainV2!.generate({ ...genInput, thought: ex.thought ?? null, thoughtWhen: ex.thoughtWhen, unprompted: ex.unprompted }))?.plan ?? null
           : await this.generator.generate(genInput);
+        if (v2) {
+          this.v2Result(!!plan);
+          // someone asked (or the owner instructed) and v2 failed: v1 answers, nobody is left hanging
+          if (!plan && !ex.unprompted) {
+            plan = await this.generator.generate(genInput);
+            if (plan) plan = { ...plan, note: `brain v2 failed, v1 answered | ${plan.note}` };
+          }
+        }
 
         if (!plan) {
           this.decision('T2', 'SILENT', 'generation failed or unparseable');
@@ -454,6 +487,7 @@ export class Arbiter {
     // messages that arrive while the gate (or a reaction) is in flight stay buffered for the next cycle
     const seenUpTo = this.buffer.length ? this.buffer[this.buffer.length - 1].ts : undefined;
     const res = await this.brainV2!.gate(this.chatJid, this.consumedUpToTs, forceDecide);
+    this.v2Result(!!res);
     if (!res) {
       this.decision('T1v2', 'IGNORE', 'gatekeeper failed or unparseable');
       this.consumeBuffer(seenUpTo);

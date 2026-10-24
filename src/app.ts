@@ -936,6 +936,7 @@ export class App {
       asleep: arbiter?.asleep ?? false,
       phase: arbiter?.phase ?? 'IDLE',
       brain: this.repo.getBrainVersion(jid),
+      brain_fallback_until: arbiter?.v2FallbackUntilTs ?? null,
       stats: {
         messages_read: allStats[`messages_read:${jid}`] ?? 0,
         messages_sent: allStats[`messages_sent:${jid}`] ?? 0,
