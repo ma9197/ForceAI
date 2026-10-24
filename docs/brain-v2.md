@@ -121,5 +121,4 @@ Note: the research agent could only open GitHub and Anthropic pages directly; mo
 
 ## Ideas not built yet
 
-- A real bits table (jokes that got 2+ laughs, retired when they stop landing). Partly covered by "what landed".
 - Reply timing based on reading time plus thinking time (shared with v1, so left alone).
