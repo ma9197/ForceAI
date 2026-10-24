@@ -11,6 +11,7 @@ READ:
 - Scoreboard: the Compare panel shows what v2 did in that group in the last 24 hours.
 - Best first test: **Replay last hours with v2** in the Compare panel. It shows what v2 would have done at 6 moments of the last 3 hours, next to what really happened. About 6 small AI calls. Nothing is sent.
 - Cost: a v2 group costs a bit more per message read (a longer thinking step). Pick Haiku 5.5 for the thinking stage to keep it cheap.
+- Safety net: if v2 fails 3 times in a row (for example the API rejects something), that group answers with v1 for 30 minutes. The top bar then shows "on v1 until ..." and the feed shows `BRAIN_FALLBACK`. A direct question v2 fails to answer is answered by v1 right away.
 
 ## What v2 does differently
 
@@ -99,7 +100,8 @@ Note: the research agent could only open GitHub and Anthropic pages directly; mo
 - Scoreboard: `Repo.brainV2Stats`, `GET /api/brain/stats`.
 - Replay: `App.replayV2`, `POST /api/brain/replay`. Per-group chattiness: `Repo.getV2Chattiness`, `POST /api/brain/chattiness`.
 - Owner feedback: `POST /api/feedback` (👍 / 👎 on lines), `POST /api/decision-feedback` (👍 / 👎 on decisions).
-- Tests: `scripts/test-brain-v2.ts`, `scripts/test-arbiter-v2.ts`. v1 parity: `scripts/v1-request-dump.ts`.
+- Tests: `scripts/test-brain-v2.ts`, `scripts/test-arbiter-v2.ts`, `scripts/test-brain-v2-e2e.ts` (real arbiter + real v2 brain, fake API). v1 parity: `scripts/v1-request-dump.ts`.
+- Safety net: `Arbiter.v2Result` (`BRAIN_V2.FALLBACK_AFTER`, `FALLBACK_MS`).
 
 ## Testing plan for the owner
 

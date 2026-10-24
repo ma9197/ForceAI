@@ -148,6 +148,8 @@ export const BRAIN_V2 = {
   BITS_DAYS: 14,                  // running bits: phrases from this many days back...
   BITS_MAX_ROWS: 4000,            // ...at most this many human messages
   BITS_CACHE_MS: 30 * 60_000,     // recomputed at most every 30 minutes per group
+  FALLBACK_AFTER: 3,              // safety net: this many failed v2 calls in a row...
+  FALLBACK_MS: 30 * 60_000,       // ...and the group runs on v1 for this long
 } as const;
 
 // ---- Outbound humanization ----

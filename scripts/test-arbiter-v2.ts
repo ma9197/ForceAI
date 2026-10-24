@@ -30,12 +30,15 @@ const log: string[] = [];
 const v2Gate: any = { decision: 'IGNORE', react: null };
 let gateDelay = 0;
 let genDelay = 0;
+let gateFail = false;
+let genFail = false;
 function harness(chatJid: string) {
   const sent: any[] = [];
   const fakeBrain: any = {
     gate: async () => {
       log.push(`v2gate:${chatJid}`);
       if (gateDelay) await sleep(gateDelay);
+      if (gateFail) return null;
       const out = { scene: { topic: 't', threads: '', vibe: 'banter', running_bit: null, bit_played_out: false }, addressed: false,
         thought: { text: 'saved line', why: '' }, scores: { relevance: 8, novelty: 8, humor: 8, timing: 3, fit: 8 },
         reason: 'r', address_message_ids: ['m1'], wait_ms: null, ...v2Gate };
@@ -46,6 +49,7 @@ function harness(chatJid: string) {
       log.push(`unprompted:${!!input.unprompted}:${input.thoughtWhen ?? ''}`);
       log.push(`ids:${(input.addressIds ?? []).join(',')}`);
       if (genDelay) await sleep(genDelay);
+      if (genFail) return null;
       return { plan: { actions: [{ type: 'message', text: 'v2 says hi' }], note: 'v2' } };
     },
     hasThought: () => true,
@@ -182,6 +186,70 @@ v2Gate.react = null;
 for (const t of ['guys', 'my grandma is in the hospital', 'they say she will be ok']) five.arb.onMessage(msg(V5, 'a', t));
 await sleep(2000);
 assert.ok(log.includes('T1v2:IGNORE') && !log.includes('T1v2:PAUSE'), log.join(' '));
+
+// 11. safety net: v2 failing 3 times in a row puts the group on v1 for a while
+log.length = 0;
+const V6 = 'v6@g.us';
+repo.setBrainVersion(V6, 'v2');
+const six = harness(V6);
+gateFail = true;
+for (let i = 0; i < 3; i++) {
+  six.arb.onMessage(msg(V6, 'a', `line ${i}`));
+  await sleep(500);
+}
+gateFail = false;
+assert.ok(log.includes('T0:BRAIN_FALLBACK'), log.join(' '));
+assert.ok(six.arb.v2FallbackUntilTs && six.arb.v2FallbackUntilTs > Date.now());
+six.arb.onMessage(msg(V6, 'a', 'hello again'));
+await sleep(600);
+assert.ok(log.includes(`v1gate:${V6}`) && log.includes(`v1gen:${V6}`), 'falls back to v1');
+
+// 12. asked, and v2 cannot write the answer: v1 answers instead of silence
+log.length = 0;
+const V7 = 'v7@g.us';
+repo.setBrainVersion(V7, 'v2');
+const seven = harness(V7);
+genFail = true;
+seven.arb.onMessage(msg(V7, 'a', 'forceai you there?'));
+await sleep(600);
+genFail = false;
+assert.ok(log.includes('T0:HARD_TRIGGER') && log.some(l => l.startsWith(`v2gen:${V7}`)) && log.includes(`v1gen:${V7}`), log.join(' '));
+assert.deepEqual(seven.sent.map(a => a.text), ['v1 says hi']);
+
+// 13. a working gate must not hide a writer that always fails: the writer has its own count
+log.length = 0;
+const V8 = 'v8@g.us';
+repo.setBrainVersion(V8, 'v2');
+const eight = harness(V8);
+v2Gate.decision = 'RESPOND';
+genFail = true;
+for (let i = 0; i < 3; i++) {
+  eight.arb.onMessage(msg(V8, 'a', `take ${i}`));
+  await sleep(500);
+}
+genFail = false;
+assert.equal(log.filter(l => l === `v2gate:${V8}`).length, 3, 'the gate worked every time');
+assert.ok(log.includes('T0:BRAIN_FALLBACK'), log.join(' '));
+assert.ok(!log.includes(`v1gen:${V8}`), 'jump-ins that fail are not handed to v1');
+eight.arb.resetBrainFallback();
+assert.equal(eight.arb.v2FallbackUntilTs, null, 'switching brains retries v2 right away');
+
+// 14. an owner instruction picked up by a v2 jump-in, and the writer fails: v1 carries it out
+log.length = 0;
+const V9 = 'v9@g.us';
+repo.setBrainVersion(V9, 'v2');
+const nine = harness(V9);
+v2Gate.decision = 'RESPOND';
+gateDelay = 400;
+genFail = true;
+nine.arb.onMessage(msg(V9, 'a', 'kanan is on one today'));
+await sleep(300);
+nine.arb.forceGenerate('roast kanan', 'ADMIN');
+await sleep(900);
+gateDelay = 0;
+genFail = false;
+assert.ok(log.includes('T1v2:RESPOND') && log.includes('unprompted:true:now') && log.includes(`v1gen:${V9}`), log.join(' '));
+assert.deepEqual(nine.sent.map(a => a.text), ['v1 says hi']);
 
 fs.rmSync(dir, { recursive: true, force: true });
 console.log('arbiter routing: all checks passed');
