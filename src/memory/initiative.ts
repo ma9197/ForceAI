@@ -27,6 +27,11 @@ export class InitiativeDistiller {
     private events: InitiativeEvents,
   ) {}
 
+  /** True while a distill call is in flight (fresh start waits for it). */
+  get working(): boolean {
+    return this.running;
+  }
+
   /** Auto-distill once enough new flagged moves have accumulated. */
   maybeAuto(): void {
     if (this.repo.countUndistilledLessons() >= INITIATIVE.AUTO_DISTILL_AFTER) void this.run();

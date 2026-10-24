@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
+import { FreshStart } from './FreshStart';
 import { InitiativePrinciples } from './InitiativePrinciples';
 import { WorldClock } from './WorldClock';
 
@@ -552,6 +553,8 @@ export function SettingsPanel({ onSaved }: { onSaved: () => void }) {
       </div>
 
       <InitiativePrinciples />
+
+      <FreshStart />
 
       <h3 style={{ margin: '18px 0 4px' }}>About</h3>
       <p className="hint" style={{ margin: '0 0 10px' }}>

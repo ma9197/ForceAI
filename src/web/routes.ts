@@ -6,6 +6,18 @@ import type { App } from '../app.js';
 import { DATA_DIR, DEMO_MODE, resolveStickerPath, applyMentions, CITY_CATALOG, cityNow, type ClockCity } from '../config.js';
 import { logger } from '../logger.js';
 import { FREQ_LEVELS, PERSONA_PRESETS } from '../ai/prompts.js';
+import { CONFIRM_PHRASE } from '../memory/freshStart.js';
+import { createBackupArchive } from '../memory/backup.js';
+
+/** Owner-only actions (backup download, fresh start) refuse a dashboard that is open to the network
+ *  without a password: the backup holds the WhatsApp login and the API keys. */
+function ownerOnlyBlocked(): string | null {
+  const host = process.env.HOST || '127.0.0.1';
+  const exposed = host !== '127.0.0.1' && host !== 'localhost';
+  return exposed && !process.env.DASHBOARD_PASSWORD
+    ? 'Set DASHBOARD_PASSWORD in your host first. Without it anyone could use this.'
+    : null;
+}
 
 function settingsPayload(app: App) {
   return {
@@ -24,6 +36,7 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     const path = req.url.split('?')[0];
     if (req.method === 'POST' && AI_ACTION_PATHS.has(path)) {
       if (DEMO_MODE) return reply.send({ ok: true, demo: true });
+      if (app.memoryLocked) return reply.code(409).send({ error: 'A fresh start is running. Try again in a minute.' });
       if (app.needsSetup) return reply.code(409).send({ error: 'Add your Anthropic API key first (Settings → API keys).' });
     }
   });
@@ -405,6 +418,32 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     logger.info(`data import: ${buf.length} bytes extracted — restarting to load it`);
     reply.send({ ok: true, bytes: buf.length, restarting: true });
     setTimeout(() => process.exit(1), 800); // Railway restarts (restart policy: on failure)
+  });
+
+  // ---- backup download: the whole data/ folder as one file (re-importable via /api/admin/import) ----
+  fastify.get('/api/admin/export', async (_req, reply) => {
+    if (DEMO_MODE) return reply.code(403).send({ error: 'Not available in the demo.' });
+    const blocked = ownerOnlyBlocked();
+    if (blocked) return reply.code(403).send({ error: blocked });
+    const day = new Date().toISOString().slice(0, 10);
+    reply.header('Content-Disposition', `attachment; filename="forceai-backup-${day}.tar.gz"`);
+    const stream = createBackupArchive(app.repo.db, DATA_DIR, () => app.repo.setConfig('backup_downloaded_at', String(Date.now())));
+    return reply.type('application/gzip').send(stream);
+  });
+
+  // ---- fresh start: forget people, attitude and old chats; keep the group's voice + all settings ----
+  fastify.get('/api/admin/fresh-start', async () => ({ ...app.freshStartPreview(), blocked: ownerOnlyBlocked() }));
+
+  fastify.post<{ Body: { confirm?: string } }>('/api/admin/fresh-start', async (req, reply) => {
+    if (DEMO_MODE) return { ok: true, demo: true };
+    const blocked = ownerOnlyBlocked();
+    if (blocked) return reply.code(403).send({ error: blocked });
+    if ((req.body?.confirm ?? '').trim().toUpperCase() !== CONFIRM_PHRASE) {
+      return reply.code(400).send({ error: `Type ${CONFIRM_PHRASE} to confirm.` });
+    }
+    const res = await app.freshStart();
+    if (res.status !== 'ok') return reply.code(res.status === 'busy' ? 409 : 500).send({ error: res.message });
+    return { ok: true, ...res };
   });
 
   fastify.get('/api/settings', async () => settingsPayload(app));

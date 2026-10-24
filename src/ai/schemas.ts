@@ -138,6 +138,16 @@ export const InitiativePrinciplesSchema = z.object({
 });
 export type InitiativePrinciplesOut = z.infer<typeof InitiativePrinciplesSchema>;
 
+/** Fresh start: kept voice items rewritten so none of them points to a specific person. */
+export const VoiceAnonymizeSchema = z.object({
+  items: z.array(z.object({
+    id: z.number().describe('The item id, exactly as given.'),
+    content: z.string().describe('The rewritten item. Same meaning, slang and language mix, but no name, nickname or detail that points to one person.'),
+    example: z.string().nullable().describe('The rewritten example, or null if it cannot work without the person.'),
+  })).describe('ONLY items that named or pointed to a specific person. Leave out every item that is already anonymous.'),
+});
+export type VoiceAnonymizeOut = z.infer<typeof VoiceAnonymizeSchema>;
+
 export type GateResultOut = z.infer<typeof GateResultSchema>;
 export type ActionPlanOut = z.infer<typeof ActionPlanSchema>;
 export type FactExtractionOut = z.infer<typeof FactExtractionSchema>;

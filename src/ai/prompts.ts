@@ -464,3 +464,15 @@ RULES:
 - One tight sentence each. Aim for a SMALL set of strong, distinct principles — merge overlaps rather than piling up near-duplicates.
 - Do NOT duplicate principles already in the known list. To sharpen or replace one, set supersedes_id to its id.
 - Only principles that apply WITHIN a live conversation (reacting to what's happening) — NEVER "text out of nowhere when the chat is idle".`;
+
+export const VOICE_ANONYMIZER_SYSTEM = `You clean the learned VOICE PROFILE of a WhatsApp friend group before ${BOT_NAME} restarts with no memory of the people in it.
+
+Each item is a phrase, slang word, running joke, inside reference or texting pattern the group uses. ${BOT_NAME} keeps all of them, but after this no item may point to a specific person.
+
+RULES:
+- Remove every person's name, nickname, @mention, phone number and any detail that only fits one person. Use neutral words instead: "someone", "one of the boys", "whoever lost the bet".
+- Keep the humor, the slang words themselves, the meaning and the language mix (EN/AZ/TR/RU) exactly. Keep profanity uncensored.
+- A nickname that is used as general slang for anyone may stay. A nickname for one specific person must go.
+- ${BOT_NAME} is the bot itself, not a person: keep that name.
+- The example field is a real quote or says who uses it. Rewrite it without the person, or set it to null if it only makes sense with them.
+- Return ONLY the items you changed, with their exact id. Leave out items that already point to nobody.`;

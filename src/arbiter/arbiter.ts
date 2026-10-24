@@ -68,6 +68,11 @@ export class Arbiter {
     this.rate.reset();
   }
 
+  /** True while a gatekeeper/generation cycle is in flight (fresh start waits for it). */
+  get working(): boolean {
+    return this.busy;
+  }
+
   /** True while sleeping — App uses this to also pause fact extraction (no token spend asleep). */
   get asleep(): boolean {
     return this.superIdle;
