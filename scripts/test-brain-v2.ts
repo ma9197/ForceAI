@@ -12,7 +12,7 @@ import { CHATTINESS_SHIFT, decide, motivation, roomShift, threshold } from '../s
 import { actualAfter, pickReplayCuts } from '../src/ai/v2/replay.js';
 import { TasteLearner, readTasteRules } from '../src/ai/v2/taste.js';
 import {
-  botTargets, botTics, callbackKeywords, closingText, dynamics, rhetoricalText, formatDecisionFeedback, formatTeasing, formatTics, teaseReception, formatClockLine, formatLinesThatWorked, formatRoomNow, type Reception,
+  botTargets, botTics, callbackKeywords, closingText, cut, dynamics, rhetoricalText, formatDecisionFeedback, formatTeasing, formatTics, teaseReception, formatClockLine, formatLinesThatWorked, formatRoomNow, type Reception,
   formatBits, formatReactionHabit, formatTakes, groupLaughs, ironyCues, parseDecisionLine, roomMap, ignoredStreak, laughCounts, landedLines, ownTakes, participation, reception, runningBits, seriousHit,
   styleStats, type MsgRow,
 } from '../src/ai/v2/signals.js';
@@ -269,7 +269,10 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
   assert.equal(dynamics(q, 'ForceAI', now).hangingQuestion?.shortId, q[1].short_id);
   assert.equal(dynamics([...q, r('Murad', 'barca', 170)], 'ForceAI', now).hangingQuestion, null, 'answered');
   // round 23: the asker took it back
-  for (const t of ['nvm found it', 'забей, нашел', 'boş ver', 'never mind lol']) assert.equal(dynamics([...q, r('Kanan', t, 170)], 'ForceAI', now).hangingQuestion, null, t);
+  for (const t of ['nvm found it', 'забей, нашел', 'boş ver', 'never mind lol', 'nvm 😂', 'nvm lol 💀', 'забей)', 'неважно)', 'oh nvm', 'ok nvm', 'actually nvm', 'ладно, забей', 'а, забей', 'да забей',
+    'nvmm', 'found it', 'нашел', 'всё, нашел', 'neyse', 'nəysə', 'buldum', 'tapdım', 'UNUT GİTSİN', 'nvm i’ll check'])
+    assert.equal(dynamics([...q, r('Kanan', t, 170)], 'ForceAI', now).hangingQuestion, null, t);
+  for (const t of ['забей гол уже', 'anyone?']) assert.ok(dynamics([...q, r('Kanan', t, 170)], 'ForceAI', now).hangingQuestion, t);
   assert.ok(dynamics([...q, r('Kanan', 'nvm i will just ask my brother later because he always has it', 170)], 'ForceAI', now).hangingQuestion, 'a long message is not a "nvm"');
   const longT0 = performance.now();
   dynamics([...q, r('Kanan', 'nvm ' + 'a'.repeat(50_000) + '!', 170)], 'ForceAI', now);
@@ -632,12 +635,27 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
   for (const jk of ['jk 😂', 'шучу', 'just kidding!', 'zarafat edirəm', 'şaka şaka']) {
     const said = r('Kanan', 'madrid is the best club in history', 50);
     const c = ironyCues([said, r('Kanan', jk, 55)], now);
-    assert.ok(c.length === 1 && c[0].shortId === said.short_id && c[0].cue.includes('they were joking'), `${jk}: ${JSON.stringify(c)}`);
+    assert.ok(c.length === 1 && c[0].shortId === said.short_id && c[0].cue.includes('(they say it was a joke)'), `${jk}: ${JSON.stringify(c)}`);
   }
   assert.deepEqual(ironyCues([r('Kanan', 'madrid won', 50), r('Kanan', 'no kidding', 55)], now), [], '"no kidding" is not "jk"');
   assert.deepEqual(ironyCues([r('Murad', 'madrid won', 50), r('Kanan', 'jk', 55)], now), [], "someone else's line");
   const both = ironyCues([r('Kanan', 'yeah right he scored', 50), r('Kanan', 'jk', 55)], now);
   assert.equal(both.length, 1, 'one cue per message');
+  // review: the common forms, and the right line
+  const jkCue = (t: string) => ironyCues([r('Kanan', 'madrid is the best club in history', 50), r('Kanan', t, 55)], now)[0]?.cue ?? null;
+  for (const t of ['jk jk', 'jkjk', 'lol jk', 'jk lol', 'haha jk', 'jk 💀', 'im kidding', 'joking', 'шучу шучу', 'да шучу', 'шутка', 'şaka', 'şaka lan', 'zarafat', 'zarafat eliyirəm', 'ZARAFAT EDİRƏM'])
+    assert.ok(jkCue(t), t);
+  for (const t of ['no kidding', 'не шучу', 'şaka değil', 'şaka mı', 'zarafat etmirəm', 'kidding?']) assert.equal(jkCue(t), null, t);
+  const longJk = jkCue('jk ' + '😂'.repeat(20))!;
+  assert.ok((longJk as any).isWellFormed() && !longJk.includes('\n') && longJk.includes('"jk"'), 'only the keyword, never half an emoji');
+  assert.equal(cut('a😂', 2), 'a', 'cut never splits an emoji');
+  const sincere = r('Kanan', 'my dog died this morning', 40);
+  assert.deepEqual(ironyCues([sincere, { ...r('Kanan', null as any, 45), type: 'audio' }, r('Kanan', 'jk', 50)], now), [], 'a voice note in between: not the text before');
+  const older = r('Kanan', 'messi is washed', 20);
+  assert.equal(ironyCues([older, r('Kanan', 'what time is the match', 40), r('Kanan', 'jk', 50, { quoted_id: older.id })], now)[0]?.shortId, older.short_id, 'quoting the line it means');
+  const claim = r('Kanan', 'madrid wins it all', 40);
+  const two = ironyCues([claim, r('Kanan', 'jk', 45), r('Kanan', 'jk 😂', 50)], now);
+  assert.ok(two.length === 1 && two[0].shortId === claim.short_id, `another "jk" is never the joke: ${JSON.stringify(two)}`);
   // sarcasm that should be flagged, in each language, typed either way
   for (const [line, cue] of [
     ['yeah right, he totally scored', '"yeah right"'], ['ага, конечно', '"ага, конечно"'], ['ага щас', '"ага щас"'],
