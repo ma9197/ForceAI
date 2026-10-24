@@ -427,7 +427,8 @@ export async function registerRoutes(fastify: FastifyInstance, app: App): Promis
     if (blocked) return reply.code(403).send({ error: blocked });
     const day = new Date().toISOString().slice(0, 10);
     reply.header('Content-Disposition', `attachment; filename="forceai-backup-${day}.tar.gz"`);
-    return reply.type('application/gzip').send(createBackupArchive(app.repo.db, DATA_DIR));
+    const stream = createBackupArchive(app.repo.db, DATA_DIR, () => app.repo.setConfig('backup_downloaded_at', String(Date.now())));
+    return reply.type('application/gzip').send(stream);
   });
 
   // ---- fresh start: forget people, attitude and old chats; keep the group's voice + all settings ----

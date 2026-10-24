@@ -9,6 +9,8 @@ interface Preview {
   images: number;
   rewrite_cost_usd: number;
   last_fresh_start: number | null;
+  backup_downloaded_at: number | null;
+  backup_fresh: boolean;
   confirm_phrase: string;
 }
 
@@ -36,6 +38,12 @@ export function FreshStart() {
 
   const load = () => api<Preview>('/api/admin/fresh-start').then(setPreview).catch(() => undefined);
   useEffect(() => { void load(); }, []);
+
+  // the server notes a finished download; re-check a few times so Fresh start unlocks by itself
+  const download = () => {
+    window.location.assign('/api/admin/export');
+    for (const ms of [4000, 10_000, 25_000, 60_000]) setTimeout(() => void load(), ms);
+  };
 
   if (!preview) return null;
   const c = preview.counts;
@@ -71,10 +79,11 @@ export function FreshStart() {
           <div className="hint">
             Saves everything to your PC as one file: memory, stickers, settings, WhatsApp login and API keys.
             <b style={{ color: 'var(--warn)' }}> Keep it private.</b> Never share it or put it on GitHub.
+            {preview.backup_downloaded_at && <> Last download: {new Date(preview.backup_downloaded_at).toLocaleString()}.</>}
             {unavailable && <><br /><span style={{ color: 'var(--warn)' }}>{unavailable}</span></>}
           </div>
         </div>
-        <button disabled={!!unavailable} onClick={() => window.location.assign('/api/admin/export')}>⬇ Download</button>
+        <button disabled={!!unavailable} onClick={download}>⬇ Download</button>
       </div>
 
       <div className="settings-row">
@@ -84,10 +93,13 @@ export function FreshStart() {
             ForceAI forgets the people, its attitude and the old chats. It keeps the group's slang, jokes,
             stickers and all settings.
             {preview.last_fresh_start && <> Last fresh start: {new Date(preview.last_fresh_start).toLocaleString()}.</>}
+            {!unavailable && !preview.backup_fresh && (
+              <><br /><span style={{ color: 'var(--warn)' }}>Download a backup first. Fresh start unlocks for 24 hours after a download.</span></>
+            )}
           </div>
         </div>
         {phase === 'idle' && (
-          <button className="danger" disabled={!!unavailable || preview.running} onClick={() => setPhase('open')}>
+          <button className="danger" disabled={!!unavailable || preview.running || !preview.backup_fresh} onClick={() => setPhase('open')}>
             Fresh start…
           </button>
         )}
@@ -118,7 +130,7 @@ export function FreshStart() {
                   <li>Learned moves: {n((c.influence_lessons ?? 0) + (c.initiative_principles ?? 0))}. Mood goes back to Default.</li>
                   <li>Old messages: {n(c.messages)}. Chat images: {n(preview.images)}. The decision log.</li>
                 </ul>
-                A safety copy of the database stays on the server. Download a backup above first anyway.
+                Your backup is downloaded. A second safety copy of the database also stays on the server.
                 The bot restarts and is offline for about a minute. Items the AI changed show as new in the Voice tab, so you can check them.
               </div>
               {error && <div className="hint" style={{ color: 'var(--danger)' }}>✗ {error}</div>}

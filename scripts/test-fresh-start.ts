@@ -171,12 +171,15 @@ old.close();
 
 // ---- backup download: tar.gz in the import layout, live DB swapped for a snapshot ----
 const tgz = path.join(dir, 'out.tar.gz');
+let downloadDone = false;
 await new Promise<void>((resolve, reject) => {
   const out = fs.createWriteStream(tgz);
-  createBackupArchive(db, dir).pipe(out);
+  createBackupArchive(db, dir, () => { downloadDone = true; }).pipe(out);
   out.on('finish', () => resolve());
   out.on('error', reject);
 });
+await new Promise(r => setTimeout(r, 200)); // tar's close event lands after the pipe finishes
+assert.ok(downloadDone, 'a finished download is reported');
 const listing = execFileSync('tar', ['-tzf', tgz]).toString().split('\n').filter(Boolean);
 assert.ok(listing.includes('forceai.db'), 'archive has the DB at its root');
 assert.ok(listing.some(n => n.startsWith('stickers/')), 'archive has stickers/');

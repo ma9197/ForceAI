@@ -27,7 +27,8 @@ The owner will tell the friends that ForceAI restarted from scratch. It keeps le
 - Also wiped: old superseded versions of voice items (never shown or used, may name people).
 - Order: lock learners and replies, wait for in-flight AI calls, AI name pass, then synchronously: disk check, `VACUUM INTO data/forceai.db.pre-fresh-start-<date-time>`, wipe in one transaction, delete `data/images/*`, VACUUM, exit(1) so Railway restarts with clean caches. Any failure before the wipe changes nothing.
 - Railway: the trial had expired (service offline). The owner bought Hobby on 2026-10-24. Trial volumes are deleted 30 days after expiry, so first confirm the volume still has the data.
-- Owner steps: check the bot is back online with its memory, merge the PR (auto-deploys), Settings, Download backup (keep it private: it holds the WhatsApp login and API keys), then Fresh start and type FRESH START, then review the highlighted items in the Voice tab.
+- Fresh start is locked until a backup download has fully streamed in the last 24 hours (config `backup_downloaded_at`). Railway volume backups need the Pro plan, so this download is the real backup.
+- Owner steps: after deploy, Power off in the dashboard (keeps the bot quiet with its old memory), Settings, Download backup (keep it private: it holds the WhatsApp login and API keys), Fresh start and type FRESH START, Power on (scan the QR if WhatsApp logged it out), then review the highlighted items in the Voice tab.
 
 ## Task 2: refactor backlog (found by a full read on 2026-10-23, not yet confirmed by running)
 

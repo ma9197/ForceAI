@@ -10,7 +10,7 @@ import { VoiceProfiler, type VoiceLearnResult } from './memory/voice.js';
 import { MemberReporter, type ReportResult } from './memory/reporter.js';
 import { InitiativeDistiller, type DistillResult } from './memory/initiative.js';
 import {
-  CONFIRM_PHRASE, anonymizeVoiceItems, backupDb, clearImages, countImages, countRows, dbBytes, estimateRewriteCostUsd,
+  BACKUP_MAX_AGE_MS, CONFIRM_PHRASE, anonymizeVoiceItems, backupDb, clearImages, countImages, countRows, dbBytes, estimateRewriteCostUsd,
   freeBytes, getKeptVoiceItems, getKnownNames, wipeMemory, type RowCounts, type WipeResult,
 } from './memory/freshStart.js';
 import { JidResolver } from './wa/jid.js';
@@ -344,8 +344,20 @@ export class App {
       images: DEMO_MODE ? 0 : countImages(IMAGE_DIR),
       rewrite_cost_usd: estimateRewriteCostUsd(items),
       last_fresh_start: Number(this.repo.getConfig('fresh_start_at')) || null,
+      backup_downloaded_at: this.backupDownloadedAt(),
+      backup_fresh: this.hasFreshBackup(),
       confirm_phrase: CONFIRM_PHRASE,
     };
+  }
+
+  /** Set by /api/admin/export once a download has fully streamed. */
+  backupDownloadedAt(): number | null {
+    return Number(this.repo.getConfig('backup_downloaded_at')) || null;
+  }
+
+  private hasFreshBackup(): boolean {
+    const at = this.backupDownloadedAt();
+    return at !== null && Date.now() - at < BACKUP_MAX_AGE_MS;
   }
 
   /** Any AI cycle or learner in flight? Its result would land after the wipe, so we wait for it. */
@@ -371,6 +383,7 @@ export class App {
    */
   async freshStart(): Promise<FreshStartResult> {
     if (this.memoryLocked) return { status: 'busy', message: 'A fresh start is already running.' };
+    if (!this.hasFreshBackup()) return { status: 'error', message: 'Download a backup first (button above). Nothing was changed.' };
     this.memoryLocked = true;
     this.memberReporter.stop();
     for (const l of [...this.extractors.values(), ...this.voiceProfilers.values()]) l.cancelPending();
@@ -783,6 +796,9 @@ export interface FreshStartPreview {
   images: number;
   rewrite_cost_usd: number;
   last_fresh_start: number | null;
+  backup_downloaded_at: number | null;
+  /** a backup was downloaded in the last 24 h: fresh start is allowed */
+  backup_fresh: boolean;
   confirm_phrase: string;
 }
 

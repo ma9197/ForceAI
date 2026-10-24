@@ -29,6 +29,8 @@ const WIPE_TABLES = [
 const KEEP_TABLES = ['stickers', 'stats', 'lid_pn_map', 'config'] as const;
 
 export const CONFIRM_PHRASE = 'FRESH START';
+/** Fresh start needs a backup downloaded this recently (owner rule: never wipe without a backup). */
+export const BACKUP_MAX_AGE_MS = 24 * 3_600_000;
 
 export type RowCounts = Record<string, number>;
 
