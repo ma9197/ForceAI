@@ -107,6 +107,16 @@ assert.deepEqual(calls.map(c => c.kind), ['plan']);
 assert.ok(calls[0].text.includes('Someone talked to you'));
 assert.deepEqual(sent.map(a => a.text), ['barca by two, cope']);
 
+// 2b. named, then two more messages before it answers: the answer quotes the question (round 26)
+reset();
+criticOut = { reason: 'meh', verdict: 'skip' };
+planOut = plan([{ type: 'message', text: 'barca, easy' }]);
+const asked2 = say('b@s', 'forceai who wins the derby?');
+say('a@s', 'he will say madrid');
+say('b@s', 'lets see');
+await sleep(800);
+assert.deepEqual(sent.map(a => [a.type, a.target_message_id]), [['reply', asked2.shortId]], JSON.stringify(sent));
+
 // 3. bad news, and the model misreads it as a joke: no laughing reaction, nothing sent
 reset();
 gateOut = { scene: scene('banter'), addressed: false, thought: null, scores: scores(0), decision: 'REACT',

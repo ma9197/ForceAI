@@ -139,6 +139,8 @@ export interface LintContext {
   replyShare?: number;
   /** short id of the newest message in the chat */
   newestShortId?: string | null;
+  /** the one message it was asked about, when 2+ people spoke after it: the answer quotes it, like people do */
+  olderTarget?: string | null;
   /** average run of messages one person sends in a row; 1.5+ means this group texts in bursts */
   burstiness?: number;
   /** 80% of human messages are shorter than this */
@@ -289,6 +291,12 @@ export function lintPlan(actions: BotAction[], ctx: LintContext): LintResult {
   // nobody in this group quotes the message right above: a quote-reply to the newest one reads like a bot
   let final = kept.map(a => (a.type === 'reply' && ctx.replyShare !== undefined && ctx.replyShare < 0.15 && ctx.newestShortId && a.target_message_id === ctx.newestShortId
     ? { type: 'message' as const, text: a.text } : a));
+
+  // answering something the chat has moved past: quote it, or nobody knows what the answer is about
+  if (ctx.olderTarget && !final.some(a => a.type === 'reply')) {
+    const i = final.findIndex(a => a.type === 'message');
+    if (i >= 0) final = final.map((a, k) => (k === i && a.type === 'message' ? { type: 'reply' as const, text: a.text, target_message_id: ctx.olderTarget! } : a));
+  }
 
   // a group that texts in bursts: one longer clean text becomes two short ones, like people send them
   const textIdx = final.flatMap((a, i) => (a.type === 'message' || a.type === 'reply' ? [i] : []));

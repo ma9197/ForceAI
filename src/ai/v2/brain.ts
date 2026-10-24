@@ -54,6 +54,15 @@ export interface SavedThought {
   at: number;
 }
 
+/** The one message it was asked about, if 2+ human messages came after it (then the answer should quote it). */
+function olderTarget(rows: MsgRow[], addressIds?: string[]): string | null {
+  if (addressIds?.length !== 1) return null;
+  const chat = rows.filter(r => r.type !== 'reaction');
+  const at = chat.findIndex(r => r.short_id === addressIds[0]);
+  if (at < 0) return null;
+  return chat.slice(at + 1).filter(r => !r.is_bot).length >= 2 ? addressIds[0] : null;
+}
+
 /**
  * Brain v2: a gatekeeper that keeps an "inner thought" with self-scores (turned into a decision by
  * code, see policy.ts), and a generator that reads the room first, considers several angles, gets
@@ -378,6 +387,7 @@ export class BrainV2 {
         lastHumanTexts: rows.filter(r => !r.is_bot && r.type === 'text').map(r => r.text ?? ''),
         replyShare: signals.style?.replyShare,
         newestShortId: rows.filter(r => r.type !== 'reaction').slice(-1)[0]?.short_id ?? null,
+        olderTarget: asked ? olderTarget(rows, input.addressIds) : null,
         burstiness: signals.style?.burstiness,
         p80Len: signals.style?.p80Len,
         laughEndShare: laughEndShare(signals.humanTexts.slice(-40)),
