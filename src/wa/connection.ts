@@ -25,6 +25,10 @@ export class WaConnection extends EventEmitter {
   state: ConnState = 'connecting';
   private reconnectDelay = 1000;
   private stopped = false;
+  private reconnectTimer: NodeJS.Timeout | null = null;
+  private openedAt = 0;
+  /** last time WhatsApp closed the connection, and how many drops in a row (shown in the dashboard) */
+  lastClose: { code: number | null; reason: string; at: number; streak: number } | null = null;
   private waVersion: { version: WAVersion; at: number } | null = null;
 
   /** set by App: lets Baileys re-fetch a sent message for decrypt retries / resends */
@@ -35,10 +39,21 @@ export class WaConnection extends EventEmitter {
     await this.connect();
   }
 
+  /** The one place a reconnect is scheduled: a newer schedule replaces an older one, so two sockets
+   *  can never be opened for the same login (they would kick each other off forever: 440). */
+  private scheduleReconnect(ms: number): void {
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect().catch(e => logger.error(e));
+    }, ms);
+  }
+
   /** Fully disconnect the WhatsApp socket (linked device goes offline) WITHOUT logging out —
    *  creds stay on disk so start() resumes the same session with no QR. */
   async stop(): Promise<void> {
     this.stopped = true;
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     try { this.sock?.end(undefined); } catch { /* ignore */ }
     this.sock = null;
     this.setState('offline');
@@ -83,8 +98,14 @@ export class WaConnection extends EventEmitter {
   }
 
   private async connect(): Promise<void> {
+    if (this.stopped) return; // a reconnect that fires after Power off must not open a socket
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
     const version = await this.resolveVersion();
+    if (this.stopped) return;
+    // never two sockets: close the previous one first (its late events are ignored below)
+    const previous = this.sock;
+    this.sock = null;
+    try { previous?.end(undefined); } catch { /* ignore */ }
 
     const sock = makeWASocket({
       ...(version ? { version } : {}),
@@ -103,6 +124,7 @@ export class WaConnection extends EventEmitter {
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('connection.update', async (update) => {
+      if (this.sock !== sock) return; // an old, replaced socket: its events must not reconnect anything
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
@@ -116,7 +138,7 @@ export class WaConnection extends EventEmitter {
       }
 
       if (connection === 'open') {
-        this.reconnectDelay = 1000;
+        this.openedAt = Date.now();
         this.setState('open');
         // Tell WhatsApp this linked device is NOT actively being watched, so the phone keeps
         // playing notification sounds (an active companion device silences them otherwise).
@@ -128,13 +150,23 @@ export class WaConnection extends EventEmitter {
       if (connection === 'close') {
         const statusCode = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode;
         if (this.stopped) return;
+        // only a connection that stayed up for a minute resets the backoff, so a kick right after
+        // every connect slows down instead of flapping every second
+        if (this.openedAt && Date.now() - this.openedAt > 60_000) this.reconnectDelay = 1000;
+        this.openedAt = 0;
+        this.lastClose = {
+          code: statusCode ?? null,
+          reason: closeReason(statusCode, lastDisconnect?.error?.message),
+          at: Date.now(),
+          streak: (this.lastClose && Date.now() - this.lastClose.at < 10 * 60_000 ? this.lastClose.streak : 0) + 1,
+        };
 
         if (statusCode === DisconnectReason.loggedOut) {
           logger.warn('logged out — wiping auth state, QR required');
           fs.rmSync(AUTH_DIR, { recursive: true, force: true });
           fs.mkdirSync(AUTH_DIR, { recursive: true });
           this.setState('logged_out');
-          setTimeout(() => this.connect().catch(e => logger.error(e)), 1000);
+          this.scheduleReconnect(1000);
           return;
         }
 
@@ -143,19 +175,23 @@ export class WaConnection extends EventEmitter {
         if (statusCode === DisconnectReason.restartRequired) {
           // Expected right after the first QR scan — reconnect immediately.
           logger.info('restart required (normal post-QR) — reconnecting');
-          this.connect().catch(e => logger.error(e));
+          this.scheduleReconnect(0);
           return;
         }
 
         this.setState('closed');
-        const delay = this.reconnectDelay;
-        this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30000);
-        logger.warn({ statusCode, delay }, 'connection closed — reconnecting with backoff');
-        setTimeout(() => this.connect().catch(e => logger.error(e)), delay);
+        // 440 = this login was opened somewhere else (another running copy of the bot, e.g. on a PC).
+        // Fighting back every second just kicks each other forever, so wait much longer.
+        const replaced = statusCode === DisconnectReason.connectionReplaced;
+        const delay = replaced ? Math.max(this.reconnectDelay, 30_000) : this.reconnectDelay;
+        this.reconnectDelay = Math.min(delay * 2, replaced ? 300_000 : 30_000);
+        logger.warn({ statusCode, reason: this.lastClose.reason, streak: this.lastClose.streak, delay }, 'connection closed — reconnecting with backoff');
+        this.scheduleReconnect(delay);
       }
     });
 
     sock.ev.on('messages.upsert', ({ messages, type }) => {
+      if (this.sock !== sock) return;
       this.emit('messages', messages as WAMessage[], type);
     });
 
@@ -166,5 +202,21 @@ export class WaConnection extends EventEmitter {
     sock.ev.on('group-participants.update', (update) => {
       this.emit('group-participants', update);
     });
+  }
+}
+
+/** Plain-words reason for a WhatsApp disconnect code (shown in the dashboard). */
+function closeReason(code: number | undefined, message?: string): string {
+  switch (code) {
+    case DisconnectReason.connectionReplaced: return 'another device or copy of the bot opened this WhatsApp login';
+    case DisconnectReason.loggedOut: return 'logged out from the phone';
+    case DisconnectReason.restartRequired: return 'restart required (normal after scanning the QR)';
+    case DisconnectReason.connectionClosed: return 'connection closed by WhatsApp';
+    case DisconnectReason.connectionLost: return 'connection lost or timed out';
+    case DisconnectReason.badSession: return 'bad session';
+    case DisconnectReason.multideviceMismatch: return 'multi-device mismatch';
+    case DisconnectReason.unavailableService: return 'WhatsApp service unavailable';
+    case 405: return 'WhatsApp rejected the app version';
+    default: return message ? `code ${code ?? '?'}: ${message.slice(0, 80)}` : `code ${code ?? '?'}`;
   }
 }

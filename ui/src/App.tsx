@@ -158,7 +158,10 @@ export default function App() {
       <div className="topbar">
         <div className="logo">Force<span>AI</span></div>
         <span className={`dot ${conn}`} title={conn} />
-        <span className="muted">{conn}</span>
+        <span className="muted" title={status?.connection_note ?? undefined}>{conn}</span>
+        {status?.connection_note && (
+          <span className="muted" style={{ fontSize: 12, color: 'var(--warn)', marginLeft: 8 }}>{status.connection_note}</span>
+        )}
         <div className="grow" />
         {status?.demo && (
           <span className="demo-badge">

@@ -859,6 +859,12 @@ export class App {
     };
   }
 
+  private connectionNote(): string | null {
+    const c = this.conn.lastClose;
+    if (DEMO_MODE || !c || Date.now() - c.at > 10 * 60_000) return null;
+    return `Last drop: ${c.reason}${c.streak > 1 ? ` (${c.streak} drops in a row)` : ''}`;
+  }
+
   statusPayload(): StatusPayload {
     const allStats = this.repo.getStats();
     const groups = [...this.linkedGroups].sort().map(jid => this.groupStatus(jid, allStats));
@@ -872,6 +878,7 @@ export class App {
     return {
       // demo: report a connected/online bot (there's no real WhatsApp) so the UI shows the main view
       connection: DEMO_MODE ? 'open' : this.conn.state,
+      connection_note: this.connectionNote(),
       online: DEMO_MODE ? true : this.online,
       needsSetup: this.needsSetup,
       demo: DEMO_MODE,

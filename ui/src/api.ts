@@ -18,6 +18,7 @@ export interface GroupStatus {
 
 export interface Status {
   connection: string;
+  connection_note?: string | null;
   online: boolean;
   needsSetup: boolean;
   demo: boolean;

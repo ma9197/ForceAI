@@ -213,6 +213,8 @@ export interface GroupStatus {
 
 export interface StatusPayload {
   connection: string;
+  /** why WhatsApp last dropped the connection, if it dropped in the last 10 minutes */
+  connection_note: string | null;
   online: boolean;
   needsSetup: boolean;
   demo: boolean;
