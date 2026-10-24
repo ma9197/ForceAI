@@ -11,7 +11,7 @@ import { CHATTINESS_SHIFT, decide, roomShift, threshold } from '../src/ai/v2/pol
 import { actualAfter, pickReplayCuts } from '../src/ai/v2/replay.js';
 import {
   botTargets, botTics, callbackKeywords, dynamics, formatDecisionFeedback, formatDynamics, formatGroupLaughs, formatTargets, formatTaste, formatTics,
-  formatBits, formatReactionHabit, formatTakes, groupLaughs, parseDecisionLine, ignoredStreak, laughCounts, landedLines, ownTakes, participation, reception, runningBits, seriousHit,
+  formatBits, formatReactionHabit, formatRoomMap, formatTakes, groupLaughs, parseDecisionLine, roomMap, ignoredStreak, laughCounts, landedLines, ownTakes, participation, reception, runningBits, seriousHit,
   styleStats, type MsgRow,
 } from '../src/ai/v2/signals.js';
 import type { GateV2Out } from '../src/ai/v2/schemas.js';
@@ -338,6 +338,37 @@ assert.equal(decide(gate({ decision: 'RESPOND', s: { humor: 7, novelty: 6, relev
   assert.deepEqual(sad.actions.map(a => (a as any).emoji), ['❤️'], 'no laughing reaction on bad news');
   assert.equal(autoFix('Barca won 3\u20131, and \u2014 honestly \u2014 deserved', marker), 'Barca won 3-1, and, honestly, deserved');
   assert.equal(phoneStyle('İndi gəlirəm.'), 'indi gəlirəm');
+}
+
+// ---- round 8: who is doing what ----
+{
+  const T = 1_800_000_000_000;
+  let k = 0;
+  const r = (who: string, text: string, at: number, extra: Partial<MsgRow> = {}): MsgRow =>
+    ({ id: `w${++k}`, short_id: `m${k}`, sender_jid: who, sender_name: who, text, type: 'text', is_bot: 0, is_owner: 0, ts: T + at * 1000, ...extra });
+  const a1 = r('Murad', 'REF IS BLIND', 10);
+  const a2 = r('Kanan', 'murad calm down', 20, { quoted_id: a1.id });
+  const a3 = r('Murad', 'NO!! he saw it', 30, { quoted_id: a2.id });
+  const b1 = r('Aysel', 'who is coming to dinner?', 40);
+  const c1 = r('Kanan', 'hahaha', 45);
+  const own = r('Said', 'anyone up?', 50, { is_owner: 1 });
+  const bad = r('Leyla', 'my grandpa is in the hospital', 55);
+  const map = roomMap([a1, a2, a3, b1, c1, own, bad], ['Murad', 'Kanan', 'Aysel', 'Leyla'], 'ForceAI', T + 120_000);
+  const who = Object.fromEntries(map.people.map(p => [p.name, p]));
+  assert.ok(who.Murad.heated && who.Murad.talkingTo.includes('Kanan'), JSON.stringify(who.Murad));
+  assert.ok(who.Kanan.talkingTo.includes('Murad') && !who.Kanan.heated);
+  assert.equal(who.Aysel.openQuestion, null, 'others spoke after her question, so it is not "open" any more');
+  assert.equal(who['the owner'].openQuestion, null, "the owner's questions are never a cue");
+  assert.ok(who.Leyla.serious);
+  assert.deepEqual(map.chains, [{ ids: [a1.short_id, a2.short_id, a3.short_id], people: ['Murad', 'Kanan'] }]);
+  const lone = roomMap([r('Aysel', 'who is coming to dinner?', 40)], [], 'ForceAI', T + 60_000);
+  assert.equal(lone.people[0].openQuestion, `m${k}`);
+  const laughing = roomMap([r('Kanan', 'hahahaha', 1), r('Kanan', '💀💀', 2), r('Kanan', 'ok', 3)], [], 'ForceAI', T + 10_000);
+  assert.ok(laughing.people[0].laughing);
+  const txt = formatRoomMap(map)!;
+  assert.ok(txt.includes('- Murad: 2 messages, worked up, talking to Kanan') && txt.includes('may be going through something real') && txt.includes('REPLY CHAINS RUNNING'), txt);
+  assert.equal(formatRoomMap(roomMap([], [], 'ForceAI', T)), null);
+  assert.equal(roomMap([r('Murad', 'old', 0)], [], 'ForceAI', T + 20 * 60_000).people.length, 0, 'only the last 15 minutes');
 }
 
 // ---- brain on a throwaway DB with a fake client ----

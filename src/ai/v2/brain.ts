@@ -14,7 +14,7 @@ import { CriticSchema, GateV2Schema, PlanV2Schema, RewriteSchema, type GateV2Out
 import {
   botTargets, botTics, callbackKeywords, dynamics, formatDecisionFeedback, formatCallbacks, formatDynamics, formatGroupLaughs, formatLanded,
   formatParticipation, formatStyleStats, formatTargets, formatTaste, formatTics, groupLaughs, landedLines, participation, reception,
-  formatBits, formatReactionHabit, formatTakes, ownTakes, runningBits, stripMarker, styleStats, type Bit, type Dynamics, type MsgRow, type StyleStats,
+  formatBits, formatReactionHabit, formatRoomMap, formatTakes, ownTakes, roomMap, runningBits, stripMarker, styleStats, type Bit, type Dynamics, type MsgRow, type StyleStats,
 } from './signals.js';
 
 export interface GateV2Result {
@@ -143,6 +143,7 @@ export class BrainV2 {
       replay ? '' : formatCityTimes(this.repo.getClockCities()),
       formatParticipation(part),
       formatDynamics(dyn, rec) ?? '',
+      formatRoomMap(roomMap(rows, this.memberNames(chatJid), BOT_NAME, now)) ?? '',
       formatReactionHabit(history) ?? '',
       part.secondsSinceBot !== null && part.secondsSinceBot < 60 ? `(You last spoke ${part.secondsSinceBot}s ago.)` : '',
       lastScene ? `Your previous read of the scene: ${lastScene.topic} / ${lastScene.vibe}${lastScene.running_bit ? ` / bit: ${lastScene.running_bit}` : ''}` : '',
@@ -184,6 +185,10 @@ export class BrainV2 {
     }
   }
 
+  private memberNames(chatJid: string): string[] {
+    return this.repo.getMembersForChat(chatJid).map(m => m.display_name ?? '').filter(Boolean);
+  }
+
   /** The group's running phrases over the last days (a heavier query, so cached per group). */
   private bits(chatJid: string): Bit[] {
     const cached = this.bitsCache.get(chatJid);
@@ -198,7 +203,7 @@ export class BrainV2 {
   private signalsBlock(chatJid: string, rows: MsgRow[], consumedUpToTs: number | null, asked: boolean): { text: string; medianLen: number; lowercaseShare: number; botTexts: string[]; humanTexts: string[]; dyn: Dynamics; style: StyleStats | null; disliked: string[] } {
     const marker = this.marker();
     const strip = (t: string) => stripMarker(t, marker.prefix, marker.suffix);
-    const names = this.repo.getMembersForChat(chatJid).map(m => m.display_name ?? '').filter(Boolean);
+    const names = this.memberNames(chatJid);
     // the owner's 👎 lines: kept out of what it learns from, and close copies are blocked by the linter
     const disliked = this.repo.getFeedbackLines(chatJid, -1, BRAIN_V2.TASTE_LINES * 4).map(strip);
     const notDisliked = (t: string) => !disliked.includes(t);
@@ -222,6 +227,7 @@ export class BrainV2 {
       style ? formatStyleStats(style) : '',
       tics ? formatTics(tics) : '',
       formatDynamics(dyn, []) ?? '',
+      formatRoomMap(roomMap(rows, names, BOT_NAME)) ?? '',
       formatLanded(landedLines(history, strip).filter(l => notDisliked(l.text))) ?? '',
       formatGroupLaughs(groupLaughs(history)) ?? '',
       formatTaste(this.repo.getFeedbackLines(chatJid, 1, BRAIN_V2.TASTE_LINES).map(strip)) ?? '',

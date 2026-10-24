@@ -662,3 +662,111 @@ export function formatReactionHabit(rows: MsgRow[]): string | null {
   if (n < 3) return null;
   return `Your last reactions: ${mine.join(' ')}. If you react, pick one that fits this message, not ${top} again by habit.`;
 }
+
+export interface PersonNow {
+  name: string;
+  msgs: number;
+  laughing: boolean;
+  heated: boolean;
+  serious: boolean;
+  /** short id of their question nobody answered yet */
+  openQuestion: string | null;
+  talkingTo: string[];
+}
+
+/** Caps lock or "!!" / "?!": someone is worked up (shouting, arguing, hyped). */
+function heatedText(t: string): boolean {
+  const letters = t.match(/\p{L}/gu) ?? [];
+  const upper = letters.filter(c => c !== c.toLowerCase()).length;
+  return (letters.length >= 6 && upper / letters.length >= 0.6) || /!!|\?!|!\?/.test(t);
+}
+
+/**
+ * Who is doing what right now, measured per person over the last minutes (theory of mind in code, like
+ * SimToM's perspective taking, arXiv 2311.10227), plus the reply chains that are running. Group chats
+ * interleave several conversations; models lose track of who answers whom (conversation disentanglement),
+ * so the chains come from the quote links and from names at the start of a message.
+ */
+export function roomMap(rows: MsgRow[], names: string[], botName: string, now = Date.now(), windowMs = 15 * 60_000): { people: PersonNow[]; chains: { ids: string[]; people: string[] }[] } {
+  const recent = rows.filter(r => now - r.ts <= windowMs && !r.is_bot);
+  const label = (r: MsgRow) => (r.is_owner ? 'the owner' : r.sender_name ?? '?');
+  const byId = new Map(rows.filter(r => r.id).map(r => [r.id!, r]));
+  const firstNames = names.map(n => ({ full: n, first: n.trim().split(/\s+/)[0].toLowerCase() })).filter(n => n.first.length >= 3);
+  const bot = botName.toLowerCase();
+
+  // who a message is aimed at: the author of the quoted message, or a name it opens with
+  const target = (r: MsgRow): string | null => {
+    const q = r.quoted_id ? byId.get(r.quoted_id) : undefined;
+    if (q) return q.is_bot ? botName : label(q);
+    const first = words(r.text ?? '')[0] ?? '';
+    if (first === bot) return botName;
+    return firstNames.find(n => n.first === first)?.full ?? null;
+  };
+
+  const people = new Map<string, PersonNow & { texts: number; laughs: number; heat: number }>();
+  for (const r of recent) {
+    const name = label(r);
+    const p = people.get(name) ?? { name, msgs: 0, laughing: false, heated: false, serious: false, openQuestion: null, talkingTo: [], texts: 0, laughs: 0, heat: 0 };
+    p.msgs += 1;
+    const t = r.text ?? '';
+    if (r.type === 'reaction') { if (LAUGH_EMOJI.test(t)) p.laughs += 1; }
+    else if (r.type === 'text') {
+      p.texts += 1;
+      if (pureLaugh(t)) p.laughs += 1;
+      if (heatedText(t)) p.heat += 1;
+      if (seriousHit(t)) p.serious = true;
+      const to = target(r);
+      if (to && to !== name && !p.talkingTo.includes(to)) p.talkingTo.push(to);
+    }
+    people.set(name, p);
+  }
+  // an open question: the person's latest text ends in "?" and nobody else wrote after it
+  for (const p of people.values()) {
+    const mine = recent.filter(r => label(r) === p.name && r.type === 'text');
+    const q = mine[mine.length - 1];
+    // never for the owner: the owner's messages are never a cue to respond
+    if (q && !q.is_owner && QUESTION_END.test(q.text ?? '') && q.short_id && !rows.some(r => r.ts > q.ts && r.type !== 'reaction' && (r.is_bot || label(r) !== p.name))) p.openQuestion = q.short_id;
+    p.laughing = p.laughs > 0 && p.laughs * 2 >= p.msgs;
+    p.heated = p.heat >= 2 || (p.heat >= 1 && p.texts <= 2);
+  }
+
+  // reply chains: messages linked by quotes, at least two people
+  const parent = new Map<string, string>();
+  const find = (id: string): string => { let x = id; while (parent.has(x)) x = parent.get(x)!; return x; };
+  const chatIds = new Set(recent.filter(r => r.type === 'text' && r.id).map(r => r.id!));
+  for (const r of recent) {
+    if (r.type !== 'text' || !r.id || !r.quoted_id || !chatIds.has(r.quoted_id)) continue;
+    const a = find(r.id), b = find(r.quoted_id);
+    if (a !== b) parent.set(a, b);
+  }
+  const groups = new Map<string, MsgRow[]>();
+  for (const r of recent) {
+    if (r.type !== 'text' || !r.id) continue;
+    const root = find(r.id);
+    groups.set(root, [...(groups.get(root) ?? []), r]);
+  }
+  const chains = [...groups.values()]
+    .filter(g => g.length >= 2 && new Set(g.map(label)).size >= 2)
+    .sort((a, b) => b[b.length - 1].ts - a[a.length - 1].ts)
+    .slice(0, 3)
+    .map(g => ({ ids: g.map(r => r.short_id ?? '?').slice(-5), people: [...new Set(g.map(label))] }));
+
+  const list = [...people.values()].sort((a, b) => b.msgs - a.msgs).slice(0, 6)
+    .map(({ texts: _t, laughs: _l, heat: _h, ...p }) => p);
+  return { people: list, chains };
+}
+
+export function formatRoomMap(map: { people: PersonNow[]; chains: { ids: string[]; people: string[] }[] }): string | null {
+  if (map.people.length === 0) return null;
+  const lines = map.people.map(p => {
+    const bits = [`${p.msgs} message${p.msgs > 1 ? 's' : ''}`];
+    if (p.serious) bits.push('may be going through something real');
+    else if (p.heated) bits.push('worked up');
+    if (p.laughing) bits.push('laughing');
+    if (p.openQuestion) bits.push(`asked #${p.openQuestion}, no answer yet`);
+    if (p.talkingTo.length) bits.push(`talking to ${p.talkingTo.join(', ')}`);
+    return `- ${p.name}: ${bits.join(', ')}`;
+  });
+  const chains = map.chains.map(c => `- ${c.ids.map(i => `#${i}`).join(' > ')} (${c.people.join(', ')})`);
+  return [`WHO IS DOING WHAT (last 15 minutes, measured):`, ...lines, ...(chains.length ? ['REPLY CHAINS RUNNING:', ...chains] : [])].join('\n');
+}
