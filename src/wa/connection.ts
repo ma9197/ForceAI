@@ -174,7 +174,7 @@ export class WaConnection extends EventEmitter {
 
         if (statusCode === DisconnectReason.restartRequired) {
           // Expected right after the first QR scan — reconnect immediately.
-          logger.info('restart required (normal post-QR) — reconnecting');
+          logger.info('restart required (normal post-QR), reconnecting');
           this.scheduleReconnect(0);
           return;
         }
@@ -185,7 +185,7 @@ export class WaConnection extends EventEmitter {
         const replaced = statusCode === DisconnectReason.connectionReplaced;
         const delay = replaced ? Math.max(this.reconnectDelay, 30_000) : this.reconnectDelay;
         this.reconnectDelay = Math.min(delay * 2, replaced ? 300_000 : 30_000);
-        logger.warn({ statusCode, reason: this.lastClose.reason, streak: this.lastClose.streak, delay }, 'connection closed — reconnecting with backoff');
+        logger.warn({ statusCode, reason: this.lastClose.reason, streak: this.lastClose.streak, delay }, 'connection closed, reconnecting with backoff');
         this.scheduleReconnect(delay);
       }
     });
