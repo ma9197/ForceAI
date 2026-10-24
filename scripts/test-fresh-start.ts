@@ -72,6 +72,8 @@ const settings: Record<string, string> = {
   member_report_ts: String(t0),
 };
 for (const [k, v] of Object.entries(settings)) repo.setConfig(k, v);
+repo.setConfig(`v2_taste_rules_${G1}`, JSON.stringify(['go easy on Murad'])); // learned from ratings: may name people
+repo.setConfig(`v2_taste_at_${G1}`, String(t0));
 fs.writeFileSync(path.join(imagesDir, 'm0.jpg'), 'img');
 fs.writeFileSync(path.join(imagesDir, 'm1.webp'), 'img');
 
@@ -162,6 +164,8 @@ assert.equal(res.after.voice_linked_to_person, 0, 'no voice item links to a pers
 assert.equal(res.after.voice_overviews, 0, 'voice overview wiped');
 assert.equal(repo.getConfig('persona_mode'), 'default');
 assert.equal(repo.getConfig('persona_custom'), '');
+assert.equal(repo.getConfig(`v2_taste_rules_${G1}`), null, 'brain v2 house rules wiped');
+assert.equal(repo.getConfig(`v2_taste_at_${G1}`), null);
 assert.equal(removedImages, 2);
 assert.equal(countImages(imagesDir), 0);
 

@@ -10,6 +10,7 @@ READ:
 - Teach it your taste: tap 👍 or 👎 on the bot's lines in the live feed. v2 reads your latest likes and dislikes in that group.
 - Too chatty or too quiet: Settings, **Brain v2 chattiness** (quiet, balanced, chatty). One group only: the Compare panel has its own chattiness box.
 - Judge its calls: on `T1v2` lines in the live feed, tap 👍 (good call) or 👎 (bad call). v2's thinking stage reads your latest calls.
+- It learns from your ratings: every 8 ratings in a group (lines and calls), one small call turns them into 3 to 6 "house rules" for that group. See, relearn or clear them in the Compare panel.
 - Scoreboard: the Compare panel shows what v2 did in that group in the last 24 hours.
 - Best first test: **Replay last hours with v2** in the Compare panel. It shows what v2 would have done at 6 moments of the last 3 hours, next to what really happened. About 6 small AI calls. Nothing is sent.
 - Cost: a v2 group costs a bit more per message read (a longer thinking step). Pick Haiku 5.5 for the thinking stage to keep it cheap.
@@ -35,6 +36,7 @@ READ:
 | Easy on one person | If it aimed at the same friend in 4 of its last 15 lines, it is told to give them a break. | Research brief #7: roast budget |
 | Thought seeds the reply | When it jumps in because of its inner thought, the reply writer gets that thought, so the jump-in keeps its reason. | Inner Thoughts |
 | Second opinion | Before an unprompted line goes out, a second quick call plays a sharp friend and says send or skip. Skip means silence. Never used when someone asked it or you gave an instruction. Settings toggle, on by default. | Research brief: pairwise judge beats single scoring (arXiv 2603.12520) |
+| House rules from your ratings | Every 8 new ratings in a group, one cheap call distills your latest likes, dislikes and decision calls into 3 to 6 short rules ("keep jump-ins to one line"). Both stages follow them. Phrased as what to do, never quoting a line. Per group; wiped by fresh start. | Learning from human feedback without training: distilled principles, like the initiative distiller |
 | Your calls on its decisions (👍 / 👎 on `T1v2`) | You mark "spoke" or "stayed quiet" as a good or bad call. Your latest calls are shown to the thinking stage as examples. | Research brief #1: owner-labelled examples |
 | Room check in code | Measured facts about the chat right now: two people in a back-and-forth (bar +0.8), someone mid-story (+0.5), a question nobody answered (-0.5). Shown to the thinking stage and moved on the bar. | Speak or Stay Silent (2026), MUCA (2024): models are bad at "when" on their own |
 | Who is doing what | Per person, last 15 minutes, measured in code: how much they wrote, worked up (caps, "!!"), laughing, asked something nobody answered, may be going through something real, who they are talking to. Plus the reply chains running right now (from quotes). | SimToM perspective taking (arXiv 2311.10227); conversation disentanglement: models lose track of interleaved threads |
@@ -104,6 +106,7 @@ Note: the research agent could only open GitHub and Anthropic pages directly; mo
 - Shadow: `Arbiter.shadowV2` (tier `S1v2`). Blind test: `POST /api/brain/ab`, table `brain_ab`.
 - Preview: `App.previewBrains`, `POST /api/brain/preview`, `ui/src/components/BrainPreview.tsx`.
 - Scoreboard: `Repo.brainV2Stats`, `GET /api/brain/stats`.
+- Learning loop: `src/ai/v2/taste.ts` (`TasteLearner`), `GET/POST /api/brain/taste`, config `v2_taste_rules_<group>`.
 - Replay: `App.replayV2`, `POST /api/brain/replay`. Per-group chattiness: `Repo.getV2Chattiness`, `POST /api/brain/chattiness`.
 - Owner feedback: `POST /api/feedback` (👍 / 👎 on lines), `POST /api/decision-feedback` (👍 / 👎 on decisions).
 - Tests: `scripts/test-brain-v2.ts`, `scripts/test-arbiter-v2.ts`, `scripts/test-brain-v2-e2e.ts` (real arbiter + real v2 brain, fake API), `scripts/fuzz-brain-v2.ts [rounds] [seed]` (3000 random rounds passed; slowest call 57 ms, the cached bits table). v1 parity: `scripts/v1-request-dump.ts`.

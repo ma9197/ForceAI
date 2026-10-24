@@ -10,6 +10,7 @@ import type { PromptBuilder } from '../prompts.js';
 import { lintPlan, type LintResult } from './lint.js';
 import { CHATTINESS_SHIFT, decide, type PolicyResult } from './policy.js';
 import { CRITIC_SYSTEM, GATEKEEPER_V2_SYSTEM, REWRITE_SYSTEM } from './prompts.js';
+import { formatTasteRules, readTasteRules } from './taste.js';
 import { CriticSchema, GateV2Schema, PlanV2Schema, RewriteSchema, type GateV2Out, type PlanV2Out } from './schemas.js';
 import {
   botTargets, botTics, callbackKeywords, dynamics, formatDecisionFeedback, formatCallbacks, formatDynamics, formatGroupLaughs, formatLanded,
@@ -117,6 +118,7 @@ export class BrainV2 {
       bits ? `RUNNING JOKES AND REFERENCES OF THIS GROUP:\n${bits}` : '',
       summary ? `WHAT HAS BEEN GOING ON LATELY:\n${summary}` : '',
       phrases ?? '',
+      formatTasteRules(readTasteRules(this.repo, chatJid)) ?? '',
       calls ?? '',
     ].filter(Boolean).join('\n\n');
     this.contextCache.set(chatJid, { text, version: this.prompts.memoryVersion, at: Date.now() });
@@ -230,6 +232,7 @@ export class BrainV2 {
       formatRoomMap(roomMap(rows, names, BOT_NAME)) ?? '',
       formatLanded(landedLines(history, strip).filter(l => notDisliked(l.text))) ?? '',
       formatGroupLaughs(groupLaughs(history)) ?? '',
+      formatTasteRules(readTasteRules(this.repo, chatJid)) ?? '',
       formatTaste(this.repo.getFeedbackLines(chatJid, 1, BRAIN_V2.TASTE_LINES).map(strip)) ?? '',
       formatTargets(botTargets(history.filter(r => r.is_bot).slice(-BRAIN_V2.TARGET_WINDOW), names, id => this.repo.getMessageById(id)?.sender_name ?? null)) ?? '',
       formatParticipation(part, asked),

@@ -1,8 +1,9 @@
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { GateResultSchema, ActionPlanSchema, FactExtractionSchema, VoiceProfileSchema, MemberReportSchema, BatchReportSchema, InitiativePrinciplesSchema, VoiceAnonymizeSchema } from '../src/ai/schemas.js';
 import { CriticSchema, GateV2Schema, PlanV2Schema, RewriteSchema } from '../src/ai/v2/schemas.js';
+import { TasteSchema } from '../src/ai/v2/taste.js';
 
-for (const [name, schema] of Object.entries({ GateResultSchema, ActionPlanSchema, FactExtractionSchema, VoiceProfileSchema, MemberReportSchema, BatchReportSchema, InitiativePrinciplesSchema, VoiceAnonymizeSchema, GateV2Schema, PlanV2Schema, RewriteSchema, CriticSchema })) {
+for (const [name, schema] of Object.entries({ GateResultSchema, ActionPlanSchema, FactExtractionSchema, VoiceProfileSchema, MemberReportSchema, BatchReportSchema, InitiativePrinciplesSchema, VoiceAnonymizeSchema, GateV2Schema, PlanV2Schema, RewriteSchema, CriticSchema, TasteSchema })) {
   const format = zodOutputFormat(schema as any);
   if (!(format as any).schema) throw new Error(`${name}: no schema produced`);
   console.log(`${name}: OK`);

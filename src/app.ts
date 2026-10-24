@@ -28,6 +28,7 @@ import { Gatekeeper } from './ai/gatekeeper.js';
 import { Generator } from './ai/generator.js';
 import { actualAfter, pickReplayCuts } from './ai/v2/replay.js';
 import { BrainV2 } from './ai/v2/brain.js';
+import { TasteLearner } from './ai/v2/taste.js';
 import { Arbiter } from './arbiter/arbiter.js';
 import { StickerLearning } from './stickers/learning.js';
 import { Bus } from './web/bus.js';
@@ -63,6 +64,8 @@ export class App {
   private voiceProfilers = new Map<string, VoiceProfiler>();
   private memberReporter: MemberReporter;
   private initiativeDistiller: InitiativeDistiller;
+  /** brain v2 learning loop: the owner's ratings in a group become a few house rules */
+  tasteLearner: TasteLearner;
   /** true while a fresh start runs: learners don't start and AI actions are refused. */
   memoryLocked = false;
   /** progress of the last fresh start, shown in Settings */
@@ -102,6 +105,12 @@ export class App {
     });
     this.initiativeDistiller = new InitiativeDistiller(this.repo, this.ai, this.prompts, {
       onDistilled: () => this.bus.publish({ kind: 'status', status: this.statusPayload() }),
+    });
+    this.tasteLearner = new TasteLearner(this.repo, this.ai, (jid, rules) => {
+      this.prompts.memoryVersion += 1; // v2's cached group context picks the new rules up
+      const reason = rules.length ? `learned ${rules.length} house rules for brain v2 from your ratings` : 'brain v2 house rules cleared';
+      const id = this.repo.insertDecision(jid, 'T0', 'TASTE', reason);
+      this.bus.publish({ kind: 'decision', chatJid: jid, ts: Date.now(), tier: 'T0', decision: 'TASTE', reason, id });
     });
 
     this.loadLinkedGroups();
@@ -380,7 +389,7 @@ export class App {
   /** Any AI cycle or learner in flight? Its result would land after the wipe, so we wait for it. */
   private memoryBusy(): boolean {
     const all = [...this.arbiters.values(), ...this.extractors.values(), ...this.voiceProfilers.values()];
-    return all.some(x => x.working) || this.memberReporter.working || this.initiativeDistiller.working;
+    return all.some(x => x.working) || this.memberReporter.working || this.initiativeDistiller.working || this.tasteLearner.working;
   }
 
   /** Waits until no AI call is in flight. false = still busy at the deadline. */

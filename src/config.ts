@@ -150,6 +150,8 @@ export const BRAIN_V2 = {
   BITS_CACHE_MS: 30 * 60_000,     // recomputed at most every 30 minutes per group
   FALLBACK_AFTER: 3,              // safety net: this many failed v2 calls in a row...
   FALLBACK_MS: 30 * 60_000,       // ...and the group runs on v1 for this long
+  TASTE_EVERY: 8,                 // learning loop: new owner ratings in a group before house rules are relearned
+  TASTE_LEARN_LINES: 20,          // latest liked / disliked lines and decision calls it learns from (each)
 } as const;
 
 // ---- Outbound humanization ----

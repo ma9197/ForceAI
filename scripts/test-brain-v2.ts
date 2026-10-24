@@ -9,6 +9,7 @@ import { BrainV2 } from '../src/ai/v2/brain.js';
 import { lintPlan, phoneStyle, autoFix, overlap, scriptOf, splitInTwo } from '../src/ai/v2/lint.js';
 import { CHATTINESS_SHIFT, decide, roomShift, threshold } from '../src/ai/v2/policy.js';
 import { actualAfter, pickReplayCuts } from '../src/ai/v2/replay.js';
+import { TasteLearner, readTasteRules } from '../src/ai/v2/taste.js';
 import {
   botTargets, botTics, callbackKeywords, dynamics, formatDecisionFeedback, formatDynamics, formatGroupLaughs, formatTargets, formatTaste, formatTics,
   formatBits, formatReactionHabit, formatRoomMap, formatTakes, groupLaughs, parseDecisionLine, roomMap, ignoredStreak, laughCounts, landedLines, ownTakes, participation, reception, runningBits, seriousHit,
@@ -425,11 +426,13 @@ const fakeAi: any = {
   gatekeeperModel: 'claude-haiku-5-5', generationModel: 'claude-sonnet-5-5',
   tuning: (_m: string, mt: number) => ({ max_tokens: mt, effort: 'low' }),
   recordUsage: () => undefined,
+  isOverBudget: () => false,
   client: { messages: { parse: async (req: any) => {
     calls.push(req);
     const schema = JSON.stringify(req.output_config.format);
     if (schema.includes('"addressed"')) return { usage: {}, stop_reason: 'end_turn', parsed_output: gateAnswer() };
     if (schema.includes('"verdict"')) return { usage: {}, stop_reason: 'end_turn', parsed_output: criticAnswer };
+    if (schema.includes('"rules"')) return { usage: {}, stop_reason: 'end_turn', parsed_output: { rules: ['keep jump-ins to one short line', ' ', 'tease Kanan lightly'] } };
     if (schema.includes('"fixes"')) return { usage: {}, stop_reason: 'end_turn', parsed_output: { fixes: [{ index: 0, text: 'kanan said that last season too' }] } };
     return { usage: {}, stop_reason: 'end_turn', parsed_output: genAnswer };
   } } },
@@ -609,6 +612,50 @@ calls.length = 0;
 await brain.gate(G, Date.now() - 60_000, false, { dryRun: true, shadow: true });
 assert.ok(!calls[0].messages[0].content.includes('Your previous read of the scene'), 'switching brains forgets it');
 saveOne();
+
+// learning loop: the owner's ratings in a group become a few house rules both stages follow
+const learned: string[][] = [];
+const taste = new TasteLearner(repo, fakeAi, (_jid, rules) => { learned.push(rules); prompts.memoryVersion += 1; });
+assert.deepEqual(taste.state('empty@g.us').rules, []);
+assert.equal((await taste.run('empty@g.us')).status, 'empty', 'nothing to learn from');
+assert.ok(taste.state(G).newRatings > 0, 'this group has ratings');
+calls.length = 0;
+const tr = await taste.run(G);
+assert.equal(tr.status, 'ok');
+assert.deepEqual(tr.rules, ['keep jump-ins to one short line', 'tease Kanan lightly'], 'blank rules dropped');
+assert.deepEqual(readTasteRules(repo, G), tr.rules);
+assert.equal(taste.state(G).newRatings, 0, 'counted from the learn time');
+assert.equal(learned.length, 1);
+const tasteReq = calls[0].messages[0].content as string;
+assert.ok(tasteReq.includes('LINES THE OWNER LIKED') && tasteReq.includes('DECISIONS THE OWNER JUDGED'));
+assert.ok(!/urge \d/.test(tasteReq), 'no code numbers in what it learns from');
+calls.length = 0;
+await brain.gate(G, Date.now() - 60_000, false, { dryRun: true });
+assert.ok(calls[0].system[1].text.includes("YOUR OWNER'S HOUSE RULES FOR THIS GROUP") && calls[0].system[1].text.includes('- tease Kanan lightly'), 'the thinking stage follows them');
+calls.length = 0;
+await brain.generate({ chatJid: G, consumedUpToTs: Date.now() - 60_000, addressIds: ['m60'], dryRun: true });
+assert.ok((calls[0].messages[0].content as string).includes('- keep jump-ins to one short line'), 'the reply writer follows them');
+assert.equal(readTasteRules(repo, 'other@g.us').length, 0, 'groups never share them');
+// auto: only where v2 runs or shadows, and only after enough new ratings
+repo.setBrainVersion(G, 'v1');
+for (const id of ['x58', 'x59']) repo.setFeedback(id, 1);
+taste.maybeAuto(G);
+assert.equal(learned.length, 1, 'v1 groups never learn');
+taste.clear(G);
+assert.deepEqual(readTasteRules(repo, G), []);
+assert.equal(learned.length, 2);
+repo.setConfig(`v2_taste_rules_${G}`, 'not json');
+assert.deepEqual(readTasteRules(repo, G), [], 'a broken value reads as no rules');
+repo.setBrainVersion(G, 'v2');
+await new Promise(r => setTimeout(r, 5));
+for (let i = 0; i < 7; i++) repo.setDecisionFeedback(repo.insertDecision(G, 'T1v2', 'IGNORE', `r${i} | quiet | urge 3 vs bar 6.5`), 'good');
+taste.maybeAuto(G);
+assert.equal(learned.length, 2, '7 new ratings: not yet');
+repo.setDecisionFeedback(repo.insertDecision(G, 'T1v2', 'RESPOND', 'r8 | strong thought | urge 7 vs bar 6.5'), 'bad');
+taste.maybeAuto(G);
+await new Promise(r => setTimeout(r, 50));
+assert.equal(learned.length, 3, 'the 8th rating relearns the rules');
+assert.deepEqual(readTasteRules(repo, G), ['keep jump-ins to one short line', 'tease Kanan lightly']);
 
 // per-group chattiness beats the global setting; "default" follows it
 repo.setConfig('v2_chattiness', 'chatty');

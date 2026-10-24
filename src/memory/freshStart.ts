@@ -249,6 +249,7 @@ export function wipeMemory(db: Database.Database, opts: { now: number; rewrites:
 
     // 3. config: voice overview goes, mood resets, settings stay
     db.exec("DELETE FROM config WHERE key GLOB 'voice_overview:*'");
+    db.exec("DELETE FROM config WHERE key GLOB 'v2_taste_*'"); // house rules learned from wiped ratings (may name people)
     const set = db.prepare('INSERT INTO config(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
     set.run('persona_mode', 'default');
     set.run('persona_custom', '');
