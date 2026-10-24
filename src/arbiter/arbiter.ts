@@ -48,8 +48,8 @@ export class Arbiter {
   // brain v2 only (never set for v1 groups)
   private lullTimer: NodeJS.Timeout | null = null;
   private lastReactTs = 0;
-  /** brain v2 safety net: failed v2 calls in a row, and until when this group runs on v1 instead */
-  private v2Failures = 0;
+  /** brain v2 safety net: failed calls in a row per stage, and until when this group runs on v1 instead */
+  private v2Failures = { gate: 0, writer: 0 };
   private v2FallbackUntil = 0;
 
   constructor(
@@ -83,20 +83,27 @@ export class Arbiter {
   }
 
   /**
-   * Brain v2 has never been wrong-footed by the real API in tests, so it gets a safety net: after
-   * FALLBACK_AFTER failed v2 calls in a row (API error or unparseable output) the group runs on v1 for
-   * FALLBACK_MS, and says so in the feed. A success resets the count.
+   * Brain v2 has not been tested against the real API, so it gets a safety net: after FALLBACK_AFTER
+   * failed calls in a row in one stage (API error or unparseable output) the group runs on v1 for
+   * FALLBACK_MS, and says so in the feed. Each stage counts on its own: a working gate must not hide a
+   * writer that always fails, and the other way round.
    */
-  private v2Result(ok: boolean): void {
-    if (ok) { this.v2Failures = 0; return; }
-    this.v2Failures += 1;
-    if (this.v2Failures < BRAIN_V2.FALLBACK_AFTER) return;
-    this.v2Failures = 0;
+  private v2Result(stage: 'gate' | 'writer', ok: boolean): void {
+    if (ok) { this.v2Failures[stage] = 0; return; }
+    this.v2Failures[stage] += 1;
+    if (this.v2Failures[stage] < BRAIN_V2.FALLBACK_AFTER) return;
+    this.v2Failures = { gate: 0, writer: 0 };
     this.v2FallbackUntil = Date.now() + BRAIN_V2.FALLBACK_MS;
     this.clearLull();
     const mins = Math.round(BRAIN_V2.FALLBACK_MS / 60_000);
     logger.warn({ chat: this.chatJid }, 'brain v2 keeps failing, falling back to v1');
-    this.decision('T0', 'BRAIN_FALLBACK', `brain v2 failed ${BRAIN_V2.FALLBACK_AFTER} times in a row: using v1 here for ${mins} minutes`);
+    this.decision('T0', 'BRAIN_FALLBACK', `brain v2 (${stage === 'gate' ? 'thinking stage' : 'reply writer'}) failed ${BRAIN_V2.FALLBACK_AFTER} times in a row: using v1 here for ${mins} minutes`);
+  }
+
+  /** The owner switched brains: start fresh (a switch back to v2 retries it right away). */
+  resetBrainFallback(): void {
+    this.v2Failures = { gate: 0, writer: 0 };
+    this.v2FallbackUntil = 0;
   }
 
   /** Clear the rolling rate-limit window (Settings "reset" button). */
@@ -409,9 +416,9 @@ export class Arbiter {
           ? (await this.brainV2!.generate({ ...genInput, thought: ex.thought ?? null, thoughtWhen: ex.thoughtWhen, unprompted: ex.unprompted }))?.plan ?? null
           : await this.generator.generate(genInput);
         if (v2) {
-          this.v2Result(!!plan);
+          this.v2Result('writer', !!plan);
           // someone asked (or the owner instructed) and v2 failed: v1 answers, nobody is left hanging
-          if (!plan && !ex.unprompted) {
+          if (!plan && (!ex.unprompted || instruction)) {
             plan = await this.generator.generate(genInput);
             if (plan) plan = { ...plan, note: `brain v2 failed, v1 answered | ${plan.note}` };
           }
@@ -487,7 +494,7 @@ export class Arbiter {
     // messages that arrive while the gate (or a reaction) is in flight stay buffered for the next cycle
     const seenUpTo = this.buffer.length ? this.buffer[this.buffer.length - 1].ts : undefined;
     const res = await this.brainV2!.gate(this.chatJid, this.consumedUpToTs, forceDecide);
-    this.v2Result(!!res);
+    this.v2Result('gate', !!res);
     if (!res) {
       this.decision('T1v2', 'IGNORE', 'gatekeeper failed or unparseable');
       this.consumeBuffer(seenUpTo);
@@ -495,9 +502,12 @@ export class Arbiter {
       return;
     }
     const { out, policy } = res;
+    const hard = [...this.hardTriggerIds]; // someone talked to it while the gate was thinking
     const thought = out.thought ? ` | thought: ${out.thought.text.slice(0, 90)}` : '';
     const room = policy.room?.length ? ` (${policy.room.join(', ')})` : '';
-    this.decision('T1v2', policy.decision, `${out.reason} | ${policy.why} | urge ${policy.motivation} vs bar ${policy.threshold}${room}${thought}`);
+    // the logged "why" says what really happens: a RESPOND that also answers a direct trigger is an answer
+    const why = policy.decision === 'RESPOND' && hard.length ? `addressed: direct trigger on ${hard.join(', ')}` : policy.why;
+    this.decision('T1v2', policy.decision, `${out.reason} | ${why} | urge ${policy.motivation} vs bar ${policy.threshold}${room}${thought}`);
 
     if (policy.decision === 'WAIT') {
       this.consecutiveWaits += 1;
@@ -508,7 +518,6 @@ export class Arbiter {
       return;
     }
     this.consecutiveWaits = 0;
-    const hard = [...this.hardTriggerIds]; // someone talked to it while the gate was thinking
     if (policy.decision === 'RESPOND' && hard.length) {
       await this.runGeneration([...new Set([...out.address_message_ids, ...hard])], `${out.reason} (and a direct trigger on ${hard.join(', ')})`);
       return;

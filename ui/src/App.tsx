@@ -185,8 +185,8 @@ export default function App() {
               <option value="v1">Brain v1</option>
               <option value="v2">Brain v2 (beta)</option>
             </select>
-            {selected.brain === 'v2' && selected.brain_fallback_until && (
-              <span className="phase-chip" title="Brain v2 failed several times in a row (see the feed), so this group answers with v1 for now. It tries v2 again by itself.">
+            {selected.brain === 'v2' && selected.brain_fallback_until && selected.brain_fallback_until > Date.now() && (
+              <span className="phase-chip" title="Brain v2 failed several times in a row (see the feed), so this group answers with v1 for now. It tries v2 again by itself, or now if you switch to v1 and back to v2.">
                 on v1 until {new Date(selected.brain_fallback_until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </span>
             )}

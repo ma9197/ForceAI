@@ -11,7 +11,7 @@ import { CHATTINESS_SHIFT, decide, roomShift, threshold } from '../src/ai/v2/pol
 import { actualAfter, pickReplayCuts } from '../src/ai/v2/replay.js';
 import {
   botTargets, botTics, callbackKeywords, dynamics, formatDecisionFeedback, formatDynamics, formatGroupLaughs, formatTargets, formatTaste, formatTics,
-  formatBits, formatReactionHabit, formatTakes, groupLaughs, ignoredStreak, laughCounts, landedLines, ownTakes, participation, reception, runningBits, seriousHit,
+  formatBits, formatReactionHabit, formatTakes, groupLaughs, parseDecisionLine, ignoredStreak, laughCounts, landedLines, ownTakes, participation, reception, runningBits, seriousHit,
   styleStats, type MsgRow,
 } from '../src/ai/v2/signals.js';
 import type { GateV2Out } from '../src/ai/v2/schemas.js';
@@ -453,7 +453,7 @@ assert.equal(calls.length, 2, 'answers when addressed never get a second opinion
 
 // owner's calls on v2 decisions reach the v2 gatekeeper as examples of when to talk
 const d1 = repo.insertDecision(G, 'T1v2', 'RESPOND', 'r | strong thought | urge 7 vs bar 6.5 | thought: roast kanan again');
-const d2 = repo.insertDecision(G, 'T1v2', 'IGNORE', 'r | nothing worth adding | thought: ask about the match');
+const d2 = repo.insertDecision(G, 'T1v2', 'IGNORE', 'r | nothing worth adding | urge 4 vs bar 6.5 | thought: ask about the match');
 const d3 = repo.insertDecision(G, 'T2', 'SEND', 'v1 line');
 assert.equal(repo.setDecisionFeedback(d1, 'bad'), true);
 assert.equal(repo.setDecisionFeedback(d2, 'bad'), true);
@@ -464,6 +464,12 @@ assert.equal(repo.getDecisionFeedback('other@g.us', 8).length, 0, 'calls stay in
 assert.ok(fb.includes('should have STAYED QUIET here: r / thought: roast kanan again') && fb.includes('should have SPOKEN here: r / thought: ask about the match'), fb);
 assert.ok(!fb.includes('urge'), 'the code numbers stay out of the examples');
 assert.ok(formatDecisionFeedback([{ decision: 'RESPOND', reason: 'asked who wins | addressed | urge 0 vs bar 6.5', verdict: 'bad' }])!.includes('your answer MISSED here'), 'a bad answer is not "stay quiet"');
+// the model's own reason may contain " | ": the fixed tail is read from the right
+assert.deepEqual(parseDecisionLine('kanan vs murad | addressed is a word here | strong thought | urge 7 vs bar 6.5 (pair talking +0.8) | thought: a | b'),
+  { reason: 'kanan vs murad | addressed is a word here', why: 'strong thought', thought: 'a | b' });
+assert.ok(formatDecisionFeedback([{ decision: 'RESPOND', reason: 'x | addressed is a word here | strong thought | urge 7 vs bar 6.5', verdict: 'bad' }])!.includes('should have STAYED QUIET'), 'only the policy part decides "addressed"');
+assert.ok(formatDecisionFeedback([{ decision: 'RESPOND', reason: 'banter | addressed: direct trigger on m4 | urge 7 vs bar 6.5', verdict: 'bad' }])!.includes('your answer MISSED here'));
+assert.deepEqual(parseDecisionLine('chat paused, offering a saved thought: x'), { reason: 'chat paused, offering a saved thought: x', why: '', thought: null });
 prompts.memoryVersion += 1;
 calls.length = 0;
 await brain.gate(G, Date.now() - 60_000, false);

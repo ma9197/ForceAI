@@ -216,6 +216,41 @@ genFail = false;
 assert.ok(log.includes('T0:HARD_TRIGGER') && log.some(l => l.startsWith(`v2gen:${V7}`)) && log.includes(`v1gen:${V7}`), log.join(' '));
 assert.deepEqual(seven.sent.map(a => a.text), ['v1 says hi']);
 
+// 13. a working gate must not hide a writer that always fails: the writer has its own count
+log.length = 0;
+const V8 = 'v8@g.us';
+repo.setBrainVersion(V8, 'v2');
+const eight = harness(V8);
+v2Gate.decision = 'RESPOND';
+genFail = true;
+for (let i = 0; i < 3; i++) {
+  eight.arb.onMessage(msg(V8, 'a', `take ${i}`));
+  await sleep(500);
+}
+genFail = false;
+assert.equal(log.filter(l => l === `v2gate:${V8}`).length, 3, 'the gate worked every time');
+assert.ok(log.includes('T0:BRAIN_FALLBACK'), log.join(' '));
+assert.ok(!log.includes(`v1gen:${V8}`), 'jump-ins that fail are not handed to v1');
+eight.arb.resetBrainFallback();
+assert.equal(eight.arb.v2FallbackUntilTs, null, 'switching brains retries v2 right away');
+
+// 14. an owner instruction picked up by a v2 jump-in, and the writer fails: v1 carries it out
+log.length = 0;
+const V9 = 'v9@g.us';
+repo.setBrainVersion(V9, 'v2');
+const nine = harness(V9);
+v2Gate.decision = 'RESPOND';
+gateDelay = 400;
+genFail = true;
+nine.arb.onMessage(msg(V9, 'a', 'kanan is on one today'));
+await sleep(300);
+nine.arb.forceGenerate('roast kanan', 'ADMIN');
+await sleep(900);
+gateDelay = 0;
+genFail = false;
+assert.ok(log.includes('T1v2:RESPOND') && log.includes('unprompted:true:now') && log.includes(`v1gen:${V9}`), log.join(' '));
+assert.deepEqual(nine.sent.map(a => a.text), ['v1 says hi']);
+
 fs.rmSync(dir, { recursive: true, force: true });
 console.log('arbiter routing: all checks passed');
 process.exit(0);

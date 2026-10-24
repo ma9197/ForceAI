@@ -381,16 +381,33 @@ export function formatTargets(targets: { name: string; count: number }[], min = 
  * The owner's calls on past v2 decisions (rated in the dashboard feed), as examples of when to talk.
  * A "bad" on a spoken line means it should have stayed quiet, and the other way round.
  */
+/**
+ * Split a logged T1v2 line, "reason | why | urge X vs bar Y (room) | thought: ...", reading the fixed
+ * tail from the right: the model's own reason may contain " | " itself. Other lines (PAUSE) come back
+ * whole as the reason.
+ */
+export function parseDecisionLine(line: string): { reason: string; why: string; thought: string | null } {
+  const urgeAt = line.lastIndexOf(' | urge ');
+  if (urgeAt < 0) return { reason: line, why: '', thought: null };
+  const head = line.slice(0, urgeAt);
+  const whyAt = head.lastIndexOf(' | ');
+  const tail = line.slice(urgeAt);
+  const thoughtAt = tail.indexOf(' | thought: ');
+  return {
+    reason: whyAt >= 0 ? head.slice(0, whyAt) : head,
+    why: whyAt >= 0 ? head.slice(whyAt + 3) : '',
+    thought: thoughtAt >= 0 ? tail.slice(thoughtAt + ' | thought: '.length) : null,
+  };
+}
+
 export function formatDecisionFeedback(rows: { decision: string; reason: string; verdict: string }[]): string | null {
   if (rows.length === 0) return null;
   const spoke = (d: string) => d === 'RESPOND' || d === 'PAUSE';
   const lines = rows.map(r => {
-    // the stored line is "reason | policy why | urge vs bar | thought: ..."; the gatekeeper only knows
-    // its own reason and thought, not the code's numbers
-    const parts = r.reason.split(' | ');
-    const thought = parts.find(p => p.startsWith('thought: '));
-    const what = [parts[0], thought].filter(Boolean).join(' / ').slice(0, 200);
-    const addressed = parts.some(p => p.startsWith('addressed'));
+    const { reason, why, thought } = parseDecisionLine(r.reason);
+    // the gatekeeper only knows its own reason and thought, not the code's numbers
+    const what = [reason, thought ? `thought: ${thought}` : ''].filter(Boolean).join(' / ').slice(0, 200);
+    const addressed = why.startsWith('addressed');
     if (spoke(r.decision) && addressed) return r.verdict === 'good' ? `- your answer was RIGHT here: ${what}` : `- your answer MISSED here (answering was right, the line was not): ${what}`;
     if (spoke(r.decision)) return r.verdict === 'good' ? `- speaking was RIGHT here: ${what}` : `- should have STAYED QUIET here: ${what}`;
     if (r.decision === 'REACT') return r.verdict === 'good' ? `- a reaction was RIGHT here: ${what}` : `- should NOT have reacted here: ${what}`;

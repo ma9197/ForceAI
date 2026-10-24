@@ -836,6 +836,7 @@ export class App {
   /** Switch a group between brain v1 (default) and v2. Takes effect on the next decision. */
   setBrainVersion(jid: string, version: 'v1' | 'v2'): void {
     this.repo.setBrainVersion(jid, version);
+    this.arbiters.get(jid)?.resetBrainFallback();
     this.repo.insertDecision(jid, 'T0', 'BRAIN', `switched to brain ${version}`);
     this.bus.publish({ kind: 'decision', chatJid: jid, ts: Date.now(), tier: 'T0', decision: 'BRAIN', reason: `switched to brain ${version}` });
     this.bus.publish({ kind: 'status', status: this.statusPayload() });
